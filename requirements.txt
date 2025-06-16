@@ -7,3 +7,5 @@ protobuf
 pwinput
 tabulate[widechars]
 tqdm
+pathlib
+requests

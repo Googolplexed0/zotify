@@ -58,7 +58,7 @@ USER_LIBRARY_READ = 'user-library-read'
 USER_READ_EMAIL = 'user-read-email'
 
 # API URLs
-BASE_URL = 'https://api.sp'+'otify.com/v1/'
+BASE_URL = 'https://api.sp' + 'otify.com/v1/'
 ALBUM_URL = BASE_URL + 'albums'
 ARTIST_URL = BASE_URL + 'artists'
 EPISODE_INFO_URL = BASE_URL + 'episodes'
@@ -70,7 +70,7 @@ TRACK_STATS_URL = BASE_URL + 'audio-features/'
 USER_FOLLOWED_ARTISTS_URL = BASE_URL + 'me/following?type=artist'
 USER_PLAYLISTS_URL = BASE_URL + 'me/playlists'
 USER_SAVED_TRACKS_URL = BASE_URL + 'me/tracks'
-PARTNER_URL = 'https://api-partner.sp'+'otify.com/pathfinder/v1/query?operationName=getEpisode&variables={"uri":"sp'+'otify:episode:'
+PARTNER_URL = 'https://api-partner.sp' + 'otify.com/pathfinder/v1/query?operationName=getEpisode&variables={"uri":"sp' + 'otify:episode:'
 PERSISTED_QUERY = '{"persistedQuery":{"version":1,"sha256Hash":"224ba0fd89fcfdfb3a15fa2d82a6112d3f4e2ac88fba5c6713de04d1b72cf482"}}'
 
 # System Constants
