@@ -3,12 +3,12 @@ from librespot.audio.decoders import AudioQuality
 from pathlib import Path
 
 from zotify.album import download_album, download_artist_albums
-from zotify.const import TRACK, NAME, ID, ARTIST, ARTISTS, ITEMS, TRACKS, EXPLICIT, ALBUM, ALBUMS, \
-    OWNER, PLAYLIST, PLAYLISTS, DISPLAY_NAME, USER_FOLLOWED_ARTISTS_URL, USER_SAVED_TRACKS_URL, SEARCH_URL
+from zotify.const import TRACK, NAME, ID, ARTIST, ARTISTS, ITEMS, TRACKS, EXPLICIT, ALBUM, ALBUMS, OWNER, \
+    PLAYLIST, PLAYLISTS, DISPLAY_NAME, USER_FOLLOWED_ARTISTS_URL, USER_SAVED_TRACKS_URL, SEARCH_URL, TRACKS_BULK_URL
 from zotify.playlist import get_playlist_info, download_from_user_playlist, download_playlist
 from zotify.podcast import download_episode, download_show
 from zotify.termoutput import Printer, PrintChannel
-from zotify.track import download_track
+from zotify.track import download_track, update_track_metadata
 from zotify.utils import split_sanitize_input, regex_input_for_urls, walk_directory_for_tracks, get_archived_entries
 from zotify.zotify import Zotify
 
@@ -311,19 +311,21 @@ def client(args: Namespace) -> None:
         return
     
     elif args.verify_library:
-        
-        track_ids = []
-        
+        # ONLY WORKS WITH ARCHIVED TRACKS (THEORITICALLY GUARANTEES BULK_URL TO WORK)
         library = walk_directory_for_tracks(Zotify.CONFIG.get_root_path())
+        redirector = {track_path.name: track_path for track_path in library}
         
+        track_files: list[Path] = []; track_ids: list[str] = []
         for entry in get_archived_entries():
             track_id, _, _, _, filename = entry.strip().split('\t')
-            if filename in library:
+            if filename in redirector:
+                track_files.append(redirector[filename])
                 track_ids.append(track_id)
         
-        for track_id in track_ids:
-            pass
-            
+        tracks = Zotify.invoke_url_bulk(TRACKS_BULK_URL, track_ids, TRACKS)
+        
+        for i, track_file in enumerate(track_files):
+            update_track_metadata(track_ids[i], track_file, tracks[i])
     
     else:
         search_text = ''

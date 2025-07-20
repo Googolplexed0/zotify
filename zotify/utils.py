@@ -5,6 +5,7 @@ import subprocess
 import music_tag
 import requests
 from time import sleep
+from typing import Any
 from pathlib import Path, PurePath
 
 from zotify.const import ALBUMARTIST, ARTIST, TRACKTITLE, ALBUM, YEAR, DISCNUMBER, \
@@ -52,16 +53,17 @@ def fix_filename(name: str | PurePath | Path ):
     return name
 
 
-def walk_directory_for_tracks(path: str | PurePath) -> set[str]:
+def walk_directory_for_tracks(path: str | PurePath) -> set[Path]:
     # path must already exist
-    tracks = set()
+    track_paths = set()
     
     for dirpath, dirnames, filenames in os.walk(Path(path)):
         for filename in filenames:
             if filename.endswith(tuple(set(EXT_MAP.values()))):
-                tracks.update(os.path.join(dirpath, filename))
+                track_paths.update(Path(dirpath) / filename)
     
-    return tracks
+    return track_paths
+
 
 # Input Processing Utils
 def regex_input_for_urls(search_input: str, non_global: bool = False) -> tuple[
@@ -133,23 +135,29 @@ def set_audio_tags(filename, track_id: str, artists: list[str], genres: list[str
     """ sets music_tag metadata """
     tags = music_tag.load_file(filename)
     
-    tags["trackid"] = track_id
-    tags[ALBUMARTIST] = album_artist
+    # Reliable Tags
     tags[ARTIST] = conv_artist_format(artists)
     tags[GENRE] = conv_genre_format(genres)
     tags[TRACKTITLE] = name
     tags[ALBUM] = album_name
+    tags[ALBUMARTIST] = album_artist
     tags[YEAR] = release_year
     tags[DISCNUMBER] = disc_number
     tags[TRACKNUMBER] = track_number
     
-    if compilation:
-        tags[COMPILATION] = compilation
+    # Unreliable Tags
+    tags["trackid"] = track_id
     
     if Zotify.CONFIG.get_disc_track_totals():
         tags[TOTALTRACKS] = total_tracks
         if total_discs is not None:
             tags[TOTALDISCS] = total_discs
+    
+    if compilation:
+        tags[COMPILATION] = compilation
+    
+    if lyrics and Zotify.CONFIG.get_save_lyrics_tags():
+        tags[LYRICS] = "".join(lyrics)
     
     ext = EXT_MAP[Zotify.CONFIG.get_download_format().lower()]
     if ext == "mp3" and not Zotify.CONFIG.get_disc_track_totals():
@@ -158,10 +166,48 @@ def set_audio_tags(filename, track_id: str, artists: list[str], genres: list[str
         tags.set_raw("mp3", "TPOS", str(disc_number))
         tags.set_raw("mp3", "TRCK", str(track_number))
     
-    if lyrics and Zotify.CONFIG.get_save_lyrics_tags():
-        tags[LYRICS] = "".join(lyrics)
-    
     tags.save()
+
+
+def get_audio_tags(filename: str | Path) -> tuple[tuple, tuple]:
+    tags = music_tag.load_file(filename)
+    
+    artists = tags[ARTIST]
+    genres = tags[GENRE]
+    name = tags[TRACKTITLE]
+    album_name = tags[ALBUM]
+    album_artist = tags[ALBUMARTIST]
+    release_year = tags[YEAR]
+    disc_number = tags[DISCNUMBER]
+    track_number = tags[TRACKNUMBER]
+    
+    unreliable_tags = ("trackid", TOTALTRACKS, TOTALDISCS, COMPILATION, LYRICS)
+    
+    return (artists, genres, name, album_name, album_artist, release_year, disc_number, track_number), \
+           (tags[maybe_tag] if maybe_tag in tags else None for maybe_tag in unreliable_tags)
+
+
+def compare_audio_tags(filename: str | Path, reliable_tags: tuple, unreliable_tags: tuple) -> bool:
+    """ Compares music_tag metadata to provided metadata, returns True if all match """
+    
+    reliable_tags_onfile, unreliable_tags_onfile = get_audio_tags(filename)
+    
+    # Definite tags must match
+    if len(reliable_tags) != len(reliable_tags_onfile):
+        return False
+    
+    for i in range(len(reliable_tags)):
+        if isinstance(reliable_tags[i], list) and isinstance(reliable_tags_onfile[i], list):
+            if sorted(reliable_tags[i]) != sorted(reliable_tags_onfile[i]):
+                return False
+        else:
+            if str(reliable_tags[i]) != str(reliable_tags_onfile[i]):
+                return False
+    
+    if sum([bool(tag) for tag in unreliable_tags]) > sum([bool(tag) for tag in unreliable_tags_onfile]):
+        return False
+    
+    return True
 
 
 def set_music_thumbnail(filename: PurePath, image_url: str, mode: str) -> None:

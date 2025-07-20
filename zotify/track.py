@@ -13,11 +13,42 @@ from zotify.config import EXPORT_M3U8
 from zotify.termoutput import Printer, PrintChannel, Loader
 from zotify.utils import fix_filename, set_audio_tags, set_music_thumbnail, create_download_directory, \
     add_to_m3u8, fetch_m3u8_songs, get_directory_song_ids, add_to_directory_song_archive, \
-    get_archived_song_ids, add_to_song_archive, fmt_duration, wait_between_downloads, conv_artist_format
+    get_archived_song_ids, add_to_song_archive, fmt_duration, wait_between_downloads, conv_artist_format, \
+    conv_genre_format, compare_audio_tags
 from zotify.zotify import Zotify
 
 
-def get_track_info(track_id) -> tuple[list[str], list[Any], str, str, str, Any, Any, Any, Any, Any, Any, Any, Any, int]:
+def parse_track_metadata(track_metadata: dict[str, Any]) -> tuple[list[str], list[Any], str, str, str, Any, Any, Any, Any, Any, Any, Any, Any, int]:
+    artists = []
+    artist_ids = []
+    for data in track_metadata[ARTISTS]:
+        artists.append(data[NAME])
+        artist_ids.append(data[ID])
+    
+    album_name = track_metadata[ALBUM][NAME]
+    album_artist = track_metadata[ALBUM][ARTISTS][0][NAME]
+    album_compilation = 1 if COMPILATION in track_metadata[ALBUM][ALBUM_TYPE] else 0
+    name = track_metadata[NAME]
+    release_year = track_metadata[ALBUM][RELEASE_DATE].split('-')[0]
+    disc_number = track_metadata[DISC_NUMBER]
+    track_number = track_metadata[TRACK_NUMBER]
+    total_tracks = track_metadata[ALBUM][TOTAL_TRACKS]
+    scraped_track_id = track_metadata[ID]
+    is_playable = track_metadata[IS_PLAYABLE]
+    duration_ms = track_metadata[DURATION_MS]
+    
+    image = track_metadata[ALBUM][IMAGES][0]
+    for i in track_metadata[ALBUM][IMAGES]:
+        if i[WIDTH] > image[WIDTH]:
+            image = i
+    image_url = image[URL]
+    
+    return (artists, artist_ids, album_name, album_artist, name, 
+            image_url, release_year, disc_number, track_number, total_tracks, 
+            album_compilation, scraped_track_id, is_playable, duration_ms)
+
+
+def get_track_info(track_id: str) -> tuple[list[str], list[Any], str, str, str, Any, Any, Any, Any, Any, Any, Any, Any, int]:
     """ Retrieves metadata for downloaded songs """
     with Loader(PrintChannel.PROGRESS_INFO, "Fetching track information..."):
         (raw, info) = Zotify.invoke_url(f'{TRACKS_URL}?ids={track_id}&market=from_token')
@@ -26,33 +57,7 @@ def get_track_info(track_id) -> tuple[list[str], list[Any], str, str, str, Any, 
         raise ValueError(f'Invalid response from TRACKS_URL:\n{raw}')
     
     try:
-        artists = []
-        artist_ids = []
-        for data in info[TRACKS][0][ARTISTS]:
-            artists.append(data[NAME])
-            artist_ids.append(data[ID])
-        
-        album_name = info[TRACKS][0][ALBUM][NAME]
-        album_artist = info[TRACKS][0][ALBUM][ARTISTS][0][NAME]
-        album_compilation = 1 if COMPILATION in info[TRACKS][0][ALBUM][ALBUM_TYPE] else 0
-        name = info[TRACKS][0][NAME]
-        release_year = info[TRACKS][0][ALBUM][RELEASE_DATE].split('-')[0]
-        disc_number = info[TRACKS][0][DISC_NUMBER]
-        track_number = info[TRACKS][0][TRACK_NUMBER]
-        total_tracks = info[TRACKS][0][ALBUM][TOTAL_TRACKS]
-        scraped_track_id = info[TRACKS][0][ID]
-        is_playable = info[TRACKS][0][IS_PLAYABLE]
-        duration_ms = info[TRACKS][0][DURATION_MS]
-        
-        image = info[TRACKS][0][ALBUM][IMAGES][0]
-        for i in info[TRACKS][0][ALBUM][IMAGES]:
-            if i[WIDTH] > image[WIDTH]:
-                image = i
-        image_url = image[URL]
-        
-        return (artists, artist_ids, album_name, album_artist, name, 
-                image_url, release_year, disc_number, track_number, total_tracks, 
-                album_compilation, scraped_track_id, is_playable, duration_ms)
+        return parse_track_metadata(info[TRACKS][0])
     except Exception as e:
         raise ValueError(f'Failed to parse TRACKS_URL response: {str(e)}\n{raw}')
 
@@ -148,6 +153,35 @@ def handle_lyrics(track_id: str, track_name: str, filedir: PurePath,
     except ValueError:
         Printer.hashtaged(PrintChannel.SKIPPING, f'LYRICS FOR "{track_name}" (LYRICS NOT AVAILABLE)')
     return lyrics
+
+
+def update_track_metadata(track_id: str, track_file: Path, track_metadata: str) -> None:
+    (artists, artist_ids, album_name, album_artist, name, image_url, release_year, disc_number,
+     track_number, total_tracks, compilation, _, _, duration_ms) = parse_track_metadata(track_metadata)
+    
+    #TODO implement total discs
+    total_discs = None 
+    
+    genres = get_track_genres(artist_ids, name)
+    
+    track_name = fix_filename(artists[0]) + ' - ' + fix_filename(name)
+    lyrics = handle_lyrics(track_id, track_name, track_file.parent, name, artists, album_name, duration_ms)
+    
+    reliable_tags = (conv_artist_format(artists), conv_genre_format(genres), name, album_name, album_artist, release_year, disc_number, track_number)
+    unreliable_tags = (track_id, total_tracks, total_discs, compilation, lyrics)
+    
+    if compare_audio_tags(track_file, reliable_tags, unreliable_tags):
+        Printer.print(PrintChannel.SKIPS, f'###   SKIPPING:  METADATA FOR "{track_file.name}" (TAGS ARE UP-TO-DATE)   ###\n')
+        return
+    
+    try:
+        set_audio_tags(track_file.name, track_id, artists, genres, name, album_name, album_artist, release_year, 
+                        disc_number, track_number, total_tracks, total_discs, compilation, lyrics)
+        set_music_thumbnail(track_file.name, image_url, mode="single")
+    except Exception as e:
+        Printer.print(PrintChannel.ERRORS, "###   ERROR:  FAILED TO WRITE METADATA   ###\n" +\
+                                            "###   Ensure FFMPEG is installed and added to your PATH   ###")
+        Printer.traceback(e)
 
 
 def download_track(mode: str, track_id: str, extra_keys: dict | None = None, pbar_stack: list | None = None) -> None:
@@ -335,7 +369,7 @@ def download_track(mode: str, track_id: str, extra_keys: dict | None = None, pba
                     time_elapsed_ffmpeg = convert_audio_format(filename_temp)
                     
                     try:
-                        set_audio_tags(filename_temp, artists, genres, name, album_name, album_artist, release_year, 
+                        set_audio_tags(filename_temp, track_id, artists, genres, name, album_name, album_artist, release_year, 
                                        disc_number, track_number, total_tracks, total_discs, compilation, lyrics)
                         set_music_thumbnail(filename_temp, image_url, mode)
                     except Exception as e:
