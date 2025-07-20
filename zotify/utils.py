@@ -5,6 +5,7 @@ import subprocess
 import requests
 import music_tag
 from music_tag.file import TAG_MAP_ENTRY
+from music_tag.mp4 import freeform_set
 from mutagen.id3 import TXXX
 from time import sleep
 from pathlib import Path, PurePath
@@ -150,12 +151,14 @@ def set_audio_tags(filename, track_id: str, artists: list[str], genres: list[str
     ext = EXT_MAP[Zotify.CONFIG.get_download_format().lower()]
     
     if ext == "mp3":
-        # 'TXXX:TRACKID': TXXX(encoding=<Encoding.UTF16: 1>, desc='TRACKID', text=['asdkfjnaskdjfkhasdf'])
         tags.mfile.tags.add(TXXX(encoding=3, desc='TRACKID', text=[track_id]))
-        # tags.tag_map["trackid"] = TAG_MAP_ENTRY(getter="TXXX:trackid", setter="TXXX:trackid", type=str)
+    elif ext == "m4a":
+        class Metadata:
+            def __init__(cls, val): cls.values = [track_id]
+        freeform_set(tags, '----:com.apple.iTunes:trackid',  Metadata())
     else:
         tags.tag_map["trackid"] = TAG_MAP_ENTRY(getter="trackid", setter="trackid", type=str)
-    tags["trackid"] = track_id
+        tags["trackid"] = track_id
     
     if Zotify.CONFIG.get_disc_track_totals():
         tags[TOTALTRACKS] = total_tracks
