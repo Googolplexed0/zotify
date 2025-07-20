@@ -9,7 +9,7 @@ from zotify.playlist import get_playlist_info, download_from_user_playlist, down
 from zotify.podcast import download_episode, download_show
 from zotify.termoutput import Printer, PrintChannel
 from zotify.track import download_track
-from zotify.utils import split_sanitize_input, regex_input_for_urls
+from zotify.utils import split_sanitize_input, regex_input_for_urls, walk_directory_for_tracks, get_archived_entries
 from zotify.zotify import Zotify
 
 
@@ -265,8 +265,8 @@ def client(args: Namespace) -> None:
         return
     
     elif args.liked_songs:
-        liked_songs = Zotify.invoke_url_nextable(USER_SAVED_TRACKS_URL, ITEMS)
         
+        liked_songs = Zotify.invoke_url_nextable(USER_SAVED_TRACKS_URL, ITEMS)
         pos = 3
         pbar = Printer.pbar(liked_songs, unit='song', pos=pos, 
                             disable=not Zotify.CONFIG.get_show_playlist_pbar())
@@ -309,6 +309,21 @@ def client(args: Namespace) -> None:
             else:
                 search(args.search)
         return
+    
+    elif args.verify_library:
+        
+        track_ids = []
+        
+        library = walk_directory_for_tracks(Zotify.CONFIG.get_root_path())
+        
+        for entry in get_archived_entries():
+            track_id, _, _, _, filename = entry.strip().split('\t')
+            if filename in library:
+                track_ids.append(track_id)
+        
+        for track_id in track_ids:
+            pass
+            
     
     else:
         search_text = ''

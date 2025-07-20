@@ -32,7 +32,7 @@ def main():
     
     parser.register('action', 'depreciated_ignore_warn', DepreciatedAction)
     
-    parser.add_argument('-v', '--version',
+    parser.add_argument('--version',
                         action='version',
                         version=f'Zotify {__version__}',
                         help='Show the version of Zotify')
@@ -87,6 +87,10 @@ def main():
                        type=str,
                        dest='file_of_urls',
                        help='Download all tracks/albums/episodes/playlists URLs within the file passed as argument')
+    group.add_argument('-v', '--verify-library',
+                       dest='verify_library',
+                       action='store_true',
+                       help='Check metadata for all tracks in ROOT_PATH or listed in SONG_ARCHIVE, updating the metadata if necessary. This will not download any new tracks, but may take a very, very long time.')
     
     for flag in DEPRECIATED_FLAGS: 
         group.add_argument(*flag["flags"],

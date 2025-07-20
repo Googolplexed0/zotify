@@ -8,7 +8,7 @@ from time import sleep
 from pathlib import Path, PurePath
 
 from zotify.const import ALBUMARTIST, ARTIST, TRACKTITLE, ALBUM, YEAR, DISCNUMBER, \
-    TRACKNUMBER, ARTWORK, TOTALTRACKS, TOTALDISCS, EXT_MAP, LYRICS, COMPILATION, GENRE
+    TRACKNUMBER, ARTWORK, TOTALTRACKS, TOTALDISCS, EXT_MAP, LYRICS, COMPILATION, GENRE, EXT_MAP
 from zotify.zotify import Zotify
 from zotify.termoutput import PrintChannel, Printer
 
@@ -51,6 +51,17 @@ def fix_filename(name: str | PurePath | Path ):
     
     return name
 
+
+def walk_directory_for_tracks(path: str | PurePath) -> set[str]:
+    # path must already exist
+    tracks = set()
+    
+    for dirpath, dirnames, filenames in os.walk(Path(path)):
+        for filename in filenames:
+            if filename.endswith(tuple(set(EXT_MAP.values()))):
+                tracks.update(os.path.join(dirpath, filename))
+    
+    return tracks
 
 # Input Processing Utils
 def regex_input_for_urls(search_input: str, non_global: bool = False) -> tuple[
@@ -118,9 +129,11 @@ def conv_genre_format(genres: list[str]) -> list[str] | str:
         return Zotify.CONFIG.get_genre_delimiter().join(genres)
 
 
-def set_audio_tags(filename, artists: list[str], genres: list[str], name, album_name, album_artist, release_year, disc_number, track_number, total_tracks, total_discs, compilation: int, lyrics: list[str] | None) -> None:
+def set_audio_tags(filename, track_id: str, artists: list[str], genres: list[str], name, album_name, album_artist, release_year, disc_number, track_number, total_tracks, total_discs, compilation: int, lyrics: list[str] | None) -> None:
     """ sets music_tag metadata """
     tags = music_tag.load_file(filename)
+    
+    tags["trackid"] = track_id
     tags[ALBUMARTIST] = album_artist
     tags[ARTIST] = conv_artist_format(artists)
     tags[GENRE] = conv_genre_format(genres)
@@ -223,15 +236,25 @@ def wait_between_downloads() -> None:
 
 
 # Song Archive Utils
-def get_archived_song_ids() -> list[str]:
-    """ Returns list of all time downloaded songs """
+def get_archived_entries() -> list[str]:
+    """ Returns list of all time downloaded song entries """
     
-    track_ids = []
     archive_path = Zotify.CONFIG.get_song_archive_location()
     
+    entries = []
     if Path(archive_path).exists() and not Zotify.CONFIG.get_disable_song_archive():
         with open(archive_path, 'r', encoding='utf-8') as f:
-            track_ids = [line.strip().split('\t')[0] for line in f.readlines()]
+            entries = f.readlines()
+    
+    return entries
+
+
+def get_archived_song_ids() -> list[str]:
+    """ Returns list of all-time downloaded track_ids """
+    
+    entries = get_archived_entries()
+    
+    track_ids = [entry.strip().split('\t')[0] for entry in entries]
     
     return track_ids
 
