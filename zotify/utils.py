@@ -17,12 +17,12 @@ from zotify.termoutput import PrintChannel, Printer
 
 
 # Path Utils
-def create_download_directory(download_path: str | PurePath) -> None:
+def create_download_directory(dir_path: str | PurePath) -> None:
     """ Create directory and add a hidden file with song ids """
-    Path(download_path).mkdir(parents=True, exist_ok=True)
+    Path(dir_path).mkdir(parents=True, exist_ok=True)
     
     # add hidden file with song ids
-    hidden_file_path = PurePath(download_path).joinpath('.song_ids')
+    hidden_file_path = PurePath(dir_path).joinpath('.song_ids')
     if Zotify.CONFIG.get_disable_directory_archives():
         return
     if not Path(hidden_file_path).is_file():

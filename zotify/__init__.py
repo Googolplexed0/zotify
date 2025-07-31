@@ -29,6 +29,7 @@ from requests import HTTPError, get, post
 from logging import getLogger
 getLogger("Librespot:Session").disabled = True
 getLogger("Librespot:AudioKeyManager").disabled = True
+getLogger("librespot.audio").disabled = True
 
 from zotify.const import AUTH_URL, BASE_URL, CLIENT_ID, SCOPES
 
