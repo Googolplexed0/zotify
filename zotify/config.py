@@ -5,7 +5,7 @@ import base64
 import sys
 import re
 import requests
-from librespot.audio.decoders import VorbisOnlyAudioQuality
+from librespot.audio.decoders import VorbisOnlyAudioQuality, AudioQuality
 from librespot.core import Session, OAuth
 from librespot.mercury import MercuryRequests
 from librespot.proto.Authentication_pb2 import AuthenticationType
@@ -45,6 +45,7 @@ CONFIG_VALUES = {
     MAX_FILENAME_LENGTH:        { 'default': '0',                       'type': int,    'arg': ('--max-filename-length'                  ,) },
     
     # Download Options
+    OPTIMIZED_DOWNLOADING:      { 'default': 'True',                    'type': bool,   'arg': ('--optimized-downloading'                ,) },
     BULK_WAIT_TIME:             { 'default': '1',                       'type': int,    'arg': ('--bulk-wait-time'                       ,) },
     DOWNLOAD_REAL_TIME:         { 'default': 'False',                   'type': bool,   'arg': ('-rt', '--download-real-time'            ,) },
     TEMP_DOWNLOAD_DIR:          { 'default': '',                        'type': str,    'arg': ('-td', '--temp-download-dir'             ,) },
@@ -391,27 +392,24 @@ class Config:
         return cls.get(MD_ARTISTDELIMITER)
     
     @classmethod
-    def get_output(cls, mode: str) -> str:
+    def get_output(cls, dl_obj_clsn: str) -> str:
         v = cls.get(OUTPUT)
-        
         if v:
             # User must include {disc_number} in OUTPUT if they want split album discs
             return v
         
-        if mode == 'playlist':
-            v = cls.get(OUTPUT_PLAYLIST)
-        elif mode == 'extplaylist':
+        if dl_obj_clsn == 'Playlist':
             v = cls.get(OUTPUT_PLAYLIST_EXT)
-        elif mode == 'liked':
+        elif dl_obj_clsn == 'LikedSongs':
             v = cls.get(OUTPUT_LIKED_SONGS)
-        elif mode == 'single':
+        elif dl_obj_clsn == 'Query':
             v = cls.get(OUTPUT_SINGLE)
-        elif mode == 'album':
+        elif dl_obj_clsn == 'Album':
             v = cls.get(OUTPUT_ALBUM)
         else:
             raise ValueError()
         
-        if cls.get_split_album_discs() and mode == "album":
+        if cls.get_split_album_discs() and dl_obj_clsn == "Album":
             return str(PurePath(v).parent / 'Disc {disc_number}' / PurePath(v).name)
         return v
     
@@ -563,6 +561,10 @@ class Config:
     @classmethod
     def get_strict_library_verify(cls) -> bool:
         return cls.get(STRICT_LIBRARY_VERIFY)
+    
+    @classmethod
+    def get_optimized_dl_order(cls) -> bool:
+        return cls.get(OPTIMIZED_DOWNLOADING)
 
 
 class Zotify:    
@@ -574,8 +576,17 @@ class Zotify:
     
     def __init__(self, args):
         Zotify.CONFIG.load(args)
+        
         with Loader(PrintChannel.MANDATORY, "Logging in..."):
             Zotify.login(args)
+        
+        quality_options = {
+        'auto': AudioQuality.VERY_HIGH if Zotify.check_premium() else AudioQuality.HIGH,
+        'normal': AudioQuality.NORMAL,
+        'high': AudioQuality.HIGH,
+        'very_high': AudioQuality.VERY_HIGH
+        }
+        Zotify.DOWNLOAD_QUALITY = quality_options.get(Zotify.CONFIG.get_download_quality(), quality_options["auto"])
         Printer.debug("Session Initialized Successfully")
     
     @classmethod

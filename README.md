@@ -107,6 +107,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 
 | Download Options             | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
+| `OPTIMIZED_DOWNLOADING`      | `--optimized-downloading`           | Whether to sort download order by item duration to reduce API ratelimiting               | True          |
 | `BULK_WAIT_TIME`             | `--bulk-wait-time`                  | The wait time between track downloads, in seconds                                        | 1             |
 | `DOWNLOAD_REAL_TIME`         | `-rt`, `--download-real-time`       | Downloads songs as fast as they would be played, should prevent account bans             | False         |
 | `TEMP_DOWNLOAD_DIR`          | `-td`, `--temp-download-dir`        | Directory where tracks are temporarily downloaded first, `""` meaning disabled           | `""`          |
@@ -227,10 +228,9 @@ The value is relative to the `ROOT_PATH` directory and may contain the following
 | `{track_number}`  | The track number                                             |
 | `{id}`            | The song id                                                  |
 | `{track_id}`      | The track id                                                 |
-| `{album_id}`      | (only when downloading albums) ID of the album               |
-| `{album_num}`     | (only when downloading albums) Incrementing track number     |
-| `{playlist}`      | (only when downloading playlists) Name of the playlist       |
-| `{playlist_id}`   | (only when downloading playlists) ID of the playlist         |
+| `{album_id}`      | The album id                                                 |
+| `{playlist}`      | (only when downloading playlists) The playlist name          |
+| `{playlist_id}`   | (only when downloading playlists) The playlist id            |
 | `{playlist_num}`  | (only when downloading playlists) Incrementing track number  |
 
 ### Example Output Values

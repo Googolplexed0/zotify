@@ -270,7 +270,7 @@ class Loader:
     # load symbol from:
     # https://stackoverflow.com/questions/22029562/python-how-to-make-simple-animated-loading-while-process-is-running
     
-    def __init__(self, chan, desc="Loading...", end='', timeout=0.1, mode='prog'):
+    def __init__(self, chan, desc="Loading...", end='', timeout=0.1, mode='prog', disabled: bool = False):
         """
         A loader-like context manager
         
@@ -295,6 +295,7 @@ class Loader:
         elif mode == 'prog':
             self.steps = ["[∙∙∙]","[●∙∙]","[∙●∙]","[∙∙●]","[∙∙∙]"]
         
+        self.disabled = disabled
         self.done = False
         self.paused = False
         self.dead = False
@@ -315,9 +316,10 @@ class Loader:
         ACTIVE_LOADER = self._inherited_active_loader
     
     def start(self):
-        self.store_active_loader()
-        self._thread.start()
-        sleep(self.timeout*2) #guarantee _animate can print at least once
+        if not self.disabled:
+            self.store_active_loader()
+            self._thread.start()
+            sleep(self.timeout*2) #guarantee _animate can print at least once
         return self
     
     def _animate(self):
@@ -333,13 +335,14 @@ class Loader:
         self.start()
     
     def stop(self):
-        self.done = True
-        while not self.dead: #guarantee _animate has finished
-            sleep(self.timeout) 
-        self.category = PrintCategory.LOADER
-        if self.end != "":
-            self._loader_print(self.end)
-        self.release_active_loader()
+        if not self.disabled:
+            self.done = True
+            while not self.dead: #guarantee _animate has finished
+                sleep(self.timeout) 
+            self.category = PrintCategory.LOADER
+            if self.end != "":
+                self._loader_print(self.end)
+            self.release_active_loader()
     
     def pause(self):
         self.paused = True
