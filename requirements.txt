@@ -1,7 +1,6 @@
 ffmpy
-git+https://github.com/kokarare1212/librespot-python
+librespot-spotizerr
 music_tag
-Pillow
 pkce
 protobuf
 pwinput

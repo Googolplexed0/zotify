@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 __version__ = "0.9.14"
 
 from enum import IntEnum
@@ -58,7 +59,7 @@ class Session(LibrespotSession):
         self.__language = language
         self.connect()
         self.authenticate(session_builder.login_credentials)
-    
+
     @staticmethod
     def from_file(cred_file: Path | str, language: str = "en") -> Session:
         """
@@ -78,7 +79,7 @@ class Session(LibrespotSession):
         )
         session = LibrespotSession.Builder(config).stored_file(str(cred_file))
         return Session(session, language)
-    
+
     @staticmethod
     def from_oauth(
         oauth: OAuth,
@@ -101,9 +102,9 @@ class Session(LibrespotSession):
             config.set_stored_credential_file(str(save_file))
         else:
             config.set_store_credentials(False)
-        
+
         token = oauth.await_token()
-        
+
         builder = LibrespotSession.Builder(config.build())
         builder.login_credentials = Authentication.LoginCredentials(
             username=oauth.username,
@@ -111,20 +112,49 @@ class Session(LibrespotSession):
             auth_data=token.access_token.encode(),
         )
         return Session(builder, language, oauth)
-    
+
+    @staticmethod
+    def from_zeroconf(
+        language: str = "en",
+        timeout: int = 300,
+        credentials_path: str = None,
+    ) -> Session:
+        try:
+            from .credential_manager import ZeroconfCredentialManager
+
+            # Generate credentials using ZeroconfServer
+            manager = ZeroconfCredentialManager(credentials_path or "credentials.json")
+            credentials = manager.generate_credentials(timeout)
+
+            if not credentials:
+                raise RuntimeError(
+                    "Failed to generate credentials using ZeroconfServer"
+                )
+
+            # Create session from the generated credentials file
+            return Session.from_file(manager.get_credentials_path(), language)
+
+        except ImportError:
+            raise ImportError(
+                "ZeroconfCredentialManager not available. Make sure _zeroconf.py is in the parent directory."
+            )
+        finally:
+            if "manager" in locals():
+                manager.cleanup()
+
     def oauth(self) -> OAuth | None:
         """Returns OAuth service"""
         return self.__oauth
-    
+
     def language(self) -> str:
         """Returns session language"""
         return self.__language
-    
+
     def is_premium(self) -> bool:
         """Returns users premium account status"""
         return self.get_user_attribute("type") == "premium"
-    
-    def authenticate(self, credential: Authentication.LoginCredentials) -> None: # type: ignore
+
+    def authenticate(self, credential: Authentication.LoginCredentials) -> None:  # type: ignore
         """
         Log in to the thing
         Args:
@@ -152,7 +182,7 @@ class ApiClient(LibrespotApiClient):
     def __init__(self, session: Session):
         super(ApiClient, self).__init__(session)
         self.__session = session
-    
+
     def invoke_url(
         self,
         url: str,
@@ -178,17 +208,17 @@ class ApiClient(LibrespotApiClient):
         }
         params["limit"] = limit
         params["offset"] = offset
-        
+
         response = get(BASE_URL + url, headers=headers, params=params)
         data = response.json()
-        
+
         try:
             raise HTTPError(
                 f"{url}\nAPI Error {data['error']['status']}: {data['error']['message']}"
             )
         except KeyError:
             return data
-    
+
     def __get_token(self) -> str:
         return (
             self.__session.tokens()
@@ -206,13 +236,13 @@ class TokenProvider(LibrespotTokenProvider):
     def __init__(self, session: Session):
         super(TokenProvider, self).__init__(session)
         self._session = session
-    
+
     def get_token(self, *scopes) -> TokenProvider.StoredToken:
         oauth = self._session.oauth()
         if oauth is None:
             return super().get_token(*scopes)
         return oauth.get_token()
-    
+
     class StoredToken(LibrespotTokenProvider.StoredToken):
         def __init__(self, obj):
             self.timestamp = int(time_ns() / 1000)
@@ -227,13 +257,15 @@ class OAuth:
     __server_thread: Thread
     __token: TokenProvider.StoredToken
     username: str
-    
-    def __init__(self, username: str, redirect_address: str | None, oauth_address: str | None) -> None:
+
+    def __init__(
+        self, username: str, redirect_address: str | None, oauth_address: str | None
+    ) -> None:
         self.username = username
         self.port = 4381
         self.oauth_address = oauth_address if oauth_address else "0.0.0.0"
         self.redirect_uri = f"http://{redirect_address if redirect_address else '127.0.0.1'}:{self.port}/login"
-    
+
     def auth_interactive(self) -> str:
         """
         Starts local server for token callback
@@ -253,7 +285,7 @@ class OAuth:
             "code_challenge": code_challenge,
         }
         return f"{AUTH_URL}authorize?{urlencode(params)}"
-    
+
     def await_token(self) -> TokenProvider.StoredToken:
         """
         Blocks until server thread gets token
@@ -262,7 +294,7 @@ class OAuth:
         """
         self.__server_thread.join()
         return self.__token
-    
+
     def get_token(self) -> TokenProvider.StoredToken:
         """
         Gets a valid token
@@ -274,7 +306,7 @@ class OAuth:
         elif self.__token.expired():
             self.set_token(self.__token.refresh_token, OAuth.RequestType.REFRESH)
         return self.__token
-    
+
     def set_token(self, code: str, request_type: RequestType) -> None:
         """
         Fetches and sets stored token
@@ -303,20 +335,20 @@ class OAuth:
                 f"Error fetching token: {response.status_code}, {response.text}"
             )
         self.__token = TokenProvider.StoredToken(response.json())
-    
+
     def __run_server(self) -> None:
         server_address = (self.oauth_address, self.port)
         httpd = self.OAuthHTTPServer(server_address, self.RequestHandler, self)
         httpd.authenticator = self
         httpd.serve_forever()
-    
+
     class RequestType(IntEnum):
         LOGIN = 0
         REFRESH = 1
-    
+
     class OAuthHTTPServer(HTTPServer):
         authenticator: OAuth
-        
+
         def __init__(
             self,
             server_address: tuple[str, int],
@@ -325,16 +357,16 @@ class OAuth:
         ):
             super().__init__(server_address, RequestHandlerClass)
             self.authenticator = authenticator
-    
+
     class RequestHandler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args):
             return
-        
+
         def do_GET(self) -> None:
             parsed_path = urlparse(self.path)
             query_params = parse_qs(parsed_path.query)
             code = query_params.get("code")
-            
+
             if code:
                 if isinstance(self.server, OAuth.OAuthHTTPServer):
                     self.server.authenticator.set_token(
