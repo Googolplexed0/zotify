@@ -7,12 +7,14 @@ import music_tag
 from music_tag.file import TAG_MAP_ENTRY
 from music_tag.mp4 import freeform_set
 from mutagen.id3 import TXXX
+from mutagen.oggvorbis import OggVorbis
+from mutagen import File
 from time import sleep
 from pathlib import Path, PurePath
 
 from zotify.config import Zotify
 from zotify.const import ALBUMARTIST, ARTIST, TRACKTITLE, ALBUM, YEAR, DISCNUMBER, TRACKNUMBER, ARTWORK, \
-    TOTALTRACKS, TOTALDISCS, EXT_MAP, LYRICS, COMPILATION, GENRE, EXT_MAP, MP3_CUSTOM_TAG_PREFIX, M4A_CUSTOM_TAG_PREFIX
+    TOTALTRACKS, TOTALDISCS, EXT_MAP, LYRICS, COMPILATION, GENRE, MP3_CUSTOM_TAG_PREFIX, M4A_CUSTOM_TAG_PREFIX
 from zotify.termoutput import PrintChannel, Printer
 
 
@@ -165,49 +167,124 @@ def conv_genre_format(genres: list[str]) -> list[str] | str:
 def set_audio_tags(track_path: PurePath, track_metadata: dict, total_discs: str | None, genres: list[str], lyrics: list[str] | None) -> None:
     """ sets music_tag metadata """
     
-    (scraped_track_id, track_name, artists, artist_ids, release_date, release_year, track_number, total_tracks,
-     album, album_artists, disc_number, compilation, duration_ms, image_url, is_playable) = track_metadata.values()
-    ext = EXT_MAP[Zotify.CONFIG.get_download_format().lower()]
-    
-    tags = music_tag.load_file(track_path)
-    
-    # Reliable Tags
-    tags[ARTIST] = conv_artist_format(artists)
-    tags[GENRE] = conv_genre_format(genres)
-    tags[TRACKTITLE] = track_name
-    tags[ALBUM] = album
-    tags[ALBUMARTIST] = conv_artist_format(album_artists)
-    tags[YEAR] = release_year
-    tags[DISCNUMBER] = disc_number
-    tags[TRACKNUMBER] = track_number
-    
-    # Unreliable Tags
-    if ext == "mp3":
-        tags.mfile.tags.add(TXXX(encoding=3, desc='TRACKID', text=[scraped_track_id]))
-    elif ext == "m4a":
-        freeform_set(tags, M4A_CUSTOM_TAG_PREFIX + "trackid",  type('tag', (object,), {'values': [scraped_track_id]})())
-    else:
-        tags.tag_map["trackid"] = TAG_MAP_ENTRY(getter="trackid", setter="trackid", type=str)
-        tags["trackid"] = scraped_track_id
-    
-    if Zotify.CONFIG.get_disc_track_totals():
-        tags[TOTALTRACKS] = total_tracks
-        if total_discs is not None:
-            tags[TOTALDISCS] = total_discs
-    
-    if compilation:
-        tags[COMPILATION] = compilation
-    
-    if lyrics and Zotify.CONFIG.get_save_lyrics_tags():
-        tags[LYRICS] = "".join(lyrics)
-    
-    if ext == "mp3" and not Zotify.CONFIG.get_disc_track_totals():
-        # music_tag python library writes DISCNUMBER and TRACKNUMBER as X/Y instead of X for mp3
-        # this method bypasses all internal formatting, probably not resilient against arbitrary inputs
-        tags.set_raw("mp3", "TPOS", str(disc_number))
-        tags.set_raw("mp3", "TRCK", str(track_number))
-    
-    tags.save()
+    try:
+        (scraped_track_id, track_name, artists, artist_ids, release_date, release_year, track_number, total_tracks,
+         album, album_artists, disc_number, compilation, duration_ms, image_url, is_playable) = track_metadata.values()
+        ext = EXT_MAP[Zotify.CONFIG.get_download_format().lower()]
+        
+        Printer.debug(f"Setting metadata for {track_path}")
+        Printer.debug(f"Track: {track_name}, Artist: {artists}, Album: {album}")
+        Printer.debug(f"File extension: {ext}")
+        
+        # Check if music_tag supports this format
+        try:
+            tags = music_tag.load_file(track_path)
+            
+            # Reliable Tags
+            tags[ARTIST] = conv_artist_format(artists, FORCE_NO_LIST=True)
+            tags[GENRE] = conv_genre_format(genres)
+            tags[TRACKTITLE] = track_name
+            tags[ALBUM] = album
+            tags[ALBUMARTIST] = conv_artist_format(album_artists, FORCE_NO_LIST=True)
+            tags[YEAR] = release_year
+            tags[DISCNUMBER] = disc_number
+            tags[TRACKNUMBER] = track_number
+            
+            # Unreliable Tags
+            if ext == "mp3":
+                tags.mfile.tags.add(TXXX(encoding=3, desc='TRACKID', text=[scraped_track_id]))
+            elif ext == "m4a":
+                freeform_set(tags, M4A_CUSTOM_TAG_PREFIX + "trackid",  type('tag', (object,), {'values': [scraped_track_id]})())
+            else:
+                tags.tag_map["trackid"] = TAG_MAP_ENTRY(getter="trackid", setter="trackid", type=str)
+                tags["trackid"] = scraped_track_id
+            
+            if Zotify.CONFIG.get_disc_track_totals():
+                tags[TOTALTRACKS] = total_tracks
+                if total_discs is not None:
+                    tags[TOTALDISCS] = total_discs
+            
+            if compilation:
+                tags[COMPILATION] = compilation
+            
+            if lyrics and Zotify.CONFIG.get_save_lyrics_tags():
+                tags[LYRICS] = "".join(lyrics)
+            
+            if ext == "mp3" and not Zotify.CONFIG.get_disc_track_totals():
+                # music_tag python library writes DISCNUMBER and TRACKNUMBER as X/Y instead of X for mp3
+                # this method bypasses all internal formatting, probably not resilient against arbitrary inputs
+                tags.set_raw("mp3", "TPOS", str(disc_number))
+                tags.set_raw("mp3", "TRCK", str(track_number))
+            
+            tags.save()
+            Printer.debug(f"Metadata saved successfully for {track_path}")
+            
+        except Exception as e:
+            Printer.hashtaged(
+                PrintChannel.WARNING,
+                f"music_tag failed for {track_path.name} ({ext}): {str(e)}"
+            )
+            Printer.hashtaged(
+                PrintChannel.WARNING,
+                f"Trying alternative metadata method for OGG files..."
+            )
+            
+            # For OGG files, try using mutagen directly
+            if ext == "ogg":
+                try:
+                    # Try to load the file with mutagen
+                    audio = File(str(track_path))
+                    if audio is None:
+                        audio = OggVorbis(str(track_path))
+                    
+                    # Set VorbisComment tags
+                    if hasattr(audio, 'tags') and audio.tags is not None:
+                        audio.tags['title'] = [track_name]
+                        audio.tags['artist'] = [conv_artist_format(artists, FORCE_NO_LIST=True)]
+                        audio.tags['album'] = [album]
+                        audio.tags['albumartist'] = [conv_artist_format(album_artists, FORCE_NO_LIST=True)]
+                        audio.tags['date'] = [release_year]
+                        audio.tags['tracknumber'] = [track_number]
+                        audio.tags['discnumber'] = [disc_number]
+                        audio.tags['genre'] = [conv_genre_format(genres)]
+                        audio.tags['trackid'] = [scraped_track_id]
+                        
+                        if Zotify.CONFIG.get_disc_track_totals():
+                            audio.tags['totaltracks'] = [total_tracks]
+                            if total_discs is not None:
+                                audio.tags['totaldiscs'] = [total_discs]
+                        
+                        if compilation:
+                            audio.tags['compilation'] = [str(compilation)]
+                        
+                        if lyrics and Zotify.CONFIG.get_save_lyrics_tags():
+                            audio.tags['lyrics'] = ["".join(lyrics)]
+                        
+                        audio.save()
+                        Printer.debug(f"OGG metadata saved successfully using mutagen for {track_path}")
+                    else:
+                        Printer.hashtaged(
+                            PrintChannel.WARNING,
+                            f"Could not access tags for OGG file: {track_path}"
+                        )
+                        
+                except Exception as ogg_error:
+                    Printer.hashtaged(
+                        PrintChannel.WARNING,
+                        f"Failed to set OGG metadata with mutagen: {str(ogg_error)}"
+                    )
+            else:
+                Printer.hashtaged(
+                    PrintChannel.WARNING,
+                    f"Unsupported format for metadata: {ext}"
+                )
+        
+    except Exception as e:
+        Printer.hashtaged(
+            PrintChannel.ERROR,
+            f"Failed to set audio tags for {track_path.name}: {str(e)}"
+        )
+        Printer.traceback(e)
 
 
 def get_audio_tags(track_path: Path) -> tuple[tuple, tuple]:
@@ -310,21 +387,80 @@ def compare_audio_tags(track_path: str | Path, reliable_tags: tuple, unreliable_
 def set_music_thumbnail(track_path: PurePath, image_url: str, mode: str) -> None:
     """ Fetch an album cover image, set album cover tag, and save to file if desired """
     
-    # jpeg format expected from request
-    img = requests.get(image_url).content
-    tags = music_tag.load_file(track_path)
-    tags[ARTWORK] = img
-    tags.save()
+    try:
+        # Download the image that Spotify returns
+        img = requests.get(image_url).content
+        
+        # Try music_tag first
+        try:
+            tags = music_tag.load_file(track_path)
+            tags[ARTWORK] = img
+            tags.save()
+            Printer.debug(f"Album art embedded successfully using music_tag for {track_path}")
+            
+        except Exception as e:
+            Printer.hashtaged(
+                PrintChannel.WARNING,
+                f"music_tag failed for album art in {track_path.name}: {str(e)}"
+            )
+            
+            # For OGG files, try using mutagen directly
+            if track_path.suffix.lower() == '.ogg':
+                try:
+                    from mutagen.oggvorbis import OggVorbis
+                    from mutagen import File
+                    
+                    # Try to load the file with mutagen
+                    audio = File(str(track_path))
+                    if audio is None:
+                        audio = OggVorbis(str(track_path))
+                    
+                    # Set the artwork using mutagen
+                    if hasattr(audio, 'tags') and audio.tags is not None:
+                        # For OGG files, add artwork as a custom VorbisComment
+                        # This is more reliable than METADATA_BLOCK_PICTURE
+                        audio.tags['artwork'] = [img]
+                        audio.save()
+                        Printer.debug(f"OGG album art embedded successfully using mutagen for {track_path}")
+                    else:
+                        Printer.hashtaged(
+                            PrintChannel.WARNING,
+                            f"Could not access tags for OGG file: {track_path}"
+                        )
+                        
+                except Exception as ogg_error:
+                    Printer.hashtaged(
+                        PrintChannel.WARNING,
+                        f"Failed to embed OGG album art with mutagen: {str(ogg_error)}"
+                    )
+            else:
+                Printer.hashtaged(
+                    PrintChannel.WARNING,
+                    f"Unsupported format for album art: {track_path.suffix}"
+                )
+        
+    except Exception as e:
+        Printer.hashtaged(
+            PrintChannel.WARNING,
+            f"Failed to embed album art in {track_path.name}: {str(e)}"
+        )
     
+    # Save separate JPG file if configured
     if not Zotify.CONFIG.get_album_art_jpg_file():
         return
     
-    jpg_filename = 'cover.jpg' if '{album}' in Zotify.CONFIG.get_output(mode) else track_path.stem + '.jpg'
-    jpg_path = Path(track_path).parent.joinpath(jpg_filename)
-    
-    if not jpg_path.exists():
-        with open(jpg_path, 'wb') as jpg_file:
-            jpg_file.write(img)
+    try:
+        jpg_filename = 'cover.jpg' if '{album}' in Zotify.CONFIG.get_output(mode) else track_path.stem + '.jpg'
+        jpg_path = Path(track_path).parent.joinpath(jpg_filename)
+        
+        if not jpg_path.exists():
+            with open(jpg_path, 'wb') as jpg_file:
+                jpg_file.write(img)
+    except Exception as e:
+        Printer.hashtaged(
+            PrintChannel.WARNING,
+            f"Failed to save separate album art file: {str(e)}"
+        )
 
 
 # Time Utils

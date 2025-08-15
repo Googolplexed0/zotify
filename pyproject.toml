@@ -11,6 +11,7 @@ description = "A highly customizable music and podcast downloader"
 authors = [
   { name = "Zotify Contributors" },
   { name = "Googolplexed" },
+  { name = "Mahmoud (qMvhmoud)" }
 ]
 requires-python = ">=3.10"
 license = "Unlicense"
@@ -22,10 +23,9 @@ classifiers = [
   "Operating System :: OS Independent"
 ]
 dependencies = [
-  "librespot @ git+https://github.com/kokarare1212/librespot-python.git",
+  "librespot-spotizerr",
   "ffmpy",
   "music_tag",
-  "Pillow",
   "pkce",
   "protobuf==3.20.1",
   "pwinput",
