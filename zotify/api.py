@@ -106,12 +106,6 @@ def fetch_search_display(search_term: str) -> list[str]:
     return search_result_uris
 
 
-def fetch_user_playlists_display() -> list[str]:
-    user_playlist_resps = Zotify.invoke_url_nextable(USER_PLAYLISTS_URL, ITEMS)
-    Printer.table("PLAYLISTS", ('ID', 'Name'), [[i+1, str(p[NAME])] for i, p in enumerate(user_playlist_resps)])
-    return [p[URI] for p in user_playlist_resps]
-
-
 class Content():
     def __mod__(self, other) -> bool:
         # used for evaluating api track equality
@@ -216,6 +210,7 @@ class Content():
         else:
             raise ValueError("No Metadata Fetched")
     
+    # placeholder func, overwrite in each child class
     def parse_metadata(self, resp: dict):
         pass
     
@@ -234,6 +229,7 @@ class Content():
             objs.append(obj)
         return objs
     
+    # placeholder func, overwrite in each child class
     def download(self, pbar_stack: list):
         pass
     
@@ -961,9 +957,15 @@ class Container(Content):
         self._disable_flag = Zotify.CONFIG.get_show_url_pbar()
         self.needs_expansion = False
     
+    # supersede in each child class
+    def extChildren(self, _extensibleChildren: list[Content | Container],
+                    objs: list[Content | Container] = []) -> list[Content | Container]:
+        _extensibleChildren.extend(objs)
+        return _extensibleChildren
+    
     @property
     def len(self):
-        return len(self._extensibleChildren)
+        return len(self.extChildren())
     
     def fetch_items(self, item_key: str, args: str = "", hide_loader: bool = False) -> list[dict]:
         with Loader(PrintChannel.PROGRESS_INFO, f"Fetching {self._clsn.lower()} {item_key}...", disabled=hide_loader):
@@ -973,18 +975,18 @@ class Container(Content):
     
     def recurse_children(self) -> list[Content]:
         children = []
-        for c in self._extensibleChildren:
+        for c in self.extChildren():
             if isinstance(c, DLContent): children.append(c)
             else: children.extend(c.recurse_children())
         return children
     
     def grab_more_children(self, hide_loader: bool = False):
         items = self.fetch_items(hide_loader=hide_loader)
-        self._extensibleChildren = self.parse_linked_objs(items, self._contains)
+        self.extChildren(self.parse_linked_objs(items, self._contains))
     
     def create_pbar(self, pbar_stack: list | None = None) -> tuple[list[Content], list]:
         pos, pbar_stack = Printer.pbar_position_handler(7, pbar_stack)
-        pbar: list[Content] = Printer.pbar(self._extensibleChildren, self.name, pos=pos,
+        pbar: list[Content] = Printer.pbar(self.extChildren(), self.name, pos=pos,
                                            unit=self._unit, disable=not self._disable_flag)
         pbar_stack.append(pbar)
         return pbar, pbar_stack
@@ -1019,13 +1021,8 @@ class Playlist(Container):
         self.snapshot_id = ""
         self.tracks_or_eps: list[Track | Episode] = []
     
-    @property
-    def _extensibleChildren(self):
-        return self.tracks_or_eps
-    
-    @_extensibleChildren.setter
-    def _extensibleChildren(self, objs: list[Content | Container]):
-        self.tracks_or_eps.extend(objs)
+    def extChildren(self, objs: list[Content | Container] = []):
+        return super().extChildren(self.tracks_or_eps, objs)
     
     def parse_metadata(self, playlist_resp: dict[str, str | bool]):
         self.name: str = playlist_resp[NAME]
@@ -1079,13 +1076,8 @@ class Album(Container):
         self.artists: list[Artist] = []
         self.tracks: list[Track] = []
     
-    @property
-    def _extensibleChildren(self):
-        return self.tracks
-    
-    @_extensibleChildren.setter
-    def _extensibleChildren(self, objs: list[Content | Container]):
-        self.tracks.extend(objs)
+    def extChildren(self, objs: list[Content | Container] = []):
+        return super().extChildren(self.tracks, objs)
     
     def parse_metadata(self, album_resp: dict[str, str | bool]):
         self.name: str = album_resp[NAME]
@@ -1139,16 +1131,8 @@ class Artist(Container):
         self.albums: list[Album] = []
         self.top_songs: list[Track] = []
     
-    @property
-    def _extensibleChildren(self):
-        return self.albums if not self.toptrackmode else self.top_songs
-    
-    @_extensibleChildren.setter
-    def _extensibleChildren(self, objs: list[Content | Container]):
-        if not self.toptrackmode:
-            self.albums.extend(objs)
-        else:
-            self.top_songs.extend(objs)
+    def extChildren(self, objs: list[Content | Container] = []):
+        return super().extChildren(self.albums if not self.toptrackmode else self.top_songs, objs)
     
     def parse_metadata(self, artist_resp: dict[str, str | int | list[str]]):
         self.name: str = artist_resp[NAME]
@@ -1186,13 +1170,8 @@ class Show(Container):
         self.total_episodes = ""
         self.episodes: list[Episode] = []
     
-    @property
-    def _extensibleChildren(self):
-        return self.episodes
-    
-    @_extensibleChildren.setter
-    def _extensibleChildren(self, objs: list[Content | Container]):
-        self.episodes.extend(objs)
+    def extChildren(self, objs: list[Content | Container] = []):
+        return super().extChildren(self.episodes, objs)
     
     def parse_metadata(self, show_resp: dict[str, str | bool]):
         self.name: str = show_resp[NAME]
@@ -1259,13 +1238,8 @@ class Query(Container):
         self.parsed_request: list[list[str]] = []
         self.requested_objs: list[list[DLContent | Container]] = []
     
-    @property
-    def _extensibleChildren(self):
-        return self.requested_objs
-    
-    @_extensibleChildren.setter
-    def _extensibleChildren(self, objs: list[DLContent | Container]):
-        self.requested_objs.extend(objs) 
+    def extChildren(self, objs: list[Content | Container] = []):
+        return super().extChildren(self.requested_objs, objs)
     
     def request(self, requested_urls: str) -> Query:
         self.requested_urls = requested_urls # only used here, can remove later
@@ -1301,7 +1275,7 @@ class Query(Container):
         return direct_reqs_objs, direct_req_item_resps
     
     def parse_direct_metadata(self, direct_reqs_objs: list[list[DLContent | Container]], direct_req_item_resps: list[list[dict]]):
-        """This sets self._extensibleChildren == self.requested_objs"""
+        """This sets self.extChildren == self.requested_objs"""
         for objs, item_resps in zip(direct_reqs_objs, direct_req_item_resps):
             if not objs:
                 self.requested_objs.append([])
@@ -1444,6 +1418,36 @@ class LikedSongs(Query):
         self.download()
 
 
+class UserPlaylists(Query):
+    def __init__(self, timestamp: str):
+        super().__init__(timestamp)
+        self._contains = Playlist
+        self._unit = "Playlist"
+        self.name = "Created Playlists"
+        self.url = USER_PLAYLISTS_URL
+    
+    def fetch_user_playlists_display(self) -> list[None | dict]:
+        user_playlist_resps = Zotify.invoke_url_nextable(self.url)
+        display_list = [[i+1, str(p[NAME])] for i, p in enumerate(user_playlist_resps)]
+        Printer.table("PLAYLISTS", ('ID', 'Name'), [[0, "ALL PLAYLISTS"]].extend(display_list))
+        return [None] + user_playlist_resps
+    
+    def select_user_playlists(self, user_playlist_resps: list[None | dict]) -> tuple[list[list[Artist]], list[list[dict]]]:
+        selected_playlist_resps: list[None | dict] = select(user_playlist_resps)
+        if selected_playlist_resps[0] == None:
+            # option 0 == get all choices
+            selected_playlist_resps = user_playlist_resps[1:]
+        self.parsed_request = [[p[URI] for p in selected_playlist_resps]]
+        return self.create_direct_objs((Playlist)), [selected_playlist_resps]
+    
+    def execute(self):
+        # with Loader(PrintChannel.PROGRESS_INFO, f"Fetching Created Playlists..."):
+        fetched_playlists = self.fetch_user_playlists_display()
+        self.parse_direct_metadata(*self.select_user_playlists(fetched_playlists))
+        self.fetch_extra_metadata()
+        self.download()
+
+
 class FollowedArtists(Query):
     def __init__(self, timestamp: str):
         super().__init__(timestamp)
@@ -1452,15 +1456,24 @@ class FollowedArtists(Query):
         self.name = "Followed Artists"
         self.url = USER_FOLLOWED_ARTISTS_URL
     
-    def create_fetch_followed_artists(self):
-        with Loader(PrintChannel.PROGRESS_INFO, f"Fetching Followed Artists..."):
-            followed_artists_resps = Zotify.invoke_url_nextable(self.url, stripper=ARTISTS)
-            self.parsed_request = [[t[ARTIST][URI] for t in followed_artists_resps]]
-            followed_artists_objs = self.create_direct_objs((Artist))
-        return followed_artists_objs, [followed_artists_resps]
+    def fetch_followed_artists_display(self) -> list[None | dict]:
+        followed_artist_resps = Zotify.invoke_url_nextable(self.url, stripper=ARTISTS)
+        display_list = [[i+1, str(a[NAME])] for i, a in enumerate(followed_artist_resps)]
+        Printer.table("ARTISTS", ('ID', 'Name'), [[0, "ALL ARTISTS"]].extend(display_list))
+        return [None] + followed_artist_resps
+    
+    def select_followed_artists(self, followed_artist_resps: list[None | dict]) -> tuple[list[list[Artist]], list[list[dict]]]:
+        selected_artist_resps: list[None | dict] = select(followed_artist_resps)
+        if selected_artist_resps[0] == None:
+            # option 0 == get all choices
+            selected_artist_resps = followed_artist_resps[1:]
+        self.parsed_request = [[a[URI] for a in selected_artist_resps]]
+        return self.create_direct_objs((Artist)), [selected_artist_resps]
     
     def execute(self):
-        self.parse_direct_metadata(*self.create_fetch_followed_artists())
+        # with Loader(PrintChannel.PROGRESS_INFO, f"Fetching Followed Artists..."):
+        fetched_artists = self.fetch_followed_artists_display()
+        self.parse_direct_metadata(*self.select_followed_artists(fetched_artists))
         self.fetch_extra_metadata()
         self.download()
 
