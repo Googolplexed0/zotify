@@ -43,7 +43,7 @@ def client(args: Namespace) -> None:
             urls: str = args.urls
         
         if len(urls) > 0:
-            Query(Zotify.DATETIME_LAUNCH).request(args.urls).execute()
+            Query(Zotify.DATETIME_LAUNCH).request(urls).execute()
     
     elif args.liked_songs:
         LikedSongs(Zotify.DATETIME_LAUNCH).execute()

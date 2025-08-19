@@ -1298,7 +1298,7 @@ class Query(Container):
     def fetch_extra_metadata(self):
         alltracks = {t for t in self.subContent if isinstance(t, Track) and t.id}
         if Zotify.CONFIG.get_save_genres():
-            artists = set.union(*(set(track.artists) for track in alltracks))
+            artists = set.union(set(), *(set(track.artists) for track in alltracks))
             artist_ids: dict[str, Artist] = {artist.id: artist for artist in artists if artist.id and not artist.hasMetadata}
             if artist_ids:
                 with Loader(PrintChannel.PROGRESS_INFO, f"Fetching bulk genre information..."):
