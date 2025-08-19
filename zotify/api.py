@@ -1114,6 +1114,7 @@ class Album(Container):
     
     def grab_more_children(self, hide_loader: bool = False):
         super().grab_more_children(hide_loader=hide_loader)
+        self.needs_expansion = False
         self.total_discs = str(self.tracks[-1].disc_number)
     
     def download(self, pbar_stack):
@@ -1322,7 +1323,7 @@ class Query(Container):
                         a = album_ids[album_resp[ID]]
                         a._accepting_children = Zotify.CONFIG.get_download_parent_album()
                         a.parse_metadata(album_resp)
-                        a.grab_more_children(hide_loader=True)
+                        if a.needs_expansion: a.grab_more_children(hide_loader=True)
     
     def create_m3u8_playlists(self):
         if Zotify.CONFIG.get_m3u8_location():
