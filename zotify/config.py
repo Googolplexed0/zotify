@@ -121,7 +121,6 @@ DEPRECIATED_CONFIGS = {
     "OVERRIDE_AUTO_WAIT":         { 'default': 'False',                   'type': bool,   'arg': ('--override-auto-wait'                   ,) },
     "REDIRECT_URI":               { 'default': '127.0.0.1:4381',          'type': str,    'arg': ('--redirect-uri'                         ,) },
     "OAUTH_ADDRESS":              { 'default': '0.0.0.0',                 'type': str,    'arg': ('--oauth-address'                        ,) },
-    
 }
 
 
@@ -567,7 +566,7 @@ class Config:
         return cls.get(OPTIMIZED_DOWNLOADING)
 
 
-class Zotify:    
+class Zotify:
     SESSION: Session = None
     DOWNLOAD_QUALITY = None
     TOTAL_API_CALLS = 0
