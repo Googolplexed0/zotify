@@ -147,13 +147,22 @@ LINUX_SYSTEM = 'Linux'
 WINDOWS_SYSTEM = 'Windows'
 
 # FFMPEG
-CODEC_MAP = {
+CODEC_MAP_TRACK = {
     'aac': 'aac',
     'fdk_aac': 'libfdk_aac',
     'mp3': 'libmp3lame',
     'ogg': 'copy',
     'opus': 'libopus',
     'vorbis': 'copy',
+    'copy': 'copy'
+}
+CODEC_MAP_EPISODE = {
+    'aac': 'aac',
+    'fdk_aac': 'libfdk_aac',
+    'mp3': 'libmp3lame',
+    'ogg': 'libopus',
+    'opus': 'libopus',
+    'vorbis': 'libvorbis',
     'copy': 'copy'
 }
 EXT_MAP = {
@@ -163,7 +172,6 @@ EXT_MAP = {
     'ogg': 'ogg',
     'opus': 'ogg',
     'vorbis': 'ogg',
-    'copy': 'ogg'
 }
 
 # Config Keys

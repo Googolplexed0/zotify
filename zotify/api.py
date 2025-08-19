@@ -269,6 +269,8 @@ class Owner(Content):
 class DLContent(Content):
     def __init__(self, id_or_uri: str, _parent: Content | Container = None):
         super().__init__(id_or_uri, _parent)
+        self._codecs: dict[str, str] = {}
+        self._ext = ""
         self.printing_label = ""
         self.filepath: PurePath | None = None
         self.duration_ms = 0
@@ -312,22 +314,19 @@ class DLContent(Content):
         return duration
     
     def convert_audio_format(self, temppath: PurePath, path: PurePath) -> str | None:
-        download_format = Zotify.CONFIG.get_download_format().lower()
-        file_codec = CODEC_MAP.get(download_format, 'copy')
-        bitrate = None
+        file_codec = self._codecs.get(Zotify.CONFIG.get_download_format().lower(), 'copy')
+        output_params = ['-c:a', file_codec]
+        
         if file_codec != 'copy':
             bitrate = Zotify.CONFIG.get_transcode_bitrate()
             if bitrate in {"auto", ""}:
-                bitrates = {
+                bitrate_presets = {
                     'auto': '320k' if Zotify.check_premium() else '160k',
                     'normal': '96k',
                     'high': '160k',
                     'very_high': '320k'
-                }
-                bitrate = bitrates[Zotify.CONFIG.get_download_quality()]
-        
-        output_params = ['-c:a', file_codec]
-        if bitrate is not None:
+                    }
+                bitrate = bitrate_presets.get(Zotify.CONFIG.get_download_quality(), bitrate_presets["auto"])
             output_params += ['-b:a', bitrate]
         
         time_ffmpeg_start = time.time()
@@ -344,7 +343,6 @@ class DLContent(Content):
             
             time_ffmpeg_end = time.time()
             time_elapsed_ffmpeg = fmt_duration(time_ffmpeg_end - time_ffmpeg_start)
-            
         except Exception as e:
             if isinstance(e, ffmpy.FFExecutableNotFoundError):
                 reason = 'FFMPEG NOT FOUND\n'
@@ -360,6 +358,8 @@ class Track(DLContent):
     def __init__(self, id_or_uri: str, _parent: Content | Container = None):
         super().__init__(id_or_uri, _parent)
         self._regex_flag = Zotify.CONFIG.get_regex_track()
+        self._codecs = CODEC_MAP_TRACK
+        self._ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower(), "ogg")
         self.url = TRACK_URL
         
         self.disc_number = ""
@@ -525,9 +525,7 @@ class Track(DLContent):
             for replstr in replstrs:
                 output_template = output_template.replace(replstr, fix_filename(repl_md))
         
-        ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower())
-        
-        return Zotify.CONFIG.get_root_path() / f"{output_template}.{ext}"
+        return Zotify.CONFIG.get_root_path() / f"{output_template}.{self._ext}"
     
     def fetch_lyrics(self, filedir: PurePath) -> list[str]:
         
@@ -651,10 +649,9 @@ class Track(DLContent):
             audio_file[tag] = val
         
         def custom_tag(audio_file: music_tag.AudioFile, tag: str, val: str):
-            ext = EXT_MAP[Zotify.CONFIG.get_download_format().lower()]
-            if ext == "mp3":
+            if self._ext == "mp3":
                 custom_mp3_tag(audio_file, tag, val)
-            elif ext == "m4a":
+            elif self._ext == "m4a":
                 custom_m4a_tag(audio_file, tag, val)
             else:
                 custom_ogg_tag(audio_file, tag, val)
@@ -686,8 +683,7 @@ class Track(DLContent):
         if self.lyrics and Zotify.CONFIG.get_save_lyrics_tags():
             tags[LYRICS] = "".join(self.lyrics)
         
-        ext = EXT_MAP[Zotify.CONFIG.get_download_format().lower()]
-        if ext == "mp3" and not Zotify.CONFIG.get_disc_track_totals():
+        if self._ext == "mp3" and not Zotify.CONFIG.get_disc_track_totals():
             # music_tag python library writes DISCNUMBER and TRACKNUMBER as X/Y instead of X for mp3
             # this method bypasses all internal formatting, probably not resilient against arbitrary inputs
             tags.set_raw("mp3", "TPOS", str(self.disc_number))
@@ -809,6 +805,8 @@ class Episode(DLContent):
     def __init__(self, id_or_uri: str, _parent: Content | Container = None):
         super().__init__(id_or_uri, _parent)
         self._regex_flag = Zotify.CONFIG.get_regex_episode()
+        self._codecs = CODEC_MAP_EPISODE
+        self._ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower(), "copy")
         self.url = EPISODE_URL
         
         self.desc = ""
@@ -847,8 +845,7 @@ class Episode(DLContent):
         self.hasMetadata = True
     
     def fill_output_template(self) -> PurePath:
-        ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower())
-        return PurePath(Zotify.CONFIG.get_root_podcast_path()) / f"{self.show.name}/{self.printing_label}.{ext}"
+        return PurePath(Zotify.CONFIG.get_root_podcast_path()) / f"{self.show.name}/{self.printing_label}.{self._ext}"
     
     def download_directly(direct_download_url: str, path: PurePath) -> str:
         time_start = time.time()
@@ -887,9 +884,14 @@ class Episode(DLContent):
             return
         
         with Loader(PrintChannel.PROGRESS_INFO, "Preparing download..."):
-            path = self.fill_output_template().with_suffix(".tmp")
+            requested_path = self.fill_output_template()
+            path = requested_path.with_suffix(".tmp")
             
-            path_exists = Path(path).is_file() and Path(path).stat().st_size
+            path_exists = False # file suffix agnostic
+            for file_match in Path(path.parent).glob(path.stem + ".*", case_sensitive=True):
+                if file_match.stat().st_size:
+                    path_exists = True
+                    break
             if path_exists and Zotify.CONFIG.get_skip_existing():
                 Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (EPISODE ALREADY EXISTS)')
                 return
@@ -925,26 +927,32 @@ class Episode(DLContent):
                     inputs={path: ["-show_entries", "stream=codec_name"]},
                 )
                 stdout, _ = ff_m.run(stdout=subprocess.PIPE)
-                codec = stdout.decode().strip().split("=")[1].split("\r")[0]
+                codec = stdout.decode().strip().split("=")[1].split("\r")[0].split("\n")[0]
                 
-                if codec in EXT_MAP:
-                    suffix = EXT_MAP[codec]
-                else:
-                    # gross, but shouldn't ever happen...
-                    suffix = codec
-                
-                path_codec = path.with_suffix(f".{suffix}")
+                path_codec = path.with_suffix("." + {EXT_MAP.get(codec, codec)})
                 if Path(path_codec).exists():
                     Path(path_codec).unlink()
-                Path(path).rename(path_codec)
+                path = Path(path).rename(path_codec)
+                self.filepath = path
             
             Printer.debug(f"Detected Codec: {codec}\n" +\
                             f"File Renamed: {path.name}")
         
         except ffmpy.FFExecutableNotFoundError:
-            Path(path).rename(path.with_suffix(".mp3"))
+            path = Path(path).rename(path.with_suffix(".mp3"))
             Printer.hashtaged(PrintChannel.WARNING, 'FFMPEG NOT FOUND\n' +\
                                                     'SKIPPING CODEC ANALYSIS - OUTPUT ASSUMED MP3')
+        
+        self.mark_downloaded()
+        self.filepath = path
+        if requested_path.suffix == ".copy":
+            return
+        
+        elif path.suffix != requested_path.suffix:
+            with Loader(PrintChannel.PROGRESS_INFO, "Converting file..."):
+                time_elapsed_ffmpeg = self.convert_audio_format(path, requested_path)
+                if time_elapsed_ffmpeg is not None:
+                    self.filepath = requested_path
 
 
 class Container(Content):
