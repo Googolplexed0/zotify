@@ -160,7 +160,7 @@ CODEC_MAP_EPISODE = {
     'aac': 'aac',
     'fdk_aac': 'libfdk_aac',
     'mp3': 'libmp3lame',
-    'ogg': 'libopus',
+    'ogg': 'libvorbis',
     'opus': 'libopus',
     'vorbis': 'libvorbis',
     'copy': 'copy'
