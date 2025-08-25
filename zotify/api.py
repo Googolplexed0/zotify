@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import ffmpy
 import functools
 import music_tag
@@ -12,6 +11,7 @@ from tqdm.auto import tqdm
 
 from zotify import __version__
 from zotify.const import *
+from zotify.termoutput import PrintChannel, Printer, Loader
 from zotify.utils import *
 
 
@@ -140,6 +140,7 @@ class Content():
         self._accepting_children = True
         self.downloaded = False # self / all child DLContent must have valid Path if True
         self.hasMetadata = False
+        self.skip_wait = False
         self.url = ""
         self.name = ""
     
@@ -210,6 +211,11 @@ class Content():
         else:
             raise ValueError("No Metadata Fetched")
     
+    def update_id(self, new_id: str):
+        if self.id != new_id:
+            self.id = new_id
+            Printer.debug(f"Updated {self.name} ({self.uri}) ID to {self.id}")
+    
     # placeholder func, overwrite in each child class
     def parse_metadata(self, resp: dict):
         pass
@@ -233,15 +239,24 @@ class Content():
     def download(self, pbar_stack: list):
         pass
     
-    def mark_downloaded(self): 
+    def mark_downloaded(self, path: PurePath | None = None): 
         # Best practice / convention is to only call this on self
         self.downloaded = True
+        if isinstance(self, DLContent) and path is not None:
+            self.filepath = path
         
         # copy downloaded file to all siblings' paths
         for sib in self._siblings:
             if sib.downloaded:
                 continue
-            if isinstance(self, DLContent) and isinstance(sib, DLContent):
+            
+            if not (isinstance(self, DLContent) and isinstance(sib, DLContent)):
+                pass
+            elif isinstance(self._parent, Album) and self._parent in sib._children and Zotify.CONFIG.get_download_parent_album():
+                # sibling spawned this object as part of its parent album download
+                # do not copy file to sibling's path
+                sib.filepath = self.filepath
+            else:
                 sib.filepath = check_path_dupes(sib.fill_output_template())
                 Path(sib.filepath.parent).mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(self.filepath, sib.filepath)
@@ -260,7 +275,8 @@ class Owner(Content):
         self.display_name = ""
         self.external_urls: dict = {}
     
-    def parse_metadata(self, owner_resp):
+    def parse_metadata(self, owner_resp: dict):
+        self.update_id(owner_resp[ID])
         self.display_name: str = owner_resp[DISPLAY_NAME]
         self.external_urls: dict = owner_resp[EXTERNAL_URLS]
         self.hasMetadata = True
@@ -285,19 +301,21 @@ class DLContent(Content):
         pos, pbar_stack = Printer.pbar_position_handler(1, pbar_stack)
         pbar = Printer.pbar(desc=self.printing_label, total=total_size, unit='B', unit_scale=True,
                             unit_divisor=1024, disable=not Zotify.CONFIG.get_show_download_pbar(), pos=pos)
-        with open(temppath, 'wb') as file:
-            b = 0
-            while b < 5:
-                data = stream.input_stream.stream().read(Zotify.CONFIG.get_chunk_size())
-                pbar.update(file.write(data))
-                downloaded += len(data)
-                b += 1 if data == b'' else 0
-                if Zotify.CONFIG.get_download_real_time():
-                    delta_real = time.time() - time_start
-                    delta_want = (downloaded / total_size) * (self.duration_ms/1000)
-                    if delta_want > delta_real:
-                        time.sleep(delta_want - delta_real)
-        pbar.close(); pbar.clear()
+        try:
+            with open(temppath, 'wb') as file:
+                b = 0
+                while b < 5:
+                    data = stream.input_stream.stream().read(Zotify.CONFIG.get_chunk_size())
+                    pbar.update(file.write(data))
+                    downloaded += len(data)
+                    b += 1 if data == b'' else 0
+                    if Zotify.CONFIG.get_download_real_time():
+                        delta_real = time.time() - time_start
+                        delta_want = (downloaded / total_size) * (self.duration_ms/1000)
+                        if delta_want > delta_real:
+                            time.sleep(delta_want - delta_real)
+        finally:
+            pbar.close(); pbar.clear()
         time_dl_end = time.time()
         
         return fmt_duration(time_dl_end - time_start)
@@ -336,7 +354,8 @@ class DLContent(Content):
                 inputs={temppath: None},
                 outputs={path: output_params}
             )
-            ff_m.run()
+            stdout, _ = ff_m.run(stdout=subprocess.PIPE)
+            Printer._logger(stdout.decode(), PrintChannel.DEBUG)
             
             if Path(temppath).exists():
                 Path(temppath).unlink()
@@ -383,6 +402,7 @@ class Track(DLContent):
             self.added_at = track_resp[ADDED_AT]
             track_resp = track_resp[TRACK]
         
+        self.update_id(track_resp[ID])
         self.name: str = track_resp[NAME]
         self.disc_number = str(track_resp[DISC_NUMBER])
         self.duration_ms: int = track_resp[DURATION_MS]
@@ -709,6 +729,7 @@ class Track(DLContent):
                 jpg_file.write(img)
     
     def download(self, pbar_stack: list):
+        self.skip_wait = True
         if self.downloaded:
             # okay to skip get_always_check_lyrics, since it was already checked this session
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK ALREADY DOWNLOADED THIS SESSION)')
@@ -719,12 +740,15 @@ class Track(DLContent):
         if Zotify.CONFIG.get_always_check_lyrics():
             self.fetch_lyrics(path.parent)
         
-        if Zotify.CONFIG.get_skip_comp_albums() and self.album and self.album.compilation:
-            return
-        elif Zotify.CONFIG.get_download_parent_album() and not Zotify.CONFIG.get_optimized_dl_order():
-            # if Zotify.CONFIG.get_optimized_dl_order(), then album's children have already been included
-            # see Query.fetch_extra_metadata() and Query.download()
+        if Zotify.CONFIG.get_download_parent_album() or Zotify.CONFIG.get_disc_track_totals():
+            # moved from Query.fetch_extra_metadata() since it cannot be done in bulk
+            if self.album.needs_expansion: self.album.grab_more_children()
+        if Zotify.CONFIG.get_download_parent_album() and not self.album._downloading_as_parent:
+            self.album._downloading_as_parent = True
             self.album.download(pbar_stack)
+            return
+        
+        if Zotify.CONFIG.get_skip_comp_albums() and self.album and self.album.compilation:
             return
         elif self.regex_check():
             return
@@ -753,15 +777,15 @@ class Track(DLContent):
             return
         if path_exists and Zotify.CONFIG.get_skip_existing() and Zotify.CONFIG.get_disable_directory_archives():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{path.relative_to(Zotify.CONFIG.get_root_path())}" (FILE ALREADY EXISTS)')
-            self.filepath = path
+            self.mark_downloaded(path)
             return
         if in_dir_songids and Zotify.CONFIG.get_skip_existing() and not Zotify.CONFIG.get_disable_directory_archives():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK ALREADY EXISTS)')
-            self.filepath = path
+            self.mark_downloaded(path)
             return
         if in_global_songids and Zotify.CONFIG.get_skip_previously_downloaded():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK DOWNLOADED PREVIOUSLY)')
-            self.filepath = path
+            self.mark_downloaded(path)
             return
         
         stream = Zotify.get_content_stream(TrackId.from_base62(self.id), Zotify.DOWNLOAD_QUALITY)
@@ -769,7 +793,8 @@ class Track(DLContent):
             Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +\
                                                  f'Track_ID: {self.id}')
             return
-        create_download_directory(temppath.parent)
+        self.skip_wait = False
+        Path(temppath.parent).mkdir(parents=True, exist_ok=True)
         time_elapsed_dl = self.fetch_content_stream(stream, temppath, pbar_stack)
         
         if not Zotify.CONFIG.get_always_check_lyrics():
@@ -781,8 +806,7 @@ class Track(DLContent):
             time_elapsed_ffmpeg = self.convert_audio_format(temppath, path)
             if time_elapsed_ffmpeg is None:
                 path = PurePath(Path(temppath).rename(path.with_suffix(".ogg")))
-            self.filepath = path
-            self.mark_downloaded()
+            self.mark_downloaded(path)
         
         try:
             self.set_audio_tags(path)
@@ -822,6 +846,7 @@ class Episode(DLContent):
         self.is_local = ""
     
     def parse_metadata(self, episode_resp: dict[str, str | int | bool]):
+        self.update_id(episode_resp[ID])
         self.name: str = episode_resp[NAME]
         self.desc: str = episode_resp[DESCRIPTION]
         self.duration_ms: int = episode_resp[DURATION_MS]
@@ -927,6 +952,7 @@ class Episode(DLContent):
                     inputs={path: ["-show_entries", "stream=codec_name"]},
                 )
                 stdout, _ = ff_m.run(stdout=subprocess.PIPE)
+                Printer._logger(stdout.decode(), PrintChannel.DEBUG)
                 codec = stdout.decode().strip().split("=")[1].split("\r")[0].split("\n")[0]
                 
                 path_codec = path.with_suffix("." + {EXT_MAP.get(codec, codec)})
@@ -936,23 +962,24 @@ class Episode(DLContent):
                 self.filepath = path
             
             Printer.debug(f"Detected Codec: {codec}\n" +\
-                            f"File Renamed: {path.name}")
+                          f"File Renamed: {path.name}")
         
         except ffmpy.FFExecutableNotFoundError:
             path = Path(path).rename(path.with_suffix(".mp3"))
             Printer.hashtaged(PrintChannel.WARNING, 'FFMPEG NOT FOUND\n' +\
                                                     'SKIPPING CODEC ANALYSIS - OUTPUT ASSUMED MP3')
         
-        self.mark_downloaded()
-        self.filepath = path
         if requested_path.suffix == ".copy":
+            self.mark_downloaded(path)
             return
         
         elif path.suffix != requested_path.suffix:
             with Loader(PrintChannel.PROGRESS_INFO, "Converting file..."):
                 time_elapsed_ffmpeg = self.convert_audio_format(path, requested_path)
-                if time_elapsed_ffmpeg is not None:
-                    self.filepath = requested_path
+                self.mark_downloaded(requested_path if time_elapsed_ffmpeg is not None else path)
+                return
+        
+        self.mark_downloaded(path)
 
 
 class Container(Content):
@@ -1005,11 +1032,10 @@ class Container(Content):
         
         pbar, pbar_stack = self.create_pbar(pbar_stack)
         for child in pbar:
-            predownloaded = child.downloaded
             child.download(pbar_stack)
             Printer.refresh_all_pbars(pbar_stack)
-            if not predownloaded: wait_between_downloads()
-        self.mark_downloaded()
+            wait_between_downloads(child.skip_wait)
+        self.mark_downloaded() # technically should have no effect, as last child marks parent downloaded
 
 
 class Playlist(Container):
@@ -1033,6 +1059,7 @@ class Playlist(Container):
         return super().extChildren(self.tracks_or_eps, objs)
     
     def parse_metadata(self, playlist_resp: dict[str, str | bool]):
+        self.update_id(playlist_resp[ID])
         self.name: str = playlist_resp[NAME]
         self.collaborative: bool = playlist_resp[COLLABORATIVE]
         self.desc: str = playlist_resp[DESCRIPTION]
@@ -1072,6 +1099,7 @@ class Album(Container):
         self._preloaded = 50
         self._disable_flag = Zotify.CONFIG.get_show_album_pbar()
         self._regex_flag = Zotify.CONFIG.get_regex_album()
+        self._downloading_as_parent = False
         
         self.url = ALBUM_URL
         self.compilation = 0
@@ -1088,6 +1116,7 @@ class Album(Container):
         return super().extChildren(self.tracks, objs)
     
     def parse_metadata(self, album_resp: dict[str, str | bool]):
+        self.update_id(album_resp[ID])
         self.name: str = album_resp[NAME]
         self.compilation: int = 1 if COMPILATION == album_resp[ALBUM_TYPE] else 0
         largest_image = max(album_resp[IMAGES], key=lambda img: img[WIDTH], default={URL: ""})
@@ -1118,11 +1147,21 @@ class Album(Container):
         self.total_discs = str(self.tracks[-1].disc_number)
     
     def download(self, pbar_stack):
-        if Zotify.CONFIG.get_skip_comp_albums() and self.compilation:
+        if self.downloaded:
+            return
+        elif Zotify.CONFIG.get_skip_comp_albums() and self.compilation:
             return
         elif self.regex_check():
             return
+        
+        if Zotify.CONFIG.get_optimized_dl_order():
+            tracks = self.tracks
+            downloadables = [c for c in self.tracks if c.id]
+            downloadables.sort(key=lambda x: x.duration_ms); edge_zip(downloadables)
+            self.tracks = downloadables
         super().download(pbar_stack)
+        if Zotify.CONFIG.get_optimized_dl_order():
+            self.tracks = tracks
 
 
 class Artist(Container):
@@ -1144,6 +1183,7 @@ class Artist(Container):
         return super().extChildren(self.albums if not self.toptrackmode else self.top_songs, objs)
     
     def parse_metadata(self, artist_resp: dict[str, str | int | list[str]]):
+        self.update_id(artist_resp[ID])
         self.name: str = artist_resp[NAME]
         
         if GENRES in artist_resp:
@@ -1183,6 +1223,7 @@ class Show(Container):
         return super().extChildren(self.episodes, objs)
     
     def parse_metadata(self, show_resp: dict[str, str | bool]):
+        self.update_id(show_resp[ID])
         self.name: str = show_resp[NAME]
         self.desc: str = show_resp[DESCRIPTION]
         self.explicit: bool = show_resp[EXPLICIT]
@@ -1243,7 +1284,7 @@ class Query(Container):
         self.name = "Total Progress"
         self.pbar_stack: list = []
         
-        self.requested_urls = ""
+        self.requested_urls = "" # for debug only
         self.parsed_request: list[list[str]] = []
         self.requested_objs: list[list[DLContent | Container]] = []
     
@@ -1253,7 +1294,7 @@ class Query(Container):
     def request(self, requested_urls: str) -> Query:
         self.requested_urls = requested_urls # only used here, can remove later
         self.parsed_request = bulk_regex_urls(self.requested_urls)
-        Printer.debug(f'Starting Download of {len(self.parsed_request)} {self._unit}')
+        Printer.debug(f'Starting Download of {len(set.union(*[set(l) for l in self.parsed_request]))} {self._unit}')
         return self
     
     def create_linked_obj(self, cls: Content | Container, id_or_uri: str) -> Content | Container:
@@ -1303,7 +1344,8 @@ class Query(Container):
             artist_ids: dict[str, Artist] = {artist.id: artist for artist in artists if artist.id and not artist.hasMetadata}
             if artist_ids:
                 with Loader(PrintChannel.PROGRESS_INFO, f"Fetching bulk genre information..."):
-                    artist_resps = Zotify.invoke_url_bulk(ARTIST_BULK_URL, list(artist_ids.keys()), ARTISTS, ITEM_FETCH[Artist])
+                    url = f"{ARTIST_URL}?{MARKET_APPEND}&{BULK_APPEND}"
+                    artist_resps = Zotify.invoke_url_bulk(url, list(artist_ids.keys()), ARTISTS, ITEM_FETCH[Artist])
                     for artist_resp in artist_resps:
                         artist_ids[artist_resp[ID]].parse_metadata(artist_resp)
                         artist_ids[artist_resp[ID]].needs_expansion = False
@@ -1318,34 +1360,53 @@ class Query(Container):
             if album_ids:
                 loader_text = "parent album" if Zotify.CONFIG.get_download_parent_album() else "track/disc total"
                 with Loader(PrintChannel.PROGRESS_INFO, f"Fetching bulk {loader_text} information..."):
-                    album_resps = Zotify.invoke_url_bulk(ALBUM_BULK_URL, list(album_ids.keys()), ALBUMS, ITEM_FETCH[Album])
+                    url = f"{ALBUM_URL}?{MARKET_APPEND}&{BULK_APPEND}"
+                    album_resps = Zotify.invoke_url_bulk(url, list(album_ids.keys()), ALBUMS, ITEM_FETCH[Album])
                     for album_resp in album_resps:
                         a = album_ids[album_resp[ID]]
                         a._accepting_children = Zotify.CONFIG.get_download_parent_album()
                         a.parse_metadata(album_resp)
-                        if a.needs_expansion: a.grab_more_children(hide_loader=True)
+                        # if a.needs_expansion: a.grab_more_children(hide_loader=True) # extremely slow, multiple calls per album
     
-    def create_m3u8_playlists(self):
-        if Zotify.CONFIG.get_m3u8_location():
-            m3u8_dir: PurePath = Zotify.CONFIG.get_m3u8_location()
+    def get_m3u8_dir(self, content_list: list[DLContent]) -> str:
+        m3u8_dir = Zotify.CONFIG.get_m3u8_location()
+        if m3u8_dir is None: # Config calls for Output Dir
+            allpaths = {obj.filepath for obj in content_list if obj.filepath}
+            if allpaths:
+                m3u8_dir = get_common_dir(allpaths)
+        return m3u8_dir
+    
+    def create_m3u8_playlists(self, force_name: str = "", append: list[str] | None = None):
         for obj_list in self.requested_objs:
             if not obj_list:
                 continue
+            
             if isinstance(obj_list[0], Container):
-                for obj in obj_list:
-                    if not Zotify.CONFIG.get_m3u8_location():
-                        allpaths = {c.filepath for c in obj.subContent if isinstance(c, DLContent) if c.filepath}
-                        m3u8_dir = get_common_dir(allpaths)
-                    m3u8_path = m3u8_dir / f"{obj.name}.m3u8"
-                    Path(m3u8_path).unlink(missing_ok=True)
-                    add_to_m3u8(m3u8_path, obj.recurse_children())
+                content_lists: list[list[DLContent]] = [obj.recurse_children() for obj in obj_list]
+                def get_m3u8_filename(content_list: list[DLContent]) -> str:
+                    return content_list[0]._parent.name
+                def get_m3u8_dir(content_list: list[DLContent]) -> str:
+                    return self.get_m3u8_dir(content_list)
             else:
-                if not Zotify.CONFIG.get_m3u8_location():
-                    allpaths = {obj.filepath for obj in obj_list if obj.filepath}
-                    m3u8_dir = get_common_dir(allpaths)
-                m3u8_path = m3u8_dir / f"{self.id}_{obj_list[0]._plural}.m3u8"
+                content_lists: list[list[DLContent]] = [obj_list]
+                def get_m3u8_filename(content_list: list[DLContent]) -> str:
+                    return f"{self.id}_{content_list[0]._plural}"
+                def get_m3u8_dir(content_list: list[DLContent]) -> str:
+                    return Zotify.CONFIG.get_root_path()
+            if force_name:
+                def get_m3u8_filename(content_list: list[DLContent]) -> str:
+                    return force_name
+            
+            for content_list in content_lists:
+                m3u8_dir = get_m3u8_dir(content_list)
+                if m3u8_dir is None:
+                    Printer.hashtaged(PrintChannel.WARNING, f"SKIPPING M3U8 CREATION for {get_m3u8_filename(content_list)}\n" +\
+                                                             "NO CONTENT WITH VALID FILEPATHS FOUND")
+                    continue
+                
+                m3u8_path = m3u8_dir / (get_m3u8_filename(content_list) + ".m3u8")
                 Path(m3u8_path).unlink(missing_ok=True)
-                add_to_m3u8(m3u8_path, obj_list)
+                add_to_m3u8(m3u8_path, content_list, append)
     
     def download(self):
         requested_objs = self.requested_objs
@@ -1359,19 +1420,35 @@ class Query(Container):
         
         try:
             super().download(pbar_stack=None)
-        except KeyboardInterrupt:
-            Printer.hashtaged(PrintChannel.MANDATORY, "USER CANCELED DOWNLOADS EARLY\n"+
-                                                      "ATTEMPTING TO CLEAN UP")
+            interrupt = None
+        except BaseException as e:
+            interrupt = e
         
         self.requested_objs = requested_objs
-        
-        # all pbars are finished here, which will print an extra newline
-        if Zotify.CONFIG.get_show_any_progress():
+        while Printer.ACTIVE_LOADER: # catch and close any/all active loaders
+            Printer.ACTIVE_LOADER.stop()
+        while Printer.ACTIVE_PBARS: # catch and close any/all active pbars
+            Printer.ACTIVE_PBARS.pop().close()
+        if Zotify.CONFIG.get_show_any_progress(): # closing all pbars will print an extra newline
             Printer.back_up()
+        
+        if isinstance(interrupt, KeyboardInterrupt):
+            Printer.hashtaged(PrintChannel.MANDATORY, "USER CANCELED DOWNLOADS EARLY\n"+
+                                                      "ATTEMPTING TO CLEAN UP")
+        elif interrupt is not None:
+            Printer.hashtaged(PrintChannel.ERROR, "UNEXPECTED ERROR DURING DOWNLOADS\n"+
+                                                  "ATTEMPTING TO CLEAN UP")
         
         if Zotify.CONFIG.get_export_m3u8():
             with Loader(PrintChannel.PROGRESS_INFO, "Creating m3u8 files..."):
                 self.create_m3u8_playlists()
+        
+        if interrupt is not None:
+            Printer.hashtaged(PrintChannel.ERROR, "CLEAN UP COMPLETE\n"+
+                                                  "LOGGING ERROR AND TRACEBACK")
+            # Printer.traceback(interrupt)
+            Printer._logger(interrupt, PrintChannel.ERROR)
+            raise interrupt
     
     def execute(self):
         direct_reqs_objs = self.create_direct_objs()
@@ -1392,34 +1469,49 @@ class LikedSongs(Query):
         with Loader(PrintChannel.PROGRESS_INFO, f"Fetching Liked Songs..."):
             liked_songs_resps = Zotify.invoke_url_nextable(self.url)
             self.parsed_request = [[t[TRACK][URI] for t in liked_songs_resps]]
-            liked_songs_objs = self.create_direct_objs((Track))
+            liked_songs_objs = self.create_direct_objs((Track,))
         return liked_songs_objs, [liked_songs_resps]
    
     def create_m3u8_playlists(self):
-        liked_tracks: list[Track] = self.requested_objs[0]
-        if Zotify.CONFIG.get_m3u8_location():
-            m3u8_dir: PurePath = Zotify.CONFIG.get_m3u8_location()
-        else:
-            allpaths = {obj.filepath for obj in liked_tracks if obj.filepath}
-            m3u8_dir = get_common_dir(allpaths)
-        m3u8_path = m3u8_dir / f"{self.name}.m3u8"
         
-        if Zotify.CONFIG.get_liked_songs_archive_m3u8() and Path(m3u8_path).exists():
+        def find_sync_point(liked_tracks: list[Track], archived_path: str) -> int | None:
+            for i, liked_track in enumerate(liked_tracks):
+                if str(liked_track.filepath) == archived_path[:-1]:
+                    return i
+            return None
+        
+        def handle_archive_mode() -> None | list[str]:
+            if not Zotify.CONFIG.get_liked_songs_archive_m3u8():
+                return
+            
+            liked_tracks: list[Track] = self.requested_objs[0]
+            m3u8_path = self.get_m3u8_dir(liked_tracks) / f"{self.name}.m3u8"
+            
+            if not Path(m3u8_path).exists():
+                return
+            
             raw_liked_archive = fetch_m3u8_songs(m3u8_path)
-            newest_liked_track_path = raw_liked_archive[1]
+            if not raw_liked_archive:
+                Printer.hashtaged(PrintChannel.WARNING, "FAILED Liked Songs ARCHIVE M3U8 UPDATE\n" +\
+                                                        "FAILED TO READ EXISTING M3U8\n" +\
+                                                        "FALLING BACK TO STANDARD M3U8 CREATION")
+                return
             
-            prepend = liked_tracks; append = None
-            for i, liked in enumerate(liked_tracks):
-                if liked.filepath == newest_liked_track_path:
-                    prepend = liked_tracks[:i] # don't include matching Track
-                    append = raw_liked_archive # includes matching track m3u8 entry
-                    break
+            for i, liked_archive_path in enumerate(raw_liked_archive[1::3]):
+                sync_point = find_sync_point(liked_tracks, liked_archive_path)
+                if sync_point is not None:
+                    self.requested_objs[0] = liked_tracks[:sync_point] # doesn't include matching Track obj
+                    append = raw_liked_archive[3*i:] # includes matching track m3u8 entry
+                    return append
+                if i == 0:
+                    Printer.hashtaged(PrintChannel.WARNING, "FIRST TRACK IN EXISTING M3U8 NOT FOUND IN CURRENT LIKED SONGS\n" +\
+                                                            "PERFORMING DEEP SEARCH FOR SYNC POINT")
             
-            Path(m3u8_path).unlink(missing_ok=True)
-            add_to_m3u8(m3u8_path, prepend, append)
-        else:
-            Path(m3u8_path).unlink(missing_ok=True)
-            add_to_m3u8(m3u8_path, liked_tracks)
+            Printer.hashtaged(PrintChannel.WARNING, "FAILED Liked Songs ARCHIVE M3U8 UPDATE\n" +\
+                                                    "FAILED TO FIND SYNC POINT\n" +\
+                                                    "FALLING BACK TO STANDARD M3U8 CREATION")
+        
+        super().create_m3u8_playlists(force_name=self.name, append=handle_archive_mode())
  
     def execute(self):
         self.parse_direct_metadata(*self.create_fetch_liked_songs())
@@ -1447,7 +1539,7 @@ class UserPlaylists(Query):
             # option 0 == get all choices
             selected_playlist_resps = user_playlist_resps[1:]
         self.parsed_request = [[p[URI] for p in selected_playlist_resps]]
-        return self.create_direct_objs((Playlist)), [selected_playlist_resps]
+        return self.create_direct_objs((Playlist,)), [selected_playlist_resps]
     
     def execute(self):
         # with Loader(PrintChannel.PROGRESS_INFO, f"Fetching Created Playlists..."):
@@ -1477,7 +1569,7 @@ class FollowedArtists(Query):
             # option 0 == get all choices
             selected_artist_resps = followed_artist_resps[1:]
         self.parsed_request = [[a[URI] for a in selected_artist_resps]]
-        return self.create_direct_objs((Artist)), [selected_artist_resps]
+        return self.create_direct_objs((Artist,)), [selected_artist_resps]
     
     def execute(self):
         # with Loader(PrintChannel.PROGRESS_INFO, f"Fetching Followed Artists..."):
@@ -1508,15 +1600,16 @@ class VerifyLibrary(Query):
                 track.filepath = PurePath(entry)
                 verifiable_tracks.append(track)
         
-        track_resps = Zotify.invoke_url_bulk(TRACK_BULK_URL, [t.id for t in verifiable_tracks], TRACKS)
+        url = f"{TRACK_URL}?{MARKET_APPEND}&{BULK_APPEND}"
+        track_resps = Zotify.invoke_url_bulk(url, [t.id for t in verifiable_tracks], TRACKS)
         
         return [verifiable_tracks], [track_resps]
     
     def execute(self):
         self.parse_direct_metadata(*self.create_fetch_verifiable_tracks())
-        pbar, pbar_stack = self.create_pbar()
         self.fetch_extra_metadata()
+        pbar: list[Track]
+        pbar, pbar_stack = self.create_pbar()
         for child in pbar:
-            assert isinstance(child, Track)
             child.verify_metadata()
             Printer.refresh_all_pbars(pbar_stack)

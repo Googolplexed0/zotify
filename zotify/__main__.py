@@ -12,6 +12,7 @@ from zotify.app import client
 from zotify.config import CONFIG_VALUES, DEPRECIATED_CONFIGS
 from zotify.termoutput import Printer
 
+
 class DepreciatedAction(argparse.Action):
     def __init__(self, option_strings, dest, **kwargs):
         if "help" in kwargs:
@@ -22,9 +23,11 @@ class DepreciatedAction(argparse.Action):
         Printer.depreciated_warning(option_string, self.help, CONFIG=False)
         setattr(namespace, self.dest, values)
 
+
 DEPRECIATED_FLAGS = (
     {"flags":    ('-d', '--download',),     "type":    str,     "help":    'Use `--file` (`-f`) instead'},
 )
+
 
 def main():
     parser = argparse.ArgumentParser(prog='zotify',
@@ -117,10 +120,10 @@ def main():
     args = parser.parse_args()
     try:
         args.func(args)
-    except KeyboardInterrupt:
+        print("\n")
+    except BaseException:
         print("\n")
         raise
-    print("\n")
 
 
 if __name__ == '__main__':

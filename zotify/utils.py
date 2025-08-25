@@ -6,7 +6,7 @@ from pathlib import Path, PurePath
 
 from zotify.config import Zotify
 from zotify.const import EXT_MAP
-from zotify.termoutput import PrintChannel, Printer, Loader
+from zotify.termoutput import PrintChannel, Printer
 
 
 # Path Utils
@@ -89,7 +89,7 @@ def bulk_regex_urls(urls: str | list[str]) -> list[list[str]]:
         urls = strlist_compressor(urls)
     
     base_uri = r'sp'+r'otify:%s:([0-9a-zA-Z]{22})'
-    base_url = r'(?:https?://)?open\.sp'+r'otify\.com(?:/intl-\w+)?/%s/([0-9a-zA-Z]{22})(?:\?si=.+?)?'
+    base_url = r'(?:https?://)?open\.' + base_uri.split(':')[0] + r'\.com(?:/intl-\w+)?/%s/([0-9a-zA-Z]{22})(?:\?si=.+?)?'
     
     from zotify.api import ITEM_FETCH, ITEM_NAMES
     matched_ids = [[]]*len(ITEM_FETCH)
@@ -137,6 +137,8 @@ def select(items: list) -> list:
 # Metadata & Codec Utils
 def conv_artist_format(artists: list, FORCE_NO_LIST: bool = False) -> list[str] | str:
     """ Returns converted artist format """
+    from zotify.api import Artist
+    artists: list[Artist] = artists
     artist_names = [a.name for a in artists]
     if Zotify.CONFIG.get_artist_delimiter() == "":
         # if len(artist_names) == 1:
@@ -186,9 +188,13 @@ def strptime_utc(dtstr) -> datetime.datetime:
     return datetime.datetime.strptime(dtstr[:-1], '%Y-%m-%dT%H:%M:%S').replace(tzinfo=datetime.timezone.utc)
 
 
-def wait_between_downloads() -> None:
+def wait_between_downloads(skip_wait: bool = False) -> None:
     waittime = Zotify.CONFIG.get_bulk_wait_time()
     if not waittime or waittime <= 0:
+        return
+    
+    if skip_wait:
+        time.sleep(min(0.5, waittime))
         return
     
     if waittime > 5:
@@ -260,6 +266,8 @@ def add_to_directory_song_archive(track_path: PurePath, track_id: str, author_na
 
 # Playlist File Utils
 def add_to_m3u8(m3u8_path: PurePath, contents: list, append_strs: list[str] | None = None):
+    from zotify.api import DLContent
+    contents: list[DLContent] = contents
     
     if not Path(m3u8_path).exists():
         Path(m3u8_path.parent).mkdir(parents=True, exist_ok=True)
@@ -283,11 +291,11 @@ def add_to_m3u8(m3u8_path: PurePath, contents: list, append_strs: list[str] | No
             file.writelines(append_strs)
 
 
-def fetch_m3u8_songs(m3u8_path: PurePath) -> list[str] | None:
+def fetch_m3u8_songs(m3u8_path: PurePath) -> list[str]:
     """ Fetches the songs and associated file paths in an .m3u8 playlist"""
     
     if not Path(m3u8_path).exists():
-        return
+        return []
     
     with open(m3u8_path, 'r', encoding='utf-8') as file:
         linesraw = file.readlines()[2:-1]

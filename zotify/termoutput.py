@@ -25,7 +25,6 @@ CLEAR_LINE = "\033[K"
 class PrintChannel(Enum):
     MANDATORY = MANDATORY
     DEBUG = DEBUG
-    
     SPLASH = PRINT_SPLASH
     
     WARNING = PRINT_WARNINGS
@@ -39,7 +38,7 @@ class PrintChannel(Enum):
 
 class PrintCategory(Enum):
     NONE = ""
-    GENERAL = "\n"
+    MANDATORY = "\n"
     LOADER = "\n\t"
     LOADER_CYCLE = f"{START_OF_PREV_LINE*2}\t"
     HASHTAG = "\n###   "
@@ -47,12 +46,11 @@ class PrintCategory(Enum):
     DEBUG = "\nDEBUG\n"
 
 
-LAST_PRINT: PrintCategory = PrintCategory.NONE
-ACTIVE_LOADER: Loader | None = None
-ACTIVE_PBARS: list[tqdm] = []
-
-
 class Printer:
+    LAST_PRINT: PrintCategory = PrintCategory.NONE
+    ACTIVE_LOADER: Loader | None = None
+    ACTIVE_PBARS: list[tqdm] = []
+    
     @staticmethod
     def _term_cols() -> int:
         try:
@@ -60,6 +58,22 @@ class Printer:
         except OSError:
             columns = 80
         return columns
+    
+    @staticmethod
+    def _logger(msg: str, channel: PrintChannel) -> None:
+        if channel not in {PrintChannel.WARNING, PrintChannel.ERROR, PrintChannel.API_ERROR, PrintChannel.DEBUG,}:
+            return
+        from zotify.config import Zotify
+        if Zotify.CONFIG.logger:
+            if isinstance(msg, BaseException):
+                msg = "".join(TracebackException.from_exception(msg).format())
+            msg = "\n\n" + msg.strip() + "\n"
+            if channel is PrintChannel.WARNING:
+                Zotify.CONFIG.logger.warning(msg)
+            elif channel in {PrintChannel.ERROR, PrintChannel.API_ERROR}:
+                Zotify.CONFIG.logger.error(msg)
+            elif channel is PrintChannel.DEBUG:
+                Zotify.CONFIG.logger.debug(msg)
     
     @staticmethod
     def _api_shrink(obj: list | tuple | dict) -> dict:
@@ -106,12 +120,11 @@ class Printer:
         elif category is PrintCategory.JSON:
             msg = "#" * (Printer._term_cols()-1) + "\n" + msg + "\n" + "#" * Printer._term_cols()
         
-        global LAST_PRINT
-        if LAST_PRINT is PrintCategory.DEBUG and category is PrintCategory.DEBUG:
+        if Printer.LAST_PRINT is PrintCategory.DEBUG and category is PrintCategory.DEBUG:
             pass
-        elif LAST_PRINT in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE} and category is PrintCategory.LOADER:
+        elif Printer.LAST_PRINT in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE} and category is PrintCategory.LOADER:
             msg = "\n" + PrintCategory.LOADER_CYCLE.value + msg
-        elif LAST_PRINT in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE} and "LOADER" not in category.name:
+        elif Printer.LAST_PRINT in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE} and "LOADER" not in category.name:
             msg = category.value.replace("\n", "", 1) + msg
         else:
             msg = category.value + msg
@@ -120,29 +133,27 @@ class Printer:
     
     @staticmethod
     def _toggle_active_loader(skip_toggle: bool = False):
-        global ACTIVE_LOADER
-        if not skip_toggle and ACTIVE_LOADER:
-            if ACTIVE_LOADER.paused:
-                ACTIVE_LOADER.resume()
+        if not skip_toggle and Printer.ACTIVE_LOADER:
+            if Printer.ACTIVE_LOADER.paused:
+                Printer.ACTIVE_LOADER.resume()
             else:
-                ACTIVE_LOADER.pause()
+                Printer.ACTIVE_LOADER.pause()
     
     @staticmethod
-    def new_print(channel: PrintChannel, msg: str, category: PrintCategory = PrintCategory.NONE, skip_toggle: bool = False, end: str = "\n") -> None:
-        global LAST_PRINT
+    def new_print(channel: PrintChannel, msg: str, category: PrintCategory = PrintCategory.NONE, 
+                  skip_toggle: bool = False, end: str = "\n") -> None:
+        Printer._logger(msg, channel)
         if channel != PrintChannel.MANDATORY:
             from zotify.config import Zotify
         if channel == PrintChannel.MANDATORY or Zotify.CONFIG.get(channel.value):
             msg, category = Printer._print_prefixes(msg, category, channel)
-            if channel == PrintChannel.DEBUG and Zotify.CONFIG.logger:
-                Zotify.CONFIG.logger.debug(msg.strip().replace("DEBUG", "\n") + "\n")
             Printer._toggle_active_loader(skip_toggle)
-            for line in str(msg).splitlines():   
-                if end == "\n": 
+            for line in str(msg).splitlines():
+                if end == "\n":
                     tqdm.write(line.ljust(Printer._term_cols()))
                 else:
                     tqdm.write(line, end=end)
-                LAST_PRINT = category
+                Printer.LAST_PRINT = category
             Printer._toggle_active_loader(skip_toggle)
     
     @staticmethod
@@ -150,7 +161,7 @@ class Printer:
         user_input = ""
         Printer._toggle_active_loader()
         while len(user_input) == 0:
-            Printer.new_print(PrintChannel.MANDATORY, prompt, PrintCategory.GENERAL, end="", skip_toggle=True)
+            Printer.new_print(PrintChannel.MANDATORY, prompt, end="", skip_toggle=True)
             user_input = str(input())
         Printer._toggle_active_loader()
         return user_input
@@ -170,13 +181,13 @@ class Printer:
                 Printer.json_dump(m, PrintChannel.DEBUG, PrintCategory.DEBUG)
     
     @staticmethod
-    def hashtaged(channel: PrintChannel, msg: str):
+    def hashtaged(channel: PrintChannel, msg: str) -> None:
         Printer.new_print(channel, msg, PrintCategory.HASHTAG)
     
     @staticmethod
     def traceback(e: Exception) -> None:
         msg = "".join(TracebackException.from_exception(e).format())
-        Printer.new_print(PrintChannel.ERROR, msg, PrintCategory.GENERAL)
+        Printer.new_print(PrintChannel.ERROR, msg, PrintCategory.MANDATORY)
     
     @staticmethod
     def depreciated_warning(option_string: str, help_msg: str = None, CONFIG = True) -> None:
@@ -208,31 +219,36 @@ class Printer:
         "      ███╔╝ ██║   ██║   ██║   ██║█████╗   ╚████╔╝ "+"\n"+\
         "     ███╔╝  ██║   ██║   ██║   ██║██╔══╝    ╚██╔╝  "+"\n"+\
         "    ███████╗╚██████╔╝   ██║   ██║██║        ██║   "+"\n"+\
-        "    ╚══════╝ ╚═════╝    ╚═╝   ╚═╝╚═╝        ╚═╝   "+"\n" )
+        "    ╚══════╝ ╚═════╝    ╚═╝   ╚═╝╚═╝        ╚═╝   "+"\n",
+        PrintCategory.MANDATORY)
     
     @staticmethod
     def search_select() -> None:
         """ Displays splash screen """
-        Printer.new_print(PrintChannel.MANDATORY, "\n" +\
+        Printer.new_print(PrintChannel.MANDATORY,
         "> SELECT A DOWNLOAD OPTION BY ID\n" +
         "> SELECT A RANGE BY ADDING A DASH BETWEEN BOTH ID's\n" +
-        "> OR PARTICULAR OPTIONS BY ADDING A COMMA BETWEEN ID's\n"
-        )
+        "> OR PARTICULAR OPTIONS BY ADDING A COMMA BETWEEN ID's\n",
+        PrintCategory.MANDATORY)
+    
+    @staticmethod
+    def newline() -> None:
+        Printer.new_print(PrintChannel.MANDATORY, "\n")
     
     @staticmethod
     def back_up() -> None:
-        Printer.new_print(PrintChannel.MANDATORY, UP_ONE_LINE, PrintCategory.GENERAL, end="")
+        Printer.new_print(PrintChannel.MANDATORY, UP_ONE_LINE, end="")
     
     # Progress Bars
     @staticmethod
     def pbar(iterable=None, desc=None, total=None, unit='it', 
-            disable=False, unit_scale=False, unit_divisor=1000, pos=1) -> tqdm:
-        if iterable and len(iterable) == 1 and len(ACTIVE_PBARS) > 0:
+             disable=False, unit_scale=False, unit_divisor=1000, pos=1) -> tqdm:
+        if iterable and len(iterable) == 1 and len(Printer.ACTIVE_PBARS) > 0:
             disable = True # minimize clutter
         new_pbar = tqdm(iterable=iterable, desc=desc, total=total, disable=disable, position=pos, 
                         unit=unit, unit_scale=unit_scale, unit_divisor=unit_divisor, leave=False)
         if new_pbar.disable: new_pbar.pos = -pos
-        if not new_pbar.disable: ACTIVE_PBARS.append(new_pbar)
+        if not new_pbar.disable: Printer.ACTIVE_PBARS.append(new_pbar)
         return new_pbar
     
     @staticmethod
@@ -243,7 +259,7 @@ class Printer:
         if not skip_pop and pbar_stack:
             if pbar_stack[-1].n == pbar_stack[-1].total: 
                 pbar_stack.pop()
-                if not pbar_stack[-1].disable: ACTIVE_PBARS.pop()
+                if not pbar_stack[-1].disable: Printer.ACTIVE_PBARS.pop()
     
     @staticmethod
     def pbar_position_handler(default_pos: int, pbar_stack: list[tqdm] | None) -> tuple[int, list[tqdm]]:
@@ -307,19 +323,17 @@ class Loader:
             self.category = PrintCategory.LOADER_CYCLE
     
     def store_active_loader(self):
-        global ACTIVE_LOADER
-        self._inherited_active_loader = ACTIVE_LOADER
-        ACTIVE_LOADER = self
+        self._inherited_active_loader = Printer.ACTIVE_LOADER
+        Printer.ACTIVE_LOADER = self
     
     def release_active_loader(self):
-        global ACTIVE_LOADER
-        ACTIVE_LOADER = self._inherited_active_loader
+        Printer.ACTIVE_LOADER = self._inherited_active_loader
     
     def start(self):
         if not self.disabled:
             self.store_active_loader()
             self._thread.start()
-            sleep(self.timeout*2) #guarantee _animate can print at least once
+            sleep(self.timeout) #guarantee _animate can print at least once
         return self
     
     def _animate(self):
@@ -338,7 +352,11 @@ class Loader:
         if not self.disabled:
             self.done = True
             while not self.dead: #guarantee _animate has finished
-                sleep(self.timeout) 
+                try:
+                    sleep(self.timeout)
+                except KeyboardInterrupt as e:
+                    self.stop() # guarantee stop is called so outer funcs can clean up all loaders
+                    raise e
             self.category = PrintCategory.LOADER
             if self.end != "":
                 self._loader_print(self.end)
