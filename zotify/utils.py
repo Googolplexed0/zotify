@@ -98,7 +98,7 @@ def bulk_regex_urls(urls: str | list[str]) -> list[list[str]]:
     return matched_ids
 
 
-def edge_zip(sorted_list: list) -> list:
+def edge_zip(sorted_list: list) -> None:
     # presorted small to big, in place, [1,2,3,4,5] -> [1,5,2,4,3],
     n = len(sorted_list)
     sorted_list[::2], sorted_list[1::2] = sorted_list[:(n+1)//2], sorted_list[:(n+1)//2-1:-1]
@@ -203,28 +203,34 @@ def wait_between_downloads(skip_wait: bool = False) -> None:
 
 
 # Song Archive Utils
-def get_archived_entries() -> list[str]:
-    """ Returns list of all time downloaded song entries """
-    
-    archive_path = Zotify.CONFIG.get_song_archive_location()
+def get_archived_entries(dir_path: PurePath | None = None) -> list[str]:
+    """ Returns list of downloaded song entries """
+    if dir_path:
+        archive_path = dir_path / '.song_ids'
+        disabled = Zotify.CONFIG.get_disable_directory_archives()
+    else:
+        archive_path = Zotify.CONFIG.get_song_archive_location()
+        disabled = Zotify.CONFIG.get_disable_song_archive()
     
     entries = []
-    if Path(archive_path).exists() and not Zotify.CONFIG.get_disable_song_archive():
+    if Path(archive_path).exists() and not disabled:
         with open(archive_path, 'r', encoding='utf-8') as f:
+            # id, date, author, track, filepath (only filename if from legacy archive)
             entries = f.readlines()
+    
+    # TODO compensate for legacy archives only returning filenames instead of full paths
     
     return entries
 
 
-def get_archived_song_ids() -> list[str]:
-    """ Returns list of all-time downloaded track_ids """
-    
-    entries = get_archived_entries()
+def get_archived_song_ids(dir_path: PurePath | None = None) -> list[str]:
+    """ Returns list of downloaded track_ids """
+    entries = get_archived_entries(dir_path)
     track_ids = [entry.strip().split('\t')[0] for entry in entries]
     return track_ids
 
 
-def add_to_song_archive(track_id: str, filename: str, author_name: str, track_name: str) -> None:
+def add_to_song_archive(track_id: str, track_path: PurePath, author_name: str, track_name: str) -> None:
     """ Adds song id to all time installed songs archive """
     
     if Zotify.CONFIG.get_disable_song_archive():
@@ -233,35 +239,22 @@ def add_to_song_archive(track_id: str, filename: str, author_name: str, track_na
     archive_path = Zotify.CONFIG.get_song_archive_location()
     if Path(archive_path).exists():
         with open(archive_path, 'a', encoding='utf-8') as file:
-            file.write(f'{track_id}\t{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t{author_name}\t{track_name}\t{filename}\n')
+            file.write(f'{track_id}\t{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t{author_name}\t{track_name}\t{track_path}\n')
     else:
         with open(archive_path, 'w', encoding='utf-8') as file:
-            file.write(f'{track_id}\t{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t{author_name}\t{track_name}\t{filename}\n')
+            file.write(f'{track_id}\t{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t{author_name}\t{track_name}\t{track_path}\n')
 
 
-def get_directory_song_ids(download_path: str) -> list[str]:
-    """ Gets song ids of songs in directory """
-    
-    track_ids = []
-    hidden_file_path = PurePath(download_path).joinpath('.song_ids')
-    if Path(hidden_file_path).is_file() and not Zotify.CONFIG.get_disable_directory_archives():
-        with open(hidden_file_path, 'r', encoding='utf-8') as file:
-            track_ids.extend([line.strip().split('\t')[0] for line in file.readlines()])
-    
-    return track_ids
-
-
-def add_to_directory_song_archive(track_path: PurePath, track_id: str, author_name: str, track_name: str) -> None:
+def add_to_directory_song_archive(track_id: str, track_path: PurePath, author_name: str, track_name: str) -> None:
     """ Appends song_id to .song_ids file in directory """
     
     if Zotify.CONFIG.get_disable_directory_archives():
         return
     
     hidden_file_path = track_path.parent / '.song_ids'
-    # not checking if file exists because we need an exception
-    # to be raised if something is wrong
+    # should already exist from create_download_directory(), so only append mode
     with open(hidden_file_path, 'a', encoding='utf-8') as file:
-        file.write(f'{track_id}\t{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t{author_name}\t{track_name}\t{track_path.name}\n')
+        file.write(f'{track_id}\t{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t{author_name}\t{track_name}\t{track_path}\n')
 
 
 # Playlist File Utils

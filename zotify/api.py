@@ -533,6 +533,7 @@ class Track(DLContent):
         ]
         
         if Zotify.CONFIG.get_disc_track_totals():
+            if self.album.needs_expansion: self.album.grab_more_children(hide_loader=True) # moved from Query.fetch_extra_metadata()
             replstrset += [{"{total_tracks}",}, {"{total_discs}",},] 
             repl_mds += [self.album.total_tracks, self.album.total_discs]
         
@@ -740,17 +741,14 @@ class Track(DLContent):
         if Zotify.CONFIG.get_always_check_lyrics():
             self.fetch_lyrics(path.parent)
         
-        if Zotify.CONFIG.get_download_parent_album() or Zotify.CONFIG.get_disc_track_totals():
-            # moved from Query.fetch_extra_metadata() since it cannot be done in bulk
-            if self.album.needs_expansion: self.album.grab_more_children()
-        if Zotify.CONFIG.get_download_parent_album() and not self.album._downloading_as_parent:
-            self.album._downloading_as_parent = True
+        if Zotify.CONFIG.get_download_parent_album() and not isinstance(self._parent, Album):
             self.album.download(pbar_stack)
             return
-        
-        if Zotify.CONFIG.get_skip_comp_albums() and self.album and self.album.compilation:
+        elif Zotify.CONFIG.get_skip_comp_albums() and self.album and self.album.compilation:
+            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK FROM COMPILATION ALBUM)')
             return
         elif self.regex_check():
+            # self.regex_check() includes print if regex matched
             return
         
         with Loader(PrintChannel.PROGRESS_INFO, "Preparing download..."):
@@ -760,17 +758,17 @@ class Track(DLContent):
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{rando}_{self.id}.tmp'
             
             path_exists = Path(path).is_file() and Path(path).stat().st_size
-            in_dir_songids = self.id in get_directory_song_ids(path.parent)
+            in_dir_songids = self.id in get_archived_song_ids(path.parent)
             in_global_songids = self.id in get_archived_song_ids()
             Printer.debug("Duplicate Check\n" +\
                          f"File Already Exists: {path_exists}\n" +\
                          f"song_id in Local Archive: {in_dir_songids}\n" +\
                          f"song_id in Global Archive: {in_global_songids}")
             
-            # same track_path, not same song_id, rename the newcomer
+            # same path, not same song_id, rename the newcomer
             if not in_dir_songids and not Zotify.CONFIG.get_disable_directory_archives():
                 path = check_path_dupes(path)
-                path_exists = False # new track_path guaranteed to be unique
+                path_exists = False # new path guaranteed to be unique
         
         if not self.is_playable:
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK IS UNAVAILABLE)')
@@ -781,10 +779,12 @@ class Track(DLContent):
             return
         if in_dir_songids and Zotify.CONFIG.get_skip_existing() and not Zotify.CONFIG.get_disable_directory_archives():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK ALREADY EXISTS)')
+            path = get_archived_entries(path.parent)[get_archived_song_ids().index(self.id)].split("\t")[-1]
             self.mark_downloaded(path)
             return
         if in_global_songids and Zotify.CONFIG.get_skip_previously_downloaded():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK DOWNLOADED PREVIOUSLY)')
+            path = get_archived_entries()[get_archived_song_ids().index(self.id)].split("\t")[-1]
             self.mark_downloaded(path)
             return
         
@@ -820,9 +820,9 @@ class Track(DLContent):
                                                   f'DOWNLOAD TOOK {time_elapsed_dl}' + \
                                                   f' (PLUS {time_elapsed_ffmpeg} CONVERTING)' if time_elapsed_ffmpeg else '')
         if not in_global_songids:
-            add_to_song_archive(self.id, path.name, self.artists[0].name, self.name)
+            add_to_song_archive(self.id, self.filepath, self.artists[0].name, self.name)
         if not in_dir_songids:
-            add_to_directory_song_archive(path, self.id, self.artists[0].name, self.name)
+            add_to_directory_song_archive(self.id, self.filepath, self.artists[0].name, self.name)
 
 
 class Episode(DLContent):
@@ -1099,10 +1099,10 @@ class Album(Container):
         self._preloaded = 50
         self._disable_flag = Zotify.CONFIG.get_show_album_pbar()
         self._regex_flag = Zotify.CONFIG.get_regex_album()
-        self._downloading_as_parent = False
         
         self.url = ALBUM_URL
         self.compilation = 0
+        self.estimated_duration_ms = 0
         self.image_url = ""
         self.label = ""
         self.release_date = ""
@@ -1154,6 +1154,7 @@ class Album(Container):
         elif self.regex_check():
             return
         
+        if self.needs_expansion: self.grab_more_children()
         if Zotify.CONFIG.get_optimized_dl_order():
             tracks = self.tracks
             downloadables = [c for c in self.tracks if c.id]
@@ -1412,7 +1413,21 @@ class Query(Container):
         requested_objs = self.requested_objs
         if Zotify.CONFIG.get_optimized_dl_order():
             downloadables = [c for c in self.subContent if isinstance(c, DLContent) and c.id]
-            downloadables.sort(key=lambda x: x.duration_ms); edge_zip(downloadables)
+            
+            if Zotify.CONFIG.get_download_parent_album():
+                tracks = {t for t in downloadables if isinstance(t, Track) and t.album is not None}
+                albums = {t.album for t in tracks}
+                for album in albums:
+                    album.estimated_duration_ms = int(album.total_tracks) * 195000 # assume 3:15 average track duration
+                downloadables = [i for i in downloadables if not i in tracks]
+                downloadables.extend(albums)
+            
+            def sort_by_dur(item: DLContent | Album) -> int:
+                if isinstance(item, Album):
+                    return item.estimated_duration_ms
+                return item.duration_ms
+            downloadables.sort(key=sort_by_dur)
+            edge_zip(downloadables)
         else:
             downloadables = []
             for cats in self.requested_objs: downloadables.extend(cats)
