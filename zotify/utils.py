@@ -375,6 +375,8 @@ def wait_between_downloads() -> None:
         Printer.hashtaged(PrintChannel.DOWNLOADS, f'PAUSED: WAITING FOR {waittime} SECONDS BETWEEN DOWNLOADS')
     sleep(waittime)
 
+def isoformat_sanitize(dts: str) -> str:
+    return dts.replace("Z", "+00:00")
 
 # Song Archive Utils
 def get_archived_entries() -> list[str]:

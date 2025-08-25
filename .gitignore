@@ -155,3 +155,5 @@ Zotify\ Podcasts/
 
 # Testing
 debug.py
+credentials.json
+uv.lock
