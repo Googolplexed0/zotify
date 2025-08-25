@@ -86,7 +86,7 @@ def download_episode(episode_id, pbar_stack: list | None = None) -> None:
     
     with Loader(PrintChannel.PROGRESS_INFO, "Preparing download..."):
         filename = f"{podcast_name} - {episode_name}"
-        episode_path = PurePath(Zotify.CONFIG.get_root_podcast_path()) / podcast_name / f"{filename}.tmp"
+        episode_path = PurePath(Zotify.CONFIG.get_root_podcast_path()) / podcast_name / f"{filename}"
         create_download_directory(episode_path.parent)
         
         (raw, resp) = Zotify.invoke_url(PARTNER_URL + episode_id + '"}&extensions=' + PERSISTED_QUERY)
@@ -101,15 +101,21 @@ def download_episode(episode_id, pbar_stack: list | None = None) -> None:
                                                      f'Episode_ID: {str(episode_id)}')
                 wait_between_downloads(); return
             
-            episode_path_exists = False
+            episode_exists_on_filesystem = False
             total_size: int = stream.input_stream.size
-            for episode_file_match in Path(episode_path.parent).glob(episode_path.stem + ".*", case_sensitive=True):
-                episode_path_exists = episode_file_match.stat().st_size == total_size
-                if episode_path_exists: break
-            if episode_path_exists and Zotify.CONFIG.get_skip_existing():
-                Printer.hashtaged(PrintChannel.SKIPPING, f'"{podcast_name} - {episode_name}" (EPISODE ALREADY EXISTS)')
+            for extension_list_item in set(EXT_MAP.values()):
+                test_episode_path = Path(episode_path).with_suffix("." + extension_list_item)
+                if test_episode_path.is_file():
+                    Printer.debug(f"FILE EXISTS: {test_episode_path}")
+                    Printer.debug(f"FILE SIZE: {test_episode_path.stat().st_size } STREAM SIZE: {total_size}")                    
+                    if test_episode_path.stat().st_size >= (total_size - 1024) and Zotify.CONFIG.get_skip_existing(): # Final file sizes can be slightly smaller than reported stream size.  Check that it's within a kilobyte
+                        Printer.hashtaged(PrintChannel.SKIPPING, f'"{podcast_name} - {episode_name}" (EPISODE ALREADY EXISTS)')
+                        episode_exists_on_filesystem = True
+                        break
+            if episode_exists_on_filesystem == True:
                 wait_between_downloads(); return
-            
+
+            episode_path = Path(episode_path).with_suffix(".tmp")            
             time_start = time.time()
             downloaded = 0
             pos, pbar_stack = Printer.pbar_position_handler(1, pbar_stack)
