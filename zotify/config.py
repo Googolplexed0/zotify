@@ -210,6 +210,9 @@ class Config:
         # Check no-splash
         if args.no_splash:
             cls.Values[PRINT_SPLASH] = False
+        
+        # Check update_archive
+        cls.Values[UPDATE_ARCHIVE] = cls.debug() or args.update_archive or args.verify_library
     
     @classmethod
     def get_default_json(cls) -> dict:
@@ -564,6 +567,14 @@ class Config:
     @classmethod
     def get_optimized_dl_order(cls) -> bool:
         return cls.get(OPTIMIZED_DOWNLOADING)
+    
+    @classmethod
+    def get_upgrade_legacy_archive(cls) -> bool:
+        return cls.get(UPDATE_ARCHIVE)
+    
+    @classmethod
+    def set_stop_upgrade_legacy_archive(cls) -> None:
+        cls.Values[UPDATE_ARCHIVE] = False
 
 
 class Zotify:

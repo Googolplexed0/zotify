@@ -434,12 +434,17 @@ class Track(DLContent):
         """ Compares metadata in self (just fetched) against metadata on file (at self.filepath),
         returns Truthy value if discrepancy is found """
         
-        reliable_tags = (conv_artist_format(self.artists), conv_genre_format(self.genres), self.name, self.album, 
-                         conv_artist_format(self.album.artists), self.album.year, self.disc_number, self.track_number)
-        unreliable_tags = (self.id,
-                           self.album.total_tracks if Zotify.CONFIG.get_disc_track_totals() else None,
-                           self.album.total_discs if Zotify.CONFIG.get_disc_track_totals() else None, 
-                           self.album.compilation, self.lyrics)
+        reliable_tags = (
+            conv_artist_format(self.artists), conv_genre_format(self.genres), self.name, self.album.name, 
+            conv_artist_format(self.album.artists), self.album.year, self.disc_number, self.track_number
+            )
+        unreliable_tags = {
+            TOTALTRACKS: self.album.total_tracks if Zotify.CONFIG.get_disc_track_totals() else None,
+            TOTALDISCS: self.album.total_discs if Zotify.CONFIG.get_disc_track_totals() else None, 
+            COMPILATION: self.album.compilation,
+            LYRICS: self.lyrics,
+            "trackid": self.id,
+            }
         reliable_tags_onfile, unreliable_tags_onfile = self.get_audio_tags()
         
         mismatches = []
@@ -465,14 +470,16 @@ class Track(DLContent):
                 return True
         
         # stickler check for unreliable tags
-        for i in range(len(unreliable_tags)):
-            if isinstance(unreliable_tags[i], list) and isinstance(unreliable_tags_onfile[i], list):
+        for tag in unreliable_tags:
+            if tag not in unreliable_tags_onfile:
+                mismatches.append({tag: (unreliable_tags[tag], None)})
+                continue
+            t1 = unreliable_tags[tag]; t2 = unreliable_tags_onfile[tag]
+            if isinstance(t1, list) and isinstance(t2, list):
                 # do not sort lyrics, since order matters
-                if unreliable_tags[i] != unreliable_tags_onfile[i]:
-                    mismatches.append( (unreliable_tags[i], unreliable_tags_onfile[i]) )
+                if t1 != t2: mismatches.append({tag: (t1, t2)})
             else:
-                if str(unreliable_tags[i]) != str(unreliable_tags_onfile[i]):
-                    mismatches.append( (unreliable_tags[i], unreliable_tags_onfile[i]) )
+                if str(t1) != str(t2): mismatches.append({tag: (t1, t2)})
         
         return mismatches
     
@@ -599,7 +606,7 @@ class Track(DLContent):
         except ValueError:
             Printer.hashtaged(PrintChannel.SKIPPING, f'LYRICS FOR "{self.printing_label}" (LYRICS NOT AVAILABLE)')
     
-    def get_audio_tags(self):
+    def get_audio_tags(self) -> tuple[tuple, dict]:
         tags = music_tag.load_file(self.filepath)
         
         artists = conv_artist_format(tags[ARTIST].values)
@@ -614,15 +621,16 @@ class Track(DLContent):
         unreliable_tags = [TOTALTRACKS, TOTALDISCS, COMPILATION, LYRICS]
         custom_tags = ["trackid"]
         if self.filepath.suffix.lower() == ".mp3":
-            custom_tags = [MP3_CUSTOM_TAG_PREFIX + tag.upper() for tag in custom_tags]
+            formatted_custom_tags = [MP3_CUSTOM_TAG_PREFIX + tag.upper() for tag in custom_tags]
         elif self.filepath.suffix.lower() == ".m4a":
-            custom_tags = [M4A_CUSTOM_TAG_PREFIX + tag for tag in custom_tags]
-        unreliable_tags.extend(custom_tags)
+            formatted_custom_tags = [M4A_CUSTOM_TAG_PREFIX + tag for tag in custom_tags]
+        else:
+            formatted_custom_tags = custom_tags.copy()
+        taglabels = unreliable_tags + formatted_custom_tags
         
-        # Printer.debug(tags.mfile.tags.__dict__)
         tag_dict = dict(tags.mfile.tags)
-        utag_vals = []
-        for utag in unreliable_tags:
+        # Printer.debug(tags.mfile.tags.__dict__)
+        def fetch_unreliable_tag(utag: str):
             val = None
             fetch_method = "legit"
             try:
@@ -648,10 +656,15 @@ class Track(DLContent):
             else:
                 val = val[0] if isinstance(val, (list, tuple)) and len(val) == 1 else val
                 val = val if val else None
-            # Printer.debug(f"{fetch_method} {utag}", val)
-            utag_vals.append(val)
-            return (artists, genres, track_name, album_name, album_artist, release_year, disc_number, track_number), \
-                   tuple(utag_vals)
+            Printer._logger(f"{fetch_method} {utag} {val}", PrintChannel.DEBUG)
+            return val
+        
+        utag_vals = {}
+        for i, utag in enumerate(unreliable_tags + custom_tags):
+            utag_vals[utag] = fetch_unreliable_tag(taglabels[i])
+        
+        return (artists, genres, track_name, album_name, album_artist, release_year, disc_number, track_number), \
+                utag_vals
     
     def set_audio_tags(self, path: PurePath):
         
@@ -820,9 +833,9 @@ class Track(DLContent):
                                                   f'DOWNLOAD TOOK {time_elapsed_dl}' + \
                                                   f' (PLUS {time_elapsed_ffmpeg} CONVERTING)' if time_elapsed_ffmpeg else '')
         if not in_global_songids:
-            add_to_song_archive(self.id, self.filepath, self.artists[0].name, self.name)
+            add_track_to_song_archive(self)
         if not in_dir_songids:
-            add_to_directory_song_archive(self.id, self.filepath, self.artists[0].name, self.name)
+            add_track_to_song_archive(self, self.filepath.parent)
 
 
 class Episode(DLContent):
@@ -1348,8 +1361,11 @@ class Query(Container):
                     url = f"{ARTIST_URL}?{MARKET_APPEND}&{BULK_APPEND}"
                     artist_resps = Zotify.invoke_url_bulk(url, list(artist_ids.keys()), ARTISTS, ITEM_FETCH[Artist])
                     for artist_resp in artist_resps:
-                        artist_ids[artist_resp[ID]].parse_metadata(artist_resp)
-                        artist_ids[artist_resp[ID]].needs_expansion = False
+                        artist = artist_ids[artist_resp[ID]]
+                        artist.parse_metadata(artist_resp); artist.needs_expansion = False
+                        for sib in artist._siblings:
+                            if not sib.hasMetadata:
+                                sib.parse_metadata(artist_resp); sib.needs_expansion = False
             for track in alltracks:
                 genres: list[str] = [*set.union(*[set(artist.genres) for artist in track.artists])]
                 genres.sort()
@@ -1605,13 +1621,13 @@ class VerifyLibrary(Query):
         # ONLY WORKS WITH ARCHIVED TRACKS (THEORETICALLY GUARANTEES BULK_URL TO WORK)
         archived_tracks = get_archived_entries()
         archived_ids = [entry.strip().split('\t')[0] for entry in archived_tracks]
-        archived_filenames = [PurePath(entry.strip().split('\t')[4]).stem for entry in archived_tracks]
+        archived_filenames_or_paths = [PurePath(entry.strip().split('\t')[4]).stem for entry in archived_tracks]
         
         verifiable_tracks: list[Track] = []
         library = walk_directory_for_tracks(Zotify.CONFIG.get_root_path())
         for entry in library:
-            if entry.stem in archived_filenames:
-                track: Track = self.create_linked_obj(Track, archived_ids[archived_filenames.index(entry.stem)])
+            if entry.stem in archived_filenames_or_paths:
+                track: Track = self.create_linked_obj(Track, archived_ids[archived_filenames_or_paths.index(entry.stem)])
                 track.filepath = PurePath(entry)
                 verifiable_tracks.append(track)
         
@@ -1623,6 +1639,7 @@ class VerifyLibrary(Query):
     def execute(self):
         self.parse_direct_metadata(*self.create_fetch_verifiable_tracks())
         self.fetch_extra_metadata()
+        self.requested_objs = self.requested_objs[0] # remove outer layer used in Querey
         pbar: list[Track]
         pbar, pbar_stack = self.create_pbar()
         for child in pbar:

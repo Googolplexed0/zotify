@@ -61,7 +61,12 @@ def main():
                         help='Enable debug mode, prints extra information and creates a `config_DEBUG.json` file')
     parser.add_argument('--update-config',
                         action='store_true',
+                        dest='update_config',
                         help='Updates the `config.json` file while keeping all current settings unchanged')
+    parser.add_argument('--update-archive',
+                        action='store_true',
+                        dest='update_archive',
+                        help='Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged')
     
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument('urls',
