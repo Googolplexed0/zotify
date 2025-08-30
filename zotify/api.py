@@ -1561,7 +1561,7 @@ class UserPlaylists(Query):
     def fetch_user_playlists_display(self) -> list[None | dict]:
         user_playlist_resps = Zotify.invoke_url_nextable(self.url)
         display_list = [[i+1, str(p[NAME])] for i, p in enumerate(user_playlist_resps)]
-        Printer.table("PLAYLISTS", ('ID', 'Name'), [[0, "ALL PLAYLISTS"]].extend(display_list))
+        Printer.table("PLAYLISTS", ('ID', 'Name'), [[0, "ALL PLAYLISTS"]] + display_list)
         return [None] + user_playlist_resps
     
     def select_user_playlists(self, user_playlist_resps: list[None | dict]) -> tuple[list[list[Artist]], list[list[dict]]]:
