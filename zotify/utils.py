@@ -143,8 +143,12 @@ def unconv_artist_format(artists: list[str] | str) -> list[str]:
 
 def conv_artist_format(artists: list, FORCE_NO_LIST: bool = False) -> list[str] | str:
     """ Returns converted artist format """
+    
     from zotify.api import Artist
     artists: list[Artist] | list[str] = artists
+    if not artists:
+        return ""
+    
     artist_names = [a.name for a in artists] if isinstance(artists[0], Artist) else artists
     if Zotify.CONFIG.get_artist_delimiter() == "":
         # if len(artist_names) == 1:
@@ -156,6 +160,10 @@ def conv_artist_format(artists: list, FORCE_NO_LIST: bool = False) -> list[str] 
 
 def conv_genre_format(genres: list[str]) -> list[str] | str:
     """ Returns converted genre format """
+    
+    if not genres:
+        return ""
+    
     if not Zotify.CONFIG.get_all_genres():
         return genres[0]
     
