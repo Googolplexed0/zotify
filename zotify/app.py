@@ -48,7 +48,7 @@ def client(args: Namespace) -> None:
     elif args.liked_songs:
         LikedSongs(Zotify.DATETIME_LAUNCH).execute()
     
-    elif args.playlist: 
+    elif args.playlist:
         UserPlaylists(Zotify.DATETIME_LAUNCH).execute()
     
     elif args.followed_artists:

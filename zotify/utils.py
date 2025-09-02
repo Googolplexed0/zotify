@@ -175,6 +175,11 @@ def conv_genre_format(genres: list[str]) -> list[str] | str:
         return Zotify.CONFIG.get_genre_delimiter().join(genres)
 
 
+def pct_error(act: float | int, expct: float | int) -> float:
+    act = float(act); expct = float(expct)
+    return abs(act - expct) / expct
+
+
 # Time Utils
 def fmt_duration(duration: float | int, unit_conv: tuple[int] = (60, 60), connectors: tuple[str] = (":", ":"), smallest_unit: str = "s", ALWAYS_ALL_UNITS: bool = False) -> str:
     """ Formats a duration to a time string, defaulting to seconds -> hh:mm:ss format """

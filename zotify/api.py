@@ -6,7 +6,6 @@ import requests
 import shutil
 import subprocess
 import uuid
-from librespot.metadata import TrackId, EpisodeId
 from tqdm.auto import tqdm
 
 from zotify import __version__
@@ -16,7 +15,7 @@ from zotify.utils import *
 
 
 def fetch_search_display(search_term: str) -> list[str]:
-    params = {LIMIT: '10',
+    params = {LIMIT: Zotify.CONFIG.get_search_query_size(),
               OFFSET: '0',
               'q': search_term,
               TYPE: 'track,album,artist,playlist'}
@@ -331,6 +330,17 @@ class DLContent(Content):
         
         return duration
     
+    def get_audio_codec(self, path: PurePath) -> str:
+        ff_m = ffmpy.FFprobe(
+            global_options=['-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'],
+            inputs={path: ["-show_entries", "stream=codec_name"]},
+        )
+        stdout, stderr = ff_m.run(stdout=subprocess.PIPE)
+        loggable_output = [stdout.decode() if stdout else "",
+                           stderr.decode() if stderr else ""]
+        Printer._logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
+        return stdout.decode().strip().split("=")[1].split("\r")[0].split("\n")[0]
+    
     def convert_audio_format(self, temppath: PurePath, path: PurePath) -> str | None:
         file_codec = self._codecs.get(Zotify.CONFIG.get_download_format().lower(), 'copy')
         output_params = ['-c:a', file_codec]
@@ -347,30 +357,47 @@ class DLContent(Content):
                 bitrate = bitrate_presets.get(Zotify.CONFIG.get_download_quality(), bitrate_presets["auto"])
             output_params += ['-b:a', bitrate]
         
-        time_ffmpeg_start = time.time()
-        try:
-            ff_m = ffmpy.FFmpeg(
+        def run_ffmpeg(output_params: list[str], error_str: str) -> float | Exception:
+            try:
+                ff_m = ffmpy.FFmpeg(
                 global_options=['-y', '-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'],
                 inputs={temppath: None},
                 outputs={path: output_params}
-            )
-            stdout, _ = ff_m.run(stdout=subprocess.PIPE)
-            Printer._logger(stdout.decode(), PrintChannel.DEBUG)
-            
-            if Path(temppath).exists():
-                Path(temppath).unlink()
-            
-            time_ffmpeg_end = time.time()
-            time_elapsed_ffmpeg = fmt_duration(time_ffmpeg_end - time_ffmpeg_start)
-        except Exception as e:
-            if isinstance(e, ffmpy.FFExecutableNotFoundError):
-                reason = 'FFMPEG NOT FOUND\n'
-            else:
-                reason = str(e) + "\n"
-            Printer.hashtaged(PrintChannel.WARNING, reason + f'SKIPPING CONVERSION TO {file_codec.upper()}')
-            time_elapsed_ffmpeg = None
+                )
+                
+                stdout, stderr = ff_m.run(stdout=subprocess.PIPE)
+                loggable_output = [stdout.decode() if stdout else "",
+                                   stderr.decode() if stderr else ""]
+                Printer._logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
+                
+                if Path(temppath).exists():
+                    Path(temppath).unlink()
+                
+                return time.time()
+                
+            except Exception as e:
+                if isinstance(e, ffmpy.FFExecutableNotFoundError):
+                    Printer.hashtaged(PrintChannel.WARNING,  'FFMPEG NOT FOUND\n' +\
+                                                            f'SKIPPING CONVERSION TO {file_codec.upper()}')
+                else:
+                    Printer.hashtaged(PrintChannel.WARNING, str(e) + "\n" + error_str)
+                return e
         
-        return time_elapsed_ffmpeg
+        time_ffmpeg_start = time.time(); time_ffmpeg_end = None
+        
+        custom_ffmpeg_args = Zotify.CONFIG.get_custom_ffmpeg_args()
+        if custom_ffmpeg_args:
+            customized_output_params = custom_ffmpeg_args if file_codec == 'copy' else output_params + custom_ffmpeg_args
+            time_ffmpeg_end = run_ffmpeg(customized_output_params, 'CUSTOM FFMPEG ARGUMENTS FAILED')
+            if isinstance(time_ffmpeg_end, ffmpy.FFExecutableNotFoundError):
+                return
+        
+        if time_ffmpeg_end is None or isinstance(time_ffmpeg_end, Exception):
+            time_ffmpeg_end = run_ffmpeg(output_params, f'SKIPPING CONVERSION TO {file_codec.upper()}')
+            if isinstance(time_ffmpeg_end, Exception):
+                return
+        
+        return fmt_duration(time_ffmpeg_end - time_ffmpeg_start)
 
 
 class Track(DLContent):
@@ -770,6 +797,14 @@ class Track(DLContent):
                 rando = str(uuid.uuid4())
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{rando}_{self.id}.tmp'
             
+            # TODO: early get_content_stream() -> stricter path_exists check BUT extra internal API calls
+            # stream = Zotify.get_content_stream(self)
+            # if stream is None:
+            #     Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +\
+            #                                          f'Track_ID: {self.id}')
+            #     return
+            # path_exists = Path(path).is_file() and pct_error(Path(path).stat().st_size, stream.input_stream.size) <= 0.1
+            
             path_exists = Path(path).is_file() and Path(path).stat().st_size
             in_dir_songids = self.id in get_archived_song_ids(path.parent)
             in_global_songids = self.id in get_archived_song_ids()
@@ -801,7 +836,7 @@ class Track(DLContent):
             self.mark_downloaded(path)
             return
         
-        stream = Zotify.get_content_stream(TrackId.from_base62(self.id), Zotify.DOWNLOAD_QUALITY)
+        stream = Zotify.get_content_stream(self)
         if stream is None:
             Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +\
                                                  f'Track_ID: {self.id}')
@@ -925,8 +960,17 @@ class Episode(DLContent):
             requested_path = self.fill_output_template()
             path = requested_path.with_suffix(".tmp")
             
+            # TODO: early get_content_stream() -> stricter path_exists check BUT extra internal API calls
+            # TODO: needs to account for both download_directly() and fetch_contet_stream() cases
+            # stream = Zotify.get_content_stream(self)
+            # if stream is None:
+            #     Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +\
+            #                                          f'Track_ID: {self.id}')
+            #     return
+            
             path_exists = False # file suffix agnostic
             for file_match in Path(path.parent).glob(path.stem + ".*", case_sensitive=True):
+                # if pct_error(Path(path).stat().st_size, stream.input_stream.size) <= 0.1:
                 if file_match.stat().st_size:
                     path_exists = True
                     break
@@ -938,7 +982,7 @@ class Episode(DLContent):
             direct_download_url = resp[DATA][EPISODE][AUDIO][ITEMS][-1][URL]
         
         if "anon-podcast.scdn.co" in direct_download_url or "audio_preview_url" not in resp:
-            stream = Zotify.get_content_stream(EpisodeId.from_base62(self.id), Zotify.DOWNLOAD_QUALITY)
+            stream = Zotify.get_content_stream(self)
             if stream is None:
                 Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING EPISODE - FAILED TO GET CONTENT STREAM\n' +\
                                                      f'Episode_ID: {self.id}')
@@ -960,13 +1004,7 @@ class Episode(DLContent):
         
         try:
             with Loader(PrintChannel.PROGRESS_INFO, "Identifying episode audio codec..."):
-                ff_m = ffmpy.FFprobe(
-                    global_options=['-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'],
-                    inputs={path: ["-show_entries", "stream=codec_name"]},
-                )
-                stdout, _ = ff_m.run(stdout=subprocess.PIPE)
-                Printer._logger(stdout.decode(), PrintChannel.DEBUG)
-                codec = stdout.decode().strip().split("=")[1].split("\r")[0].split("\n")[0]
+                codec = self.get_audio_codec(path)
                 
                 path_codec = path.with_suffix("." + {EXT_MAP.get(codec, codec)})
                 if Path(path_codec).exists():

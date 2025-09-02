@@ -125,6 +125,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `DOWNLOAD_FORMAT`            | `--codec`, `--download-format`      | Audio codec of downloads, copy avoids remuxing (aac, fdk_aac, mp3, ogg, opus, vorbis)    | copy          |
 | `DOWNLOAD_QUALITY`           | `-q`, `--download-quality`          | Audio quality of downloads, auto selects highest available (normal, high, very_high*)    | auto          |
 | `TRANSCODE_BITRATE`          | `-b`, `--bitrate`                   | Overwrite the bitrate for FFMPEG encoding (not recommended)                              |               |
+| `CUSTOM_FFMEPG_ARGS`         | `--custom-ffmpeg-args`              | Additional FFMPEG functions or filters to apply to downloaded audio (space delimited)    |  `""`         |
 
 | Archive Options              | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
@@ -162,9 +163,9 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 
 | API Options                  | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
+| `SEARCH_QUERY_SIZE`          | `--search-query-size`               | Number of items to fetch per category when performing a search               | 10                        |
 | `RETRY_ATTEMPTS`             | `--retry-attempts`                  | Number of times to retry failed API requests                                 | 1                         |
 | `CHUNK_SIZE`                 | `--chunk-size`                      | Chunk size for downloading                                                   | 20000                     |
-| `OAUTH_ADDRESS`              | `--redirect-uri`                    | Local server address listening for OAuth login requests                      | 0.0.0.0                   |
 | `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests                                | 127.0.0.1                 |
 
 | Terminal & Logging Options   | Command Line Config Flag            | Description                                                                  | Default Value             |
@@ -254,6 +255,20 @@ You can add multiple patterns into a single regex by chaining the "or" construct
 ### Example Regex Values
 
 Check for Live Performances   :   `^.*?\\(?(?:Live|Live (?:from|in|at) .*?)\\)?$`
+
+## FFMPEG Argument Formatting
+
+With `CUSTOM_FFMEPG_ARGS` (or the commandline parameter `--custom-ffmpeg-args`), you can specify additional audio processing functions to be applied to downloaded audio files. To understand available FFMPEG options and filtergraphs, see the [FFMPEG Documentation](https://ffmpeg.org/ffmpeg.html#Audio-Options) and [FFMPEG Filters Documentation](https://ffmpeg.org/ffmpeg-filters.html#Audio-Filters). Make sure to escape any extra quotes `"` used in the Regex, as the argument parser expects a single string of space-delimited key-value pairs.
+
+### Example FFMPEG Argument Values
+
+Increase Volume by 50%                                :   `"-af volume=1.5"`
+
+Decrease Volume by 50% for the First 30 Seconds       :   `"-af volume=0.5:enable='between(t,0,30)'"`
+
+Slow Audio Tempo to 60% (pitch/frequency unaffected)  :   `"-af atempo=0.6"`
+
+Increase Volume and Tempo by 50%                      :   `"-af volume=1.5,atempo=1.5"`
 
 ## Docker Usage
 

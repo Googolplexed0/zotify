@@ -8,6 +8,7 @@ import requests
 from librespot.audio.decoders import VorbisOnlyAudioQuality, AudioQuality
 from librespot.core import Session, OAuth
 from librespot.mercury import MercuryRequests
+from librespot.metadata import TrackId, EpisodeId
 from librespot.proto.Authentication_pb2 import AuthenticationType
 from pathlib import Path, PurePath
 from time import sleep
@@ -62,6 +63,7 @@ CONFIG_VALUES = {
     DOWNLOAD_FORMAT:            { 'default': 'copy',                    'type': str,    'arg': ('--codec', '--download-format'           ,) },
     DOWNLOAD_QUALITY:           { 'default': 'auto',                    'type': str,    'arg': ('-q', '--download-quality'               ,) },
     TRANSCODE_BITRATE:          { 'default': 'auto',                    'type': str,    'arg': ('-b', '--bitrate', '--transcode-bitrate' ,) },
+    CUSTOM_FFMEPG_ARGS:         { 'default': '',                        'type': str,    'arg': ('--custom-ffmpeg-args'                   ,) },
     
     # Archive Options
     SONG_ARCHIVE_LOCATION:      { 'default': '',                        'type': str,    'arg': ('--song-archive-location'                ,) },
@@ -95,6 +97,7 @@ CONFIG_VALUES = {
     ALBUM_ART_JPG_FILE:         { 'default': 'False',                   'type': bool,   'arg': ('--album-art-jpg-file'                   ,) },
     
     # API Options
+    SEARCH_QUERY_SIZE:          { 'default': '10',                      'type': str,    'arg': ('--search-query-size'                    ,) },
     RETRY_ATTEMPTS:             { 'default': '1',                       'type': int,    'arg': ('--retry-attempts'                       ,) },
     CHUNK_SIZE:                 { 'default': '20000',                   'type': int,    'arg': ('--chunk-size'                           ,) },
     REDIRECT_ADDRESS:           { 'default': '127.0.0.1',               'type': str,    'arg': ('--redirect-address'                     ,) },
@@ -575,6 +578,17 @@ class Config:
     @classmethod
     def set_stop_upgrade_legacy_archive(cls) -> None:
         cls.Values[UPDATE_ARCHIVE] = False
+    
+    @classmethod
+    def get_search_query_size(cls) -> str:
+        size = cls.get(SEARCH_QUERY_SIZE)
+        return size if size else "10"
+    
+    @classmethod
+    def get_custom_ffmpeg_args(cls) -> list[str]:
+        argstr: str = cls.get(CUSTOM_FFMEPG_ARGS)
+        ffmpeg_args = argstr.split()
+        return ffmpeg_args
 
 
 class Zotify:
@@ -596,7 +610,9 @@ class Zotify:
         'high': AudioQuality.HIGH,
         'very_high': AudioQuality.VERY_HIGH
         }
-        Zotify.DOWNLOAD_QUALITY = quality_options.get(Zotify.CONFIG.get_download_quality(), quality_options["auto"])
+        preference = quality_options.get(Zotify.CONFIG.get_download_quality(), quality_options["auto"])
+        Zotify.DOWNLOAD_QUALITY = VorbisOnlyAudioQuality(preference)
+        
         Printer.debug("Session Initialized Successfully")
     
     @classmethod
@@ -636,9 +652,19 @@ class Zotify:
         return
     
     @classmethod
-    def get_content_stream(cls, content_id, quality):
+    def get_content_stream(cls, content):
+        from zotify.api import DLContent, Track, Episode
+        content: DLContent = content
+        
+        if isinstance(content, Track):
+            content_id = TrackId.from_base62(content.id)
+        elif isinstance(content, Episode):
+            content_id = EpisodeId.from_base62(content.id)
+        else:
+            return
+        
         try:
-            return cls.SESSION.content_feeder().load(content_id, VorbisOnlyAudioQuality(quality), False, None)
+            return cls.SESSION.content_feeder().load(content_id, Zotify.DOWNLOAD_QUALITY, False, None)
         except RuntimeError as e:
             if 'Failed fetching audio key!' in e.args[0]:
                 gid, fileid = e.args[0].split('! ')[1].split(', ')
