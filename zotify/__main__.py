@@ -123,12 +123,7 @@ def main():
     parser.set_defaults(func=client)
     
     args = parser.parse_args()
-    try:
-        args.func(args)
-        print("\n")
-    except BaseException:
-        print("\n")
-        raise
+    args.func(args)
 
 
 if __name__ == '__main__':

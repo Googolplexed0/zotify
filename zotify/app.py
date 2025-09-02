@@ -31,36 +31,45 @@ def client(args: Namespace) -> None:
     Zotify(args)
     Printer.splash()
     
-    if args.file_of_urls or args.urls:
-        urls = ""
-        if args.file_of_urls:
-            if Path(args.file_of_urls).exists():
-                with open(args.file_of_urls, 'r', encoding='utf-8') as file:
-                    urls = " ".join([line.strip() for line in file.readlines()])
-            else:
-                Printer.hashtaged(PrintChannel.ERROR, f'FILE {args.file_of_urls} NOT FOUND')
-        elif args.urls:
-            urls: str = args.urls
+    exc = None
+    try:
+        if args.file_of_urls or args.urls:
+            urls = ""
+            if args.file_of_urls:
+                if Path(args.file_of_urls).exists():
+                    with open(args.file_of_urls, 'r', encoding='utf-8') as file:
+                        urls = " ".join([line.strip() for line in file.readlines()])
+                else:
+                    Printer.hashtaged(PrintChannel.ERROR, f'FILE {args.file_of_urls} NOT FOUND')
+            elif args.urls:
+                urls: str = args.urls
+            
+            if len(urls) > 0:
+                Query(Zotify.DATETIME_LAUNCH).request(urls).execute()
         
-        if len(urls) > 0:
-            Query(Zotify.DATETIME_LAUNCH).request(urls).execute()
+        elif args.liked_songs:
+            LikedSongs(Zotify.DATETIME_LAUNCH).execute()
+        
+        elif args.playlist:
+            UserPlaylists(Zotify.DATETIME_LAUNCH).execute()
+        
+        elif args.followed_artists:
+            FollowedArtists(Zotify.DATETIME_LAUNCH).execute()
+        
+        elif args.verify_library:
+            VerifyLibrary(Zotify.DATETIME_LAUNCH).execute()
+        
+        elif args.search:
+            search_and_select(args.search)
+        
+        else:
+            search_and_select()
     
-    elif args.liked_songs:
-        LikedSongs(Zotify.DATETIME_LAUNCH).execute()
+    except BaseException as e:
+        exc = e
     
-    elif args.playlist:
-        UserPlaylists(Zotify.DATETIME_LAUNCH).execute()
-    
-    elif args.followed_artists:
-        FollowedArtists(Zotify.DATETIME_LAUNCH).execute()
-    
-    elif args.verify_library:
-        VerifyLibrary(Zotify.DATETIME_LAUNCH).execute()
-    
-    elif args.search:
-        search_and_select(args.search)
-    
-    else:
-        search_and_select()
-    
-    Printer.debug(f"Total API Calls: {Zotify.TOTAL_API_CALLS}")
+    finally:
+        Printer.debug(f"Total API Calls: {Zotify.TOTAL_API_CALLS}")
+        Zotify.cleanup()
+        print("\n")
+        if exc: raise exc

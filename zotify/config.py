@@ -199,7 +199,8 @@ class Config:
             logging.basicConfig(level=logging.DEBUG, filemode="x", filename=logfile)
             cls.logger = logging.getLogger("zotify.debug")
         else:
-            logging.basicConfig(level=logging.CRITICAL)
+            logfile = PurePath(cls.get_root_path()/f"zotify_{Zotify.DATETIME_LAUNCH}.log")
+            logging.basicConfig(level=logging.CRITICAL, filemode="x", filename=logfile)
             # mutedLoggers = {"Librespot:Session", "Librespot:AudioKeyManager", "librespot.audio", "Librespot:CdnManager"}
             # for logger in mutedLoggers:
             #     logging.getLogger(logger).disabled = True
@@ -675,13 +676,13 @@ class Zotify:
                 raise e
     
     @classmethod
-    def __get_auth_token(cls):
+    def __get_auth_token(cls) -> str:
         return cls.SESSION.tokens().get_token(
             USER_READ_EMAIL, PLAYLIST_READ_PRIVATE, USER_LIBRARY_READ, USER_FOLLOW_READ
         ).access_token
     
     @classmethod
-    def get_auth_header(cls):
+    def get_auth_header(cls) -> str:
         return {
             'Authorization': f'Bearer {cls.__get_auth_token()}',
             'Accept-Language': f'{cls.CONFIG.get_language()}',
@@ -725,7 +726,7 @@ class Zotify:
         return responsetext, responsejson
     
     @classmethod
-    def invoke_url_with_params(cls, url, limit, offset, **kwargs):
+    def invoke_url_with_params(cls, url, limit, offset, **kwargs) -> dict:
         params = {LIMIT: limit, OFFSET: offset}
         params.update(kwargs)
         
@@ -758,3 +759,18 @@ class Zotify:
     @classmethod
     def check_premium(cls) -> bool:
         return (cls.SESSION.get_user_attribute(TYPE) == PREMIUM)
+    
+    @classmethod
+    def cleanup(cls) -> None:
+        logging.shutdown()
+        
+        # delete non-debug logfiles if empty (no critical errors)
+        logfile = Path(Zotify.CONFIG.get_root_path()/f"zotify_{Zotify.DATETIME_LAUNCH}.log")
+        if logfile.exists():
+            with open(logfile) as file:
+                lines = file.readlines()
+            if not lines:
+                logfile.unlink()
+        
+        for tempfile in Path(Zotify.CONFIG.get_root_path()).glob("**.tmp"):
+            tempfile.unlink()
