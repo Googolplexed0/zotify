@@ -288,7 +288,17 @@ def get_archived_song_ids(dir_path: PurePath | None = None) -> list[str]:
     return track_ids
 
 
-def add_track_to_song_archive(track, dir_path: PurePath | None = None) -> None:
+def add_to_archive(item_id: str, timestamp: str, author_name: str, item_name: str, item_path: PurePath, 
+                   archive_path: PurePath, mode: str) -> None:
+    """ Adds item record to the song archive at archive_path """
+    
+    if not timestamp:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(archive_path, mode, encoding='utf-8') as file:
+        file.write(f'{item_id}\t{timestamp}\t{author_name}\t{item_name}\t{item_path}\n')
+
+
+def add_obj_to_song_archive(obj, dir_path: PurePath | None = None) -> None:
     if dir_path:
         disabled = Zotify.CONFIG.get_disable_directory_archives()
         archive_path = dir_path / '.song_ids'
@@ -301,20 +311,12 @@ def add_track_to_song_archive(track, dir_path: PurePath | None = None) -> None:
     if disabled:
         return
     
-    from zotify.api import Track
-    track: Track = track
-    add_to_archive(track.id, "", track.artists[0].name, track.name, track.filepath,
+    from zotify.api import Track, Episode
+    obj: Track | Episode = obj
+    author_name = obj.artists[0].name if isinstance(obj, Track) else obj.show.publisher
+    item_name = obj.name if isinstance(obj, Track) else obj.printing_label
+    add_to_archive(obj.id, "", author_name, item_name, obj.filepath,
                    archive_path, mode)
-
-
-def add_to_archive(item_id: str, timestamp: str, author_name: str, item_name: str, item_path: PurePath, 
-                   archive_path: PurePath, mode: str) -> None:
-    """ Adds item record to the song archive at archive_path """
-    
-    if not timestamp:
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(archive_path, mode, encoding='utf-8') as file:
-        file.write(f'{item_id}\t{timestamp}\t{author_name}\t{item_name}\t{item_path}\n')
 
 
 # Playlist File Utils

@@ -277,7 +277,6 @@ class Config:
             if root_podcast_path[0] == ".":
                 root_podcast_path = cls.get_root_path() / PurePath(root_podcast_path).relative_to(".")
             root_podcast_path = PurePath(Path(root_podcast_path).expanduser())
-        Path(root_podcast_path).mkdir(parents=True, exist_ok=True)
         return root_podcast_path
     
     @classmethod
@@ -772,5 +771,6 @@ class Zotify:
             if not lines:
                 logfile.unlink()
         
-        for tempfile in Path(Zotify.CONFIG.get_root_path()).glob("**.tmp"):
-            tempfile.unlink()
+        for dir in (Path(Zotify.CONFIG.get_root_path()), Path(Zotify.CONFIG.get_root_podcast_path())):
+            for tempfile in dir.glob("**.tmp"):
+                    tempfile.unlink()

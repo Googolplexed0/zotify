@@ -104,6 +104,7 @@ USER_SAVED_TRACKS_URL = USER_URL + TRACKS
 LYRICS_URL = 'https://spclient.wg.sp' + 'otify.com/color-lyrics/v2/track/'
 PARTNER_URL = 'https://api-partner.sp' + 'otify.com/pathfinder/v1/query?operationName=getEpisode&variables={"uri":"sp' + 'otify:episode:'
 PERSISTED_QUERY = '{"persistedQuery":{"version":1,"sha256Hash":"224ba0fd89fcfdfb'+'3a15fa2d82a6112d'+'3f4e2ac88fba5c67'+'13de04d1b72cf482"}}'
+STREAMABLE_PODCAST = 'anon-podcast.scdn.co'
 
 # API Scopes
 PLAYLIST_READ_PRIVATE = 'playlist-read-private'
