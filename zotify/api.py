@@ -158,7 +158,7 @@ class Content():
     def _cache_children(self, children: set[Content | Container]):
         childContent = {child for child in children if not isinstance(child, Container)}
         self.query._allContent.update(childContent)
-        if isinstance(self, Container):
+        if all([isinstance(o, Container) for o in self.parent_tree]):
             self.query._subContent.update(childContent)
         childContainers = {child for child in children if isinstance(child, Container)}
         self.query._allContainers.update(childContainers)
@@ -760,7 +760,7 @@ class Track(DLContent):
         
         if Zotify.CONFIG.get_disc_track_totals():
             tags[TOTALTRACKS] = self.album.total_tracks
-            if self.album.total_discs is not None:
+            if self.album.total_discs:
                 tags[TOTALDISCS] = self.album.total_discs
         
         if self.album.compilation:
@@ -807,6 +807,7 @@ class Track(DLContent):
             self.fetch_lyrics(path.parent)
         
         if Zotify.CONFIG.get_download_parent_album() and not isinstance(self._parent, Album):
+            # only called when not get_optimized_dl() since download_parent_album() replaces Tracks with optimized Albums
             self.album.download(pbar_stack)
             return
         elif Zotify.CONFIG.get_skip_comp_albums() and self.album and self.album.compilation:
@@ -1137,7 +1138,7 @@ class Container(Content):
     def create_pbar(self, pbar_stack: list | None = None) -> tuple[list[Content], list]:
         pos, pbar_stack = Printer.pbar_position_handler(7, pbar_stack)
         pbar: list[Content] = Printer.pbar(self.extChildren(), self.name, pos=pos,
-                                           unit=self._unit, disable=not self._disable_flag)
+                                           unit=self._unit, disable=self._disable_flag)
         pbar_stack.append(pbar)
         return pbar, pbar_stack
     
@@ -1277,8 +1278,8 @@ class Album(Container):
         elif self.regex_check():
             return
         
-        if self.needs_expansion: self.grab_more_children()
         if Zotify.CONFIG.get_optimized_dl_order():
+            # only called when get_download_parent_album() since get_optimized_dl() typically bypasses Containers
             tracks = self.tracks
             downloadables = [c for c in self.tracks if c.id]
             downloadables.sort(key=lambda x: x.duration_ms); edge_zip(downloadables)
@@ -1465,25 +1466,26 @@ class Query(Container):
             if not objs:
                 self.requested_objs.append([])
                 continue
+            
             with Loader(PrintChannel.PROGRESS_INFO, f"Parsing {objs[0]._clsn.lower()} information..."):
                 for obj, item_resp in zip(objs, item_resps):
                     obj.parse_metadata(item_resp)
                     if isinstance(obj, Container) and obj.needs_expansion:
-                        obj.grab_more_children()
-                
-                while any({isinstance(obj, Container) and obj.needs_recursion for obj in objs}):
-                    recurs = [o for o in objs if isinstance(o, Container) and o.needs_recursion]
-                    children: list[Container] = []
-                    for r in recurs: children.extend(r.extChildren())
-                    # assumes all Containers inside objs are the same class
-                    url = f"{children[0].url}?{MARKET_APPEND}&{BULK_APPEND}"
-                    item_resps = Zotify.invoke_url_bulk(url, [c.id for c in children], children[0]._plural, ITEM_FETCH[children[0].__class__])
-                    for child, resp in zip(children, item_resps):
-                        child.parse_metadata(resp)
-                        if isinstance(child, Container) and child.needs_expansion:
-                            child.grab_more_children()
-                    objs = children
-                
+                        obj.grab_more_children(hide_loader=True)
+            
+            while any({isinstance(obj, Container) and obj.needs_recursion for obj in objs}):
+                recurs = [o for o in objs if isinstance(o, Container) and o.needs_recursion]
+                children: list[Container] = []
+                for r in recurs: children.extend(r.extChildren())
+                # assumes all Containers inside objs are the same class
+                url = f"{children[0].url}?{MARKET_APPEND}&{BULK_APPEND}"
+                item_resps = Zotify.invoke_url_bulk(url, [c.id for c in children], children[0]._plural, ITEM_FETCH[children[0].__class__])
+                for child, resp in zip(children, item_resps):
+                    child.parse_metadata(resp)
+                    if isinstance(child, Container) and child.needs_expansion:
+                        child.grab_more_children()
+                objs = children
+            
             self.requested_objs.append(objs) # basic metadata complete objs
     
     def fetch_extra_metadata(self):
@@ -1519,7 +1521,10 @@ class Query(Container):
                         a = album_ids[album_resp[ID]]
                         a._accepting_children = Zotify.CONFIG.get_download_parent_album()
                         a.parse_metadata(album_resp)
-                        # if a.needs_expansion: a.grab_more_children(hide_loader=True) # extremely slow, multiple calls per album
+                        if a.needs_expansion: a.grab_more_children(hide_loader=True)
+                        for sib in a._siblings:
+                            if not sib.hasMetadata:
+                                sib.parse_metadata(album_resp); sib.needs_expansion = False
     
     def get_m3u8_dir(self, content_list: list[DLContent]) -> str:
         m3u8_dir = Zotify.CONFIG.get_m3u8_location()
