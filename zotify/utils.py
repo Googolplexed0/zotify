@@ -88,8 +88,8 @@ def bulk_regex_urls(urls: str | list[str]) -> list[list[str]]:
     if isinstance(urls, list):
         urls = strlist_compressor(urls)
     
-    base_uri = r'sp'+r'otify:%s:([0-9a-zA-Z]{22})'
-    base_url = r'(?:https?://)?open\.' + base_uri.split(':')[0] + r'\.com(?:/intl-\w+)?/%s/([0-9a-zA-Z]{22})(?:\?si=.+?)?'
+    base_uri = r'(?:sp'+r'otify:)?%s:([0-9a-zA-Z]{22})'
+    base_url = r'(?:https?://)?open\.' + base_uri.split(':')[1] + r'\.com(?:/intl-\w+)?/%s/([0-9a-zA-Z]{22})(?:\?si=.+?)?'
     
     from zotify.api import ITEM_FETCH, ITEM_NAMES
     matched_ids = [[]]*len(ITEM_FETCH)
@@ -281,11 +281,18 @@ def get_archived_entries(dir_path: PurePath | None = None) -> list[str]:
     return get_archived_entries(dir_path)
 
 
-def get_archived_song_ids(dir_path: PurePath | None = None) -> list[str]:
-    """ Returns list of downloaded track_ids """
+def get_archived_item_ids(dir_path: PurePath | None = None) -> list[str]:
+    """ Returns list of downloaded item_ids """
     entries = get_archived_entries(dir_path)
-    track_ids = [entry.strip().split('\t')[0] for entry in entries]
-    return track_ids
+    item_ids = [entry.strip().split('\t')[0] for entry in entries]
+    return item_ids
+
+
+def get_archived_item_paths(dir_path: PurePath | None = None) -> list[PurePath]:
+    """ Returns list of downloaded item_paths """
+    entries = get_archived_entries(dir_path)
+    item_paths = [PurePath(entry.strip().split('\t')[-1]) for entry in entries]
+    return item_paths
 
 
 def add_to_archive(item_id: str, timestamp: str, author_name: str, item_name: str, item_path: PurePath, 

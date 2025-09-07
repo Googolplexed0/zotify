@@ -75,10 +75,9 @@ def main():
                         help='Perform multiple queries with a single persistent Session')
     
     group = parser.add_mutually_exclusive_group(required=False)
-    group.add_argument('--url', '--urls',
+    group.add_argument('urls',
                        type=str,
                        # action='extend',
-                       dest="urls",
                        nargs='*',
                        help='Download track(s), album(s), playlist(s), podcast episode(s), or artist(s) specified by the URL(s) passed as a command line argument(s). If an artist\'s URL is given, all albums by the specified artist will be downloaded. Can take multiple URLs as multiple arguments.')
     group.add_argument('-f', '--file',

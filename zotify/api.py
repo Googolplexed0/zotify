@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 
 from zotify import __version__
 from zotify.const import *
-from zotify.termoutput import PrintChannel, Printer, Loader
+from zotify.termoutput import PrintChannel, Printer, Loader, Interface
 from zotify.utils import *
 
 
@@ -144,36 +144,38 @@ class Content():
         self.name = ""
     
     @property
-    def subContent(self) -> set[Content]:
-        childContent = {child for child in self._children if not isinstance(child, Container)}
-        childContainers = {child for child in self._children if isinstance(child, Container)}
-        return childContent.union(*(child.subContent for child in childContainers))
+    def query(self) -> Query:
+        if isinstance(self, Query):
+            return self
+        return self._parent.query
     
     @property
-    def _allContent(self) -> set[Container]:
-        def allSubContent(cont: Content) -> set[Container]:
-            childContent = {child for child in cont._children if not isinstance(child, Container)}
-            return childContent.union(*(allSubContent(child) for child in cont._children))
-        return self._parent._allContent if self._parent else allSubContent(self)
+    def parent_tree(self) -> list[Content]:
+        if self._parent:
+            return self._parent.parent_tree + [self]
+        return [self]
     
-    @property
-    def _allContainers(self) -> set[Container]:
-        def allSubContainers(cont: Content) -> set[Container]:
-            childContainers = {child for child in cont._children if isinstance(child, Container)}
-            return childContainers.union(*(allSubContainers(child) for child in cont._children))
-        return self._parent._allContainers if self._parent else allSubContainers(self)
+    def _cache_children(self, children: set[Content | Container]):
+        childContent = {child for child in children if not isinstance(child, Container)}
+        self.query._allContent.update(childContent)
+        if isinstance(self, Container):
+            self.query._subContent.update(childContent)
+        childContainers = {child for child in children if isinstance(child, Container)}
+        self.query._allContainers.update(childContainers)
     
     def add_children(self, obj_or_objs: Content | Container | list[Content | Container]):
         if isinstance(obj_or_objs, (tuple, list, set)):
             self._children.update(obj_or_objs)
+            self._cache_children(set(obj_or_objs))
         else:
             self._children.add(obj_or_objs)
+            self._cache_children({obj_or_objs,})
     
     def findChild(self, obj: Content | Container) -> Content | Container:
         """ Returns matching obj if found, else passed obj after adopting """
         
         # same track, same container
-        allcont = self._allContainers if isinstance(obj, Container) else self._allContent
+        allcont = self.query._allContainers if isinstance(obj, Container) else self.query._allContent
         if obj in allcont:
             return {cont for cont in allcont if obj == cont}.pop()
         
@@ -266,6 +268,18 @@ class Content():
         
         if self._parent and all({i.downloaded for i in self._parent._children}):
             self._parent.mark_downloaded()
+    
+    def dashboard(self, extra_attrs: list[str] = [], suppress_id: bool = False, force_clsn: bool = False) -> str:
+        db = ""
+        attrs = (["id", "name"] if not suppress_id else ["name",]) + extra_attrs
+        for attr in attrs:
+            adds = Interface.parse_dbs(self, attr)
+            if force_clsn:
+               adds = "\n".join([f"{self._clsn} {line}" if self._clsn not in line else line for line in adds.split("\n")])
+            db += adds
+            if attr != attrs[-1]:
+                db += "\n"
+        return db
 
 
 class Owner(Content):
@@ -286,9 +300,16 @@ class DLContent(Content):
         super().__init__(id_or_uri, _parent)
         self._codecs: dict[str, str] = {}
         self._ext = ""
+        self._dl_status = ""
         self.printing_label = ""
         self.filepath: PurePath | None = None
         self.duration_ms = 0
+    
+    def set_dl_status(self, str_status) -> Loader:
+        self._dl_status = str_status
+        if Zotify.CONFIG.get_standard_interface():
+            Interface.refresh()
+        return Loader(PrintChannel.PROGRESS_INFO, str_status + "...")
     
     def fill_output_template(self) -> PurePath:
         pass
@@ -297,9 +318,10 @@ class DLContent(Content):
         time_start = time.time()
         total_size = stream.input_stream.size
         downloaded = 0
+        disable = Zotify.CONFIG.get_standard_interface() or not Zotify.CONFIG.get_show_download_pbar()
         pos, pbar_stack = Printer.pbar_position_handler(1, pbar_stack)
         pbar = Printer.pbar(desc=self.printing_label, total=total_size, unit='B', unit_scale=True,
-                            unit_divisor=1024, disable=not Zotify.CONFIG.get_show_download_pbar(), pos=pos)
+                            unit_divisor=1024, disable=disable, pos=pos)
         try:
             with open(temppath, 'wb') as file:
                 b = 0
@@ -423,7 +445,10 @@ class Track(DLContent):
         self.added_at = ""
         self.added_by = ""
         self.is_local = ""
-  
+    
+    def dashboard(self, suppress_id: bool = False) -> str:
+        return super().dashboard(["track_number", "artists", "album"], suppress_id=suppress_id)
+    
     def parse_metadata(self, track_resp: dict[str, str | int | bool]):
         if isinstance(self._parent, LikedSongs):
             self.added_at = track_resp[ADDED_AT]
@@ -687,8 +712,8 @@ class Track(DLContent):
             return val
         
         utag_vals = {}
-        for i, utag in enumerate(unreliable_tags + custom_tags):
-            utag_vals[utag] = fetch_unreliable_tag(taglabels[i])
+        for taglabel, utag in zip(taglabels, unreliable_tags + custom_tags):
+            utag_vals[utag] = fetch_unreliable_tag(taglabel)
         
         return (artists, genres, track_name, album_name, album_artist, release_year, disc_number, track_number), \
                 utag_vals
@@ -791,7 +816,8 @@ class Track(DLContent):
             # self.regex_check() includes print if regex matched
             return
         
-        with Loader(PrintChannel.PROGRESS_INFO, "Preparing download..."):
+        Interface.bind(self)
+        with self.set_dl_status("Preparing Download"):
             # TODO: early get_content_stream() -> stricter path_exists check BUT extra internal API calls
             # stream = Zotify.get_content_stream(self)
             # if stream is None:
@@ -801,8 +827,8 @@ class Track(DLContent):
             # path_exists = Path(path).is_file() and pct_error(Path(path).stat().st_size, stream.input_stream.size) <= 0.1
             
             path_exists = Path(path).is_file() and Path(path).stat().st_size
-            in_dir_songids = self.id in get_archived_song_ids(path.parent)
-            in_global_songids = self.id in get_archived_song_ids()
+            in_dir_songids = self.id in get_archived_item_ids(path.parent)
+            in_global_songids = self.id in get_archived_item_ids()
             Printer.debug("Duplicate Check\n" +
                          f"File Already Exists: {path_exists}\n" +
                          f"song_id in Local Archive: {in_dir_songids}\n" +
@@ -827,12 +853,12 @@ class Track(DLContent):
             return
         if in_dir_songids and Zotify.CONFIG.get_skip_existing() and not Zotify.CONFIG.get_disable_directory_archives():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK ALREADY EXISTS)')
-            path = get_archived_entries(path.parent)[get_archived_song_ids(path.parent).index(self.id)].split("\t")[-1]
+            path = get_archived_item_paths(path.parent)[get_archived_item_ids(path.parent).index(self.id)]
             self.mark_downloaded(path)
             return
         if in_global_songids and Zotify.CONFIG.get_skip_previously_downloaded():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK DOWNLOADED PREVIOUSLY)')
-            path = get_archived_entries()[get_archived_song_ids().index(self.id)].split("\t")[-1]
+            path = get_archived_item_paths()[get_archived_item_ids().index(self.id)]
             self.mark_downloaded(path)
             return
         
@@ -843,12 +869,13 @@ class Track(DLContent):
             return
         self.skip_wait = False
         
+        self.set_dl_status("Downloading Stream")
         time_elapsed_dl = self.fetch_content_stream(stream, temppath, pbar_stack)
         
         if not Zotify.CONFIG.get_always_check_lyrics():
             self.fetch_lyrics(path.parent)
         
-        with Loader(PrintChannel.PROGRESS_INFO, "Converting file..."):
+        with self.set_dl_status("Converting File"):
             # convert temppath -> path here
             create_download_directory(path.parent)
             time_elapsed_ffmpeg = self.convert_audio_format(temppath, path)
@@ -864,6 +891,8 @@ class Track(DLContent):
                                                   'Ensure FFMPEG is installed and added to your PATH')
             Printer.traceback(e)
         
+        Interface.update(time_elapsed_dl, time_elapsed_ffmpeg, self.name)
+        self.set_dl_status("Waiting Between Downloads")
         Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{path.relative_to(Zotify.CONFIG.get_root_path())}"\n' +
                                                   f'DOWNLOAD TOOK {time_elapsed_dl}' +
                                                   f' (PLUS {time_elapsed_ffmpeg} CONVERTING)' if time_elapsed_ffmpeg else '')
@@ -893,6 +922,9 @@ class Episode(DLContent):
         self.added_at = ""
         self.added_by = ""
         self.is_local = ""
+    
+    def dashboard(self, suppress_id: bool = False) -> str:
+        return super().dashboard(["show",], suppress_id=suppress_id)
     
     def parse_metadata(self, episode_resp: dict[str, str | int | bool]):
         self.update_id(episode_resp[ID])
@@ -967,7 +999,8 @@ class Episode(DLContent):
         if self.regex_check():
             return
         
-        with Loader(PrintChannel.PROGRESS_INFO, "Preparing download..."):
+        Interface.bind(self)
+        with self.set_dl_status("Preparing Download"):
             path = self.fill_output_template()
             
             # TODO: early get_content_stream() -> stricter path_exists check BUT extra internal API calls
@@ -986,7 +1019,7 @@ class Episode(DLContent):
                     if file_match.stat().st_size:
                         path_exists = True
                         break
-            in_dir_songids = self.id in get_archived_song_ids(path.parent)
+            in_dir_songids = self.id in get_archived_item_ids(path.parent)
             Printer.debug("Duplicate Check\n" +
                          f"File Already Exists: {path_exists}\n" +
                          f"song_id in Local Archive: {in_dir_songids}\n")
@@ -1005,10 +1038,11 @@ class Episode(DLContent):
             return
         if in_dir_songids and Zotify.CONFIG.get_skip_existing() and not Zotify.CONFIG.get_disable_directory_archives():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (EPISODE ALREADY EXISTS)')
-            path = get_archived_entries(path.parent)[get_archived_song_ids(path.parent).index(self.id)].split("\t")[-1]
+            path = get_archived_item_paths(path.parent)[get_archived_item_ids(path.parent).index(self.id)]
             self.mark_downloaded(path)
             return
         
+        self.set_dl_status("Downloading Stream")
         if not self.fetch_partner_url():
             stream = Zotify.get_content_stream(self)
             if stream is None:
@@ -1026,7 +1060,7 @@ class Episode(DLContent):
         self.skip_wait = False
         
         try:
-            with Loader(PrintChannel.PROGRESS_INFO, "Identifying episode audio codec..."):
+            with self.set_dl_status("Identifying Episode Audio Codec"):
                 codec = self.get_audio_codec(temppath)
                 ext = "." + EXT_MAP.get(codec, codec)
             Printer.debug(f'Detected Codec: {codec}\n' +
@@ -1044,13 +1078,15 @@ class Episode(DLContent):
         if path.suffix == ".copy":
             path = path.with_suffix(ext)
         
-        with Loader(PrintChannel.PROGRESS_INFO, 'Converting file...'):
+        with self.set_dl_status("Converting File"):
             create_download_directory(path.parent)
             time_elapsed_ffmpeg = self.convert_audio_format(temppath, path)
             if time_elapsed_ffmpeg is None:
                 path = PurePath(Path(temppath).rename(path.with_suffix(ext)))
             self.mark_downloaded(path)
         
+        Interface.update(time_elapsed_dl, time_elapsed_ffmpeg, self.name)
+        self.set_dl_status("Waiting Between Downloads")
         Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{path.relative_to(Zotify.CONFIG.get_root_podcast_path())}"\n' +
                                                   f'DOWNLOAD TOOK {time_elapsed_dl}' +
                                                   f' (PLUS {time_elapsed_ffmpeg} CONVERTING)' if time_elapsed_ffmpeg else '')
@@ -1059,14 +1095,16 @@ class Episode(DLContent):
 
 
 class Container(Content):
+    _disable_flag = Zotify.CONFIG.get_standard_interface()
+    
     def __init__(self, id_or_uri: str, _parent: Content | Container = None):
         super().__init__(id_or_uri, _parent)
         self._contains = Content, Container
         self._preloaded = 0
         self._fetch_q = 50
         self._unit = "Content" if isinstance(self._contains, tuple) else self._contains.__name__ + "s"
-        self._disable_flag = Zotify.CONFIG.get_show_url_pbar()
         self.needs_expansion = False
+        self.needs_recursion = False
     
     # supersede in each child class
     def extChildren(self, _extensibleChildren: list[Content | Container],
@@ -1092,8 +1130,9 @@ class Container(Content):
         return children
     
     def grab_more_children(self, hide_loader: bool = False):
-        items = self.fetch_items(hide_loader=hide_loader)
-        self.extChildren(self.parse_linked_objs(items, self._contains))
+        item_resps = self.fetch_items(hide_loader=hide_loader)
+        # assumes all items inside objs are the same class
+        self.extChildren(self.parse_linked_objs(item_resps, self._contains))
     
     def create_pbar(self, pbar_stack: list | None = None) -> tuple[list[Content], list]:
         pos, pbar_stack = Printer.pbar_position_handler(7, pbar_stack)
@@ -1120,7 +1159,7 @@ class Playlist(Container):
         self._contains = Track, Episode
         self._preloaded = 100
         self._fetch_q = 100
-        self._disable_flag = Zotify.CONFIG.get_show_playlist_pbar()
+        self._disable_flag = super()._disable_flag or not Zotify.CONFIG.get_show_playlist_pbar() 
         
         self.url = PLAYLIST_URL
         self.collaborative = False
@@ -1133,6 +1172,9 @@ class Playlist(Container):
     
     def extChildren(self, objs: list[Track | Episode] = []):
         return super().extChildren(self.tracks_or_eps, objs)
+    
+    def dashboard(self, suppress_id: bool = False) -> str:
+        return super().dashboard(suppress_id=suppress_id)
     
     def parse_metadata(self, playlist_resp: dict[str, str | bool]):
         self.update_id(playlist_resp[ID])
@@ -1173,7 +1215,7 @@ class Album(Container):
         super().__init__(id_or_uri, _parent)
         self._contains = Track
         self._preloaded = 50
-        self._disable_flag = Zotify.CONFIG.get_show_album_pbar()
+        self._disable_flag = super()._disable_flag or not Zotify.CONFIG.get_show_album_pbar()
         self._regex_flag = Zotify.CONFIG.get_regex_album()
         
         self.url = ALBUM_URL
@@ -1190,6 +1232,9 @@ class Album(Container):
     
     def extChildren(self, objs: list[Track] = []):
         return super().extChildren(self.tracks, objs)
+    
+    def dashboard(self, suppress_id: bool = False) -> str:
+        return super().dashboard(["total_tracks", "artists"], suppress_id=suppress_id, force_clsn=True)
     
     def parse_metadata(self, album_resp: dict[str, str | bool]):
         self.update_id(album_resp[ID])
@@ -1213,6 +1258,8 @@ class Album(Container):
                 # set in self.grab_more_children() if album incomplete
                 self.total_discs = str(album_resp[TRACKS][ITEMS][-1][DISC_NUMBER])
             self.hasMetadata = True
+        elif isinstance(self._parent, Artist):
+            self.needs_expansion = True
     
     def fetch_items(self, hide_loader: bool = False) -> list[dict | None]:
         return super().fetch_items(TRACKS, hide_loader=hide_loader)
@@ -1248,7 +1295,8 @@ class Artist(Container):
         self.toptrackmode: bool = False
         self._contains = Album if not self.toptrackmode else Track
         self._fetch_q = 20 if not self.toptrackmode else 100
-        self._disable_flag = Zotify.CONFIG.get_show_artist_pbar()
+        self._disable_flag = super()._disable_flag or not Zotify.CONFIG.get_show_artist_pbar()
+        self.needs_recursion = not self.toptrackmode
         
         self.url = ARTIST_URL
         self.genres: list[str] = []
@@ -1258,6 +1306,9 @@ class Artist(Container):
     
     def extChildren(self, objs: list[Album | Track] = []):
         return super().extChildren(self.albums if not self.toptrackmode else self.top_songs, objs)
+    
+    def dashboard(self, suppress_id: bool = False) -> str:
+        return super().dashboard(["genres"], suppress_id=suppress_id)
     
     def parse_metadata(self, artist_resp: dict[str, str | int | list[str]]):
         self.update_id(artist_resp[ID])
@@ -1285,7 +1336,7 @@ class Show(Container):
         super().__init__(id_or_uri, _parent)
         self._contains = Episode
         self._preloaded = 50
-        self._disable_flag = Zotify.CONFIG.get_show_album_pbar()
+        self._disable_flag = super()._disable_flag or not Zotify.CONFIG.get_show_album_pbar()
         
         self.url = SHOW_URL
         self.desc = ""
@@ -1298,6 +1349,9 @@ class Show(Container):
     
     def extChildren(self, objs: list[Episode] = []):
         return super().extChildren(self.episodes, objs)
+    
+    def dashboard(self, suppress_id: bool = False) -> str:
+        return super().dashboard(["total_episodes",], suppress_id=suppress_id)
     
     def parse_metadata(self, show_resp: dict[str, str | bool]):
         self.update_id(show_resp[ID])
@@ -1358,6 +1412,10 @@ class Query(Container):
         super().__init__(timestamp)
         self._contains = Content, Container
         self._unit = "Content" if Zotify.CONFIG.get_optimized_dl_order() else "URL"
+        self._disable_flag = super()._disable_flag or not Zotify.CONFIG.get_show_url_pbar()
+        self._subContent: set[Content] = set()
+        self._allContent: set[Content] = set()
+        self._allContainers: set[Container] = set()
         self.name = "Total Progress"
         self.pbar_stack: list = []
         
@@ -1386,9 +1444,9 @@ class Query(Container):
             direct_reqs_objs.append(objs)
         return direct_reqs_objs
     
-    def fetch_direct_metadata(self, direct_reqs_objs: list[list[DLContent | Container]]) -> tuple[list[list[DLContent | Container]], list[list[dict]]]:
+    def fetch_direct_metadata(self, direct_reqs_objs: list[list[DLContent | Container]], qs: tuple[int] = ITEM_FETCH.values()) -> tuple[list[list[DLContent | Container]], list[list[dict]]]:
         direct_req_item_resps = []
-        for q, objs in zip(ITEM_FETCH.values(), direct_reqs_objs):
+        for objs, q in zip(direct_reqs_objs, qs):
             if not objs:
                 direct_req_item_resps.append([])
                 continue
@@ -1412,10 +1470,24 @@ class Query(Container):
                     obj.parse_metadata(item_resp)
                     if isinstance(obj, Container) and obj.needs_expansion:
                         obj.grab_more_children()
+                
+                while any({isinstance(obj, Container) and obj.needs_recursion for obj in objs}):
+                    recurs = [o for o in objs if isinstance(o, Container) and o.needs_recursion]
+                    children: list[Container] = []
+                    for r in recurs: children.extend(r.extChildren())
+                    # assumes all Containers inside objs are the same class
+                    url = f"{children[0].url}?{MARKET_APPEND}&{BULK_APPEND}"
+                    item_resps = Zotify.invoke_url_bulk(url, [c.id for c in children], children[0]._plural, ITEM_FETCH[children[0].__class__])
+                    for child, resp in zip(children, item_resps):
+                        child.parse_metadata(resp)
+                        if isinstance(child, Container) and child.needs_expansion:
+                            child.grab_more_children()
+                    objs = children
+                
             self.requested_objs.append(objs) # basic metadata complete objs
     
     def fetch_extra_metadata(self):
-        alltracks = {t for t in self.subContent if isinstance(t, Track) and t.id}
+        alltracks = {t for t in self._subContent if isinstance(t, Track) and t.id}
         
         if Zotify.CONFIG.get_save_genres():
             artists = set.union(set(), *(set(track.artists) for track in alltracks))
@@ -1492,7 +1564,7 @@ class Query(Container):
     def download(self):
         requested_objs = self.requested_objs
         if Zotify.CONFIG.get_optimized_dl_order():
-            downloadables = [c for c in self.subContent if isinstance(c, DLContent) and c.id]
+            downloadables = [c for c in self._subContent if isinstance(c, DLContent) and c.id]
             
             if Zotify.CONFIG.get_download_parent_album():
                 tracks = {t for t in downloadables if isinstance(t, Track) and t.album is not None}
@@ -1512,6 +1584,9 @@ class Query(Container):
             downloadables = []
             for cats in self.requested_objs: downloadables.extend(cats)
         self.requested_objs = downloadables
+        
+        if Zotify.CONFIG.get_standard_interface():
+            Interface.refresh()
         
         try:
             super().download(pbar_stack=None)

@@ -182,21 +182,22 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `CHUNK_SIZE`                 | `--chunk-size`                      | Chunk size for downloading                                                   | 20000                     |
 | `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests                                | 127.0.0.1                 |
 
-| Terminal & Logging Options   | Command Line Config Flag            | Description                                                                  | Default Value             |
-|------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
-| `PRINT_SPLASH`               | `--print-splash`                    | Show the Zotify logo at startup                                              | False                     |
-| `PRINT_PROGRESS_INFO`        | `--print-progress-info`             | Show message contianing download progress information                        | True                      |
-| `PRINT_SKIPS`                | `--print-skips`                     | Show message when a track is skipped                                         | True                      |
-| `PRINT_DOWNLOADS`            | `--print-downloads`                 | Show message when a track is downloaded successfully                         | True                      |
-| `PRINT_DOWNLOAD_PROGRESS`    | `--print-download-progress`         | Show track download progress bar                                             | True                      |
-| `PRINT_URL_PROGRESS`         | `--print-url-progress`              | Show url progress bar                                                        | True                      |
-| `PRINT_ALBUM_PROGRESS`       | `--print-album-progress`            | Show album progress bar                                                      | True                      |
-| `PRINT_ARTIST_PROGRESS`      | `--print-artist-progress`           | Show artist progress bar                                                     | True                      |
-| `PRINT_PLAYLIST_PROGRESS`    | `--print-playlist-progress`         | Show playlist progress bar                                                   | True                      |
-| `PRINT_WARNINGS`             | `--print-warnings`                  | Show warnings                                                                | True                      |
-| `PRINT_ERRORS`               | `--print-errors`                    | Show errors                                                                  | True                      |
-| `PRINT_API_ERRORS`           | `--print-api-errors`                | Show API errors                                                              | True                      |
-| `FFMPEG_LOG_LEVEL`           | `--ffmpeg-log-level`                | FFMPEG's logged level of detail when completing a transcoded download        | error                     |
+| Terminal & Logging Options   | Command Line Config Flag            | Description                                                                              | Default Value |
+|------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
+| `PRINT_SPLASH`               | `--print-splash`                    | Show the Zotify logo at startup                                                          | False         |
+| `PRINT_PROGRESS_INFO`        | `--print-progress-info`             | Show message contianing download progress information                                    | True          |
+| `PRINT_SKIPS`                | `--print-skips`                     | Show message when a track is skipped                                                     | True          |
+| `PRINT_DOWNLOADS`            | `--print-downloads`                 | Show message when a track is downloaded successfully                                     | True          |
+| `PRINT_DOWNLOAD_PROGRESS`    | `--print-download-progress`         | Show track download progress bar                                                         | True          |
+| `PRINT_URL_PROGRESS`         | `--print-url-progress`              | Show url progress bar                                                                    | True          |
+| `PRINT_ALBUM_PROGRESS`       | `--print-album-progress`            | Show album progress bar                                                                  | True          |
+| `PRINT_ARTIST_PROGRESS`      | `--print-artist-progress`           | Show artist progress bar                                                                 | True          |
+| `PRINT_PLAYLIST_PROGRESS`    | `--print-playlist-progress`         | Show playlist progress bar                                                               | True          |
+| `PRINT_WARNINGS`             | `--print-warnings`                  | Show warnings                                                                            | True          |
+| `PRINT_ERRORS`               | `--print-errors`                    | Show errors                                                                              | True          |
+| `PRINT_API_ERRORS`           | `--print-api-errors`                | Show API errors                                                                          | True          |
+| `STANDARD_INTERFACE`         | `--standard-interface`              | Silence all non-mandatory prints and loaders, instead show a standardized dashboard      | False         |
+| `FFMPEG_LOG_LEVEL`           | `--ffmpeg-log-level`                | FFMPEG's logged level of detail when completing a transcoded download                    | error         |
 
 \* very_high (320k) is limited to Premium accounts only  
 

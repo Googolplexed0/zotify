@@ -132,7 +132,7 @@ class Printer:
         return msg, category
     
     @staticmethod
-    def _toggle_active_loader(skip_toggle: bool = False):
+    def _toggle_active_loader(skip_toggle: bool = False) -> None:
         if not skip_toggle and Printer.ACTIVE_LOADER:
             if Printer.ACTIVE_LOADER.paused:
                 Printer.ACTIVE_LOADER.resume()
@@ -145,6 +145,8 @@ class Printer:
         Printer._logger(msg, channel)
         if channel != PrintChannel.MANDATORY:
             from zotify.config import Zotify
+            if Zotify.CONFIG.get_standard_interface():
+                return
         if channel == PrintChannel.MANDATORY or Zotify.CONFIG.get(channel.value):
             msg, category = Printer._print_prefixes(msg, category, channel)
             Printer._toggle_active_loader(skip_toggle)
@@ -287,7 +289,14 @@ class Loader:
     # load symbol from:
     # https://stackoverflow.com/questions/22029562/python-how-to-make-simple-animated-loading-while-process-is-running
     
-    def __init__(self, chan, desc="Loading...", end='', timeout=0.1, mode='prog', disabled: bool = False):
+    def __enter__(self):
+        self.start()
+    
+    def __exit__(self, exc_type, exc_value, tb):
+        # handle exceptions with those variables ^
+        self.stop()
+    
+    def __init__(self, channel, desc="Loading...", end='', timeout=0.1, mode='prog', disabled: bool = False):
         """
         A loader-like context manager
         
@@ -299,10 +308,9 @@ class Loader:
         self.desc = desc
         self.end = end
         self.timeout = timeout
-        self.channel = chan
+        self.channel = channel
         self.category = PrintCategory.LOADER
         
-        self._thread = Thread(target=self._animate, daemon=True)
         if mode == 'std1':
             self.steps = ["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"]
         elif mode == 'std2':
@@ -313,41 +321,41 @@ class Loader:
             self.steps = ["[∙∙∙]","[●∙∙]","[∙●∙]","[∙∙●]","[∙∙∙]"]
         
         self.disabled = disabled
+        if self.channel is not PrintChannel.MANDATORY:
+            from zotify.config import Zotify
+            self.disabled = disabled or Zotify.CONFIG.get_standard_interface()
         self.done = False
         self.paused = False
         self.dead = False
     
-    def _loader_print(self, msg: str):
-        Printer.new_print(self.channel, msg, self.category, skip_toggle=True)
-        
-        if self.category is PrintCategory.LOADER:
-            self.category = PrintCategory.LOADER_CYCLE
-    
-    def store_active_loader(self):
+    def _store_active_loader(self):
         self._inherited_active_loader = Printer.ACTIVE_LOADER
         Printer.ACTIVE_LOADER = self
     
-    def release_active_loader(self):
+    def _release_active_loader(self):
         Printer.ACTIVE_LOADER = self._inherited_active_loader
     
-    def start(self):
-        if not self.disabled:
-            self.store_active_loader()
-            self._thread.start()
-            sleep(self.timeout) #guarantee _animate can print at least once
-        return self
+    def loader_print(self, msg: str):
+        Printer.new_print(self.channel, msg, self.category, skip_toggle=True)
+        if self.category is PrintCategory.LOADER:
+            self.category = PrintCategory.LOADER_CYCLE
     
-    def _animate(self):
+    def animate(self):
         for c in cycle(self.steps):
             if self.done:
                 break
             elif not self.paused:
-                self._loader_print(f"{c} {self.desc}")
+                self.loader_print(f"{c} {self.desc}")
             sleep(self.timeout)
         self.dead = True
     
-    def __enter__(self):
-        self.start()
+    def start(self):
+        if not self.disabled:
+            self._thread = Thread(target=self.animate, daemon=True)
+            self._store_active_loader()
+            self._thread.start()
+            sleep(self.timeout) #guarantee _animate can print at least once
+        return self
     
     def stop(self):
         if not self.disabled:
@@ -360,8 +368,8 @@ class Loader:
                     raise e
             self.category = PrintCategory.LOADER
             if self.end != "":
-                self._loader_print(self.end)
-            self.release_active_loader()
+                self.loader_print(self.end)
+            self._release_active_loader()
     
     def pause(self):
         self.paused = True
@@ -370,7 +378,85 @@ class Loader:
         self.category = PrintCategory.LOADER
         self.paused = False
         sleep(self.timeout*2) #guarantee _animate can print at least once
+
+
+class Interface:
+    CURRENT_ITEM = None
+    LAST_DL_TIME: int | None = None
+    LAST_CONVERTING_TIME: int | None = None
+    LAST_DL_ITEM_NAME: str | None = None
+    LAST_ERROR: str | None = None
     
-    def __exit__(self, exc_type, exc_value, tb):
-        # handle exceptions with those variables ^
-        self.stop()
+    @staticmethod
+    def _term_lines() -> int:
+        try:
+            _, lines = get_terminal_size()
+        except OSError:
+            lines = 20
+        return lines
+    
+    @staticmethod
+    def parse_dbs(obj, attr: str) -> str:
+        from zotify.api import Content
+        obj: Content = obj
+        prefix = f"{obj._clsn} " if obj._clsn.lower() not in attr else ""
+        val: str | Content | list[str | Content] = getattr(obj, attr)
+        
+        if isinstance(val, Content):
+            return val.dashboard(suppress_id=True)
+        elif isinstance(val, list):
+            if not val:
+                return prefix + attr.replace("_", " ").title() + " == " + "None"
+            elif isinstance(val[0], str):
+                return prefix + attr.replace("_", " ").title() + " == " + ", ".join(val)
+            elif isinstance(val[0], Content):
+                dbs = [c.dashboard(suppress_id=True).split("\n") for c in val]
+                headers = [attr.split(" == ")[0] for attr in dbs[0]]
+                vals = [ [db[i].split(" == ")[-1] for db in dbs if db[i].split(" == ")[-1] != "None"]  for i in range(len(headers))]
+                vals = [v if v else ["None"] for v in vals]
+                combs = [h + " == " + ", ".join(v) for h, v in zip(headers, vals)]
+                return "\n".join(combs)
+            else:
+                return prefix + attr.replace("_", " ").title() + " == " + "!UNEXPECTED ATTR!"
+        else:
+            return prefix + attr.replace("_", " ").title() + " == " + val
+    
+    @staticmethod
+    def print_interface(msg) -> None:
+        for line in str(msg).splitlines():
+            tqdm.write(line.ljust(Printer._term_cols()))
+    
+    @staticmethod
+    def bind(currentobj) -> None:
+        Interface.CURRENT_ITEM = currentobj
+    
+    @staticmethod
+    def refresh() -> None:
+        if Interface.CURRENT_ITEM is None:
+            # attempt to preserve terminal history 
+            Printer.new_print(PrintChannel.MANDATORY, "\n"*(Interface._term_lines()))
+            Printer.clear()
+            return
+        
+        from zotify.api import DLContent
+        obj: DLContent = Interface.CURRENT_ITEM; subc = obj.query._subContent
+        dashboard = f"Query Tree: {" -> ".join([i._clsn for i in obj.parent_tree])}\n" +\
+                    f"\n" +\
+                    f"Current DLContent: {obj._clsn}\n" +\
+                    f"{obj.dashboard()}\n" +\
+                    f"\n" +\
+                    f"Status: {obj._dl_status}\n" +\
+                    f"Total Query Progress: {len({c for c in subc if c.downloaded})}/{len(subc)}\n" +\
+                    f"\n" +\
+                    f"Last Download Time: {Interface.LAST_DL_TIME}\n" +\
+                    f"Last Conversion Time: {Interface.LAST_CONVERTING_TIME}\n" +\
+                    f"Last Downloaded Item: {Interface.LAST_DL_ITEM_NAME}\n" +\
+                    f"Last Encountered Error: {Interface.LAST_ERROR}\n"
+        Printer.clear()
+        Interface.print_interface(dashboard)
+    
+    @staticmethod
+    def update(time_elapsed_dl: str, time_elapsed_ffmpeg: str, item_name: str) -> None:
+        Interface.LAST_DL_TIME = time_elapsed_dl
+        Interface.LAST_CONVERTING_TIME = time_elapsed_ffmpeg
+        Interface.LAST_DL_ITEM_NAME = item_name

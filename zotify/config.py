@@ -115,6 +115,7 @@ CONFIG_VALUES = {
     PRINT_WARNINGS:             { 'default': 'True',                    'type': bool,   'arg': ('--print-warnings'                       ,) },
     PRINT_ERRORS:               { 'default': 'True',                    'type': bool,   'arg': ('--print-errors'                         ,) },
     PRINT_API_ERRORS:           { 'default': 'True',                    'type': bool,   'arg': ('--print-api-errors'                     ,) },
+    STANDARD_INTERFACE:         { 'default': 'False',                   'type': bool,   'arg': ('--standard-interface'                   ,) },
     FFMPEG_LOG_LEVEL:           { 'default': 'error',                   'type': str,    'arg': ('--ffmpeg-log-level'                     ,) },
 }  
 
@@ -477,6 +478,8 @@ class Config:
     
     @classmethod
     def get_show_any_progress(cls) -> bool:
+        if cls.get_standard_interface():
+            return False
         return cls.get(PRINT_DOWNLOAD_PROGRESS) or cls.get(PRINT_URL_PROGRESS) \
            or cls.get(PRINT_ALBUM_PROGRESS) or cls.get(PRINT_ARTIST_PROGRESS) \
         or cls.get(PRINT_PLAYLIST_PROGRESS)
@@ -589,6 +592,10 @@ class Config:
         argstr: str = cls.get(CUSTOM_FFMEPG_ARGS)
         ffmpeg_args = argstr.split()
         return ffmpeg_args
+    
+    @classmethod
+    def get_standard_interface(cls) -> bool:
+        return cls.get(STANDARD_INTERFACE)
 
 
 class Zotify:
