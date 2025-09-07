@@ -145,9 +145,13 @@ cython_debug/
 .vscode/
 .idea/
 
+# uv dependencies 
+uv.lock
+
 # Configuration
 .zotify/
 config.json
+credentials.json
 
 # Download Folder
 Zotify\ Music/
