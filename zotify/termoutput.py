@@ -191,10 +191,11 @@ class Printer:
     
     @staticmethod
     def depreciated_warning(option_string: str, help_msg: str = None, CONFIG = True) -> None:
-        Printer.new_print(PrintChannel.MANDATORY, "\n" +\
-        "###   WARNING: " + ("CONFIG" if CONFIG else "ARGUMENT") + f" `{option_string}` IS DEPRECIATED, IGNORING   ###\n" +\
-        "###   THIS WILL BE REMOVED IN FUTURE VERSIONS   ###\n" +\
-        f"###   {help_msg}   ###\n" if  help_msg else "\n")
+        Printer.hashtaged(PrintChannel.MANDATORY, 
+        f"WARNING: {"CONFIG" if CONFIG else "ARGUMENT"} `{option_string}` IS DEPRECIATED, IGNORING\n" +
+        f"THIS WILL BE REMOVED IN FUTURE VERSIONS\n" +
+        f"{help_msg}" if help_msg else ""
+        )
     
     @staticmethod
     def table(title: str, headers: tuple[str], tabular_data: list) -> None:
@@ -214,11 +215,11 @@ class Printer:
     def splash() -> None:
         """ Displays splash screen """
         Printer.new_print(PrintChannel.SPLASH,
-        "    ███████╗ ██████╗ ████████╗██╗███████╗██╗   ██╗"+"\n"+\
-        "    ╚══███╔╝██╔═══██╗╚══██╔══╝██║██╔════╝╚██╗ ██╔╝"+"\n"+\
-        "      ███╔╝ ██║   ██║   ██║   ██║█████╗   ╚████╔╝ "+"\n"+\
-        "     ███╔╝  ██║   ██║   ██║   ██║██╔══╝    ╚██╔╝  "+"\n"+\
-        "    ███████╗╚██████╔╝   ██║   ██║██║        ██║   "+"\n"+\
+        "    ███████╗ ██████╗ ████████╗██╗███████╗██╗   ██╗"+"\n"+
+        "    ╚══███╔╝██╔═══██╗╚══██╔══╝██║██╔════╝╚██╗ ██╔╝"+"\n"+
+        "      ███╔╝ ██║   ██║   ██║   ██║█████╗   ╚████╔╝ "+"\n"+
+        "     ███╔╝  ██║   ██║   ██║   ██║██╔══╝    ╚██╔╝  "+"\n"+
+        "    ███████╗╚██████╔╝   ██║   ██║██║        ██║   "+"\n"+
         "    ╚══════╝ ╚═════╝    ╚═╝   ╚═╝╚═╝        ╚═╝   "+"\n",
         PrintCategory.MANDATORY)
     
@@ -226,9 +227,9 @@ class Printer:
     def search_select() -> None:
         """ Displays splash screen """
         Printer.new_print(PrintChannel.MANDATORY,
-        "> SELECT A DOWNLOAD OPTION BY ID\n" +
-        "> SELECT A RANGE BY ADDING A DASH BETWEEN BOTH ID's\n" +
-        "> OR PARTICULAR OPTIONS BY ADDING A COMMA BETWEEN ID's\n",
+        "> SELECT A SINGLE OPTION BY ID\n" +
+        "> SELECT A RANGE BY ADDING A DASH BETWEEN BOTH IDs\n" +
+        "> MAKE MULTIPLE SELECTIONS BY ADDING A COMMA BETWEEN IDs OR RANGES\n",
         PrintCategory.MANDATORY)
     
     @staticmethod

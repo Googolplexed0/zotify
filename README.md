@@ -69,7 +69,7 @@ If an artist's URL is given, all albums by the specified artist will be download
 
 ### Basic Flags and Modes
 
-`(python -m) zotify <{mode flag}> <{config flag} {config value}> <track/album/playlist/episode/artist url>`
+`(python -m) zotify <{config flag} {config value}> <{mode flag}> <track/album/playlist/episode/artist url>`
 
 | Command Line Config Flag           | Function                                                                                                                |
 |------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
@@ -78,8 +78,10 @@ If an artist's URL is given, all albums by the specified artist will be download
 | `-c`, `--config-location`          | Specify a directory containing a Zotify `config.json` file to load settings (Also accepts a filepath to a `.json` file) |
 | `-u`, `--username`                 | Account username                                                                                                        |
 | `--token`                          | Authentication token                                                                                                    |
+| `--persist`                        | Perform multiple Queries on the same Session, requiring only one account login                                          |
 | `--debug`                          | Enable debug mode, prints extra information and creates a `config_DEBUG.json` file                                      |
 | `--update-config`                  | Updates the `config.json` file while keeping all current settings unchanged                                             |
+| `--update-archive`                 | Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged                   |
 
 | Command Line Mode Flag (exclusive) | Mode                                                                                                      |
 |------------------------------------|-----------------------------------------------------------------------------------------------------------|

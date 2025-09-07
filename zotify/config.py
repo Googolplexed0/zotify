@@ -173,7 +173,7 @@ class Config:
                 elif key in CONFIG_VALUES:
                     cls.Values[key] = cls.parse_arg_value(key, jsonvalues[key])
                 elif key in DEPRECIATED_CONFIGS: # keep, warn, and place at the bottom (don't delete)
-                    Printer.depreciated_warning(key, f'Delete the "{key}": "{jsonvalues[key]}" line from your config.json')
+                    Printer.depreciated_warning(key, f'Delete the `"{key}": "{jsonvalues[key]}"` line from your config.json')
                     cls.Values["vvv___DEPRECIATED_BELOW_HERE___vvv"] = "vvv___REMOVE_THESE___vvv"
                     cls.Values[key] = cls.parse_arg_value(key, jsonvalues[key], DEPRECIATED_CONFIGS)
         
@@ -451,7 +451,7 @@ class Config:
         
         if level == "warn": level += "ing"
         if level not in valid_levels:
-            raise ValueError(f'FFMPEG LOGGING LEVEL "{level}" NOT VALID\n' +\
+            raise ValueError(f'FFMPEG LOGGING LEVEL "{level}" NOT VALID\n' +
                              f'SELECT FROM: {valid_levels}')
         return level
     
@@ -668,8 +668,8 @@ class Zotify:
         except RuntimeError as e:
             if 'Failed fetching audio key!' in e.args[0]:
                 gid, fileid = e.args[0].split('! ')[1].split(', ')
-                Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +\
-                                                      'MAY BE CAUSED BY RATE LIMITS - CONSIDER INCREASING `BULK_WAIT_TIME`\n' +\
+                Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +
+                                                      'MAY BE CAUSED BY RATE LIMITS - CONSIDER INCREASING `BULK_WAIT_TIME`\n' +
                                                      f'GID: {gid[5:]} - File_ID: {fileid[8:]}')
             else:        
                 raise e
@@ -710,7 +710,7 @@ class Zotify:
             
             if not responsejson or 'error' in responsejson:
                 if not expectFail: 
-                    Printer.hashtaged(PrintChannel.WARNING, f'API ERROR (TRY {tryCount}) - RETRYING\n' +\
+                    Printer.hashtaged(PrintChannel.WARNING, f'API ERROR (TRY {tryCount}) - RETRYING\n' +
                                                             f'{responsejson["error"]["status"]}: {responsejson["error"]["message"]}')
                 sleep(5 if not expectFail else 1)
                 tryCount += 1
@@ -719,7 +719,7 @@ class Zotify:
                 return responsetext, responsejson
         
         if not expectFail:
-            Printer.hashtaged(PrintChannel.API_ERROR, f'API ERROR (TRY {tryCount}) - RETRY LIMIT EXCEDED\n' +\
+            Printer.hashtaged(PrintChannel.API_ERROR, f'API ERROR (TRY {tryCount}) - RETRY LIMIT EXCEDED\n' +
                                                       f'{responsejson["error"]["status"]}: {responsejson["error"]["message"]}')
         
         return responsetext, responsejson

@@ -1,4 +1,4 @@
-from argparse import Namespace
+from argparse import Namespace, Action
 from pathlib import Path
 
 from zotify.api import Query, LikedSongs, UserPlaylists, FollowedArtists, VerifyLibrary, fetch_search_display
@@ -26,23 +26,19 @@ def search_and_select(search: str = ""):
     Query(Zotify.DATETIME_LAUNCH).request(' '.join(uris)).execute()
 
 
-def client(args: Namespace) -> None:
-    """ Connects to download server to perform query's and get songs to download """
-    Zotify(args)
-    Printer.splash()
-    
-    exc = None
+def perform_query(args: Namespace) -> None:
+    """ Connects to download server to perform query """
     try:
-        if args.file_of_urls or args.urls:
+        if args.urls or args.file_of_urls:
             urls = ""
-            if args.file_of_urls:
+            if args.urls:
+                urls: str = args.urls
+            elif args.file_of_urls:
                 if Path(args.file_of_urls).exists():
                     with open(args.file_of_urls, 'r', encoding='utf-8') as file:
                         urls = " ".join([line.strip() for line in file.readlines()])
                 else:
                     Printer.hashtaged(PrintChannel.ERROR, f'FILE {args.file_of_urls} NOT FOUND')
-            elif args.urls:
-                urls: str = args.urls
             
             if len(urls) > 0:
                 Query(Zotify.DATETIME_LAUNCH).request(urls).execute()
@@ -50,11 +46,11 @@ def client(args: Namespace) -> None:
         elif args.liked_songs:
             LikedSongs(Zotify.DATETIME_LAUNCH).execute()
         
-        elif args.playlist:
-            UserPlaylists(Zotify.DATETIME_LAUNCH).execute()
-        
         elif args.followed_artists:
             FollowedArtists(Zotify.DATETIME_LAUNCH).execute()
+        
+        elif args.playlists:
+            UserPlaylists(Zotify.DATETIME_LAUNCH).execute()
         
         elif args.verify_library:
             VerifyLibrary(Zotify.DATETIME_LAUNCH).execute()
@@ -64,12 +60,60 @@ def client(args: Namespace) -> None:
         
         else:
             search_and_select()
+        
+        Printer.debug(f"Total API Calls: {Zotify.TOTAL_API_CALLS}")
+        Zotify.TOTAL_API_CALLS = 0
     
     except BaseException as e:
-        exc = e
-    
-    finally:
         Printer.debug(f"Total API Calls: {Zotify.TOTAL_API_CALLS}")
         Zotify.cleanup()
         print("\n")
-        if exc: raise exc
+        raise e
+
+
+def client(args: Namespace, modes: list[Action]) -> None:
+    """ Loads config, creates Session, and performs queries as needed """
+    Zotify(args)
+    Printer.splash()
+    
+    ask_mode = False
+    if any([getattr(args, mode.dest) for mode in modes]):
+        perform_query(args)
+    else:
+        if not args.persist:
+            # this maintains current behavior when no mode/url present
+            Printer.hashtaged(PrintChannel.MANDATORY, "NO MODE SELECTED, DEFAULTING TO SEARCH")
+            perform_query(args)
+            
+            # TODO: decide if this alt behavior should be implemented
+            # Printer.hashtaged(PrintChannel.MANDATORY, "NO MODE SELECTED, PLEASE SELECT ONE")
+            # ask_mode = True
+    
+    while args.persist or ask_mode:
+        mode_data = [[i+1, mode.dest.upper().replace("_", " ")] for i, mode in enumerate(modes)]
+        Printer.table("Modes", ("ID", "MODE"), mode_data + [[0, "EXIT"]])
+        selected_mode: Action | None = select(modes + [None], get_input_prompt="MODE SELECTION: ")[-1]
+        ask_mode = False
+        
+        if selected_mode is None:
+            Printer.hashtaged(PrintChannel.MANDATORY, "CLOSING SESSION")
+            break
+        
+        # clear previous run modes
+        for mode in modes:
+            if mode.nargs:
+                setattr(args, mode.dest, None)
+            else:
+                setattr(args, mode.dest, False)
+        
+        # set new mode
+        if selected_mode.nargs:
+            mode_args = Printer.get_input(f"\nMODE ARGUMENTS ({mode.dest.upper().replace("_", " ")}): ")
+            setattr(args, mode.dest, mode_args)
+        else:
+            setattr(args, mode.dest, True)
+        
+        perform_query(args)
+    
+    Zotify.cleanup()
+    print("\n")

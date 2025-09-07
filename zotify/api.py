@@ -45,7 +45,7 @@ def fetch_search_display(search_term: str) -> list[str]:
                 if splits[i][0] == '-':
                     break
                 if splits[i] not in allowed_types:
-                    raise ValueError(f'Parameters passed after {split} option must be from this list:\n' +\
+                    raise ValueError(f'Parameters passed after {split} option must be from this list:\n' +
                                      f'{'\n'.join(allowed_types)}')
                 passed_types.append(splits[i])
             params[TYPE] = ','.join(passed_types)
@@ -170,7 +170,7 @@ class Content():
             self._children.add(obj_or_objs)
     
     def findChild(self, obj: Content | Container) -> Content | Container:
-        """Returns matching obj if found, else passed obj after adopting"""
+        """ Returns matching obj if found, else passed obj after adopting """
         
         # same track, same container
         allcont = self._allContainers if isinstance(obj, Container) else self._allContent
@@ -192,13 +192,13 @@ class Content():
         if self._regex_flag is None:
             return False
         regex_match = self._regex_flag.search(self.name)
-        Printer.debug("Regex Check\n" +\
-                     f"Pattern: {self._regex_flag.pattern}\n" +\
-                     f"{self._clsn} Name: {self.name}\n" +\
+        Printer.debug("Regex Check\n" +
+                     f"Pattern: {self._regex_flag.pattern}\n" +
+                     f"{self._clsn} Name: {self.name}\n" +
                      f"Match Object: {regex_match}")
         if regex_match:
-            Printer.hashtaged(PrintChannel.SKIPPING, f'{self._clsn.upper()} MATCHES REGEX FILTER\n' +\
-                                                     f'{self._clsn}_Name: {self.name} - {self._clsn}_ID: {self.id}' +\
+            Printer.hashtaged(PrintChannel.SKIPPING, f'{self._clsn.upper()} MATCHES REGEX FILTER\n' +
+                                                     f'{self._clsn}_Name: {self.name} - {self._clsn}_ID: {self.id}' +
                                                     (f'\nRegex Groups: {regex_match.groupdict()}' if regex_match.groups() else ""))
         return regex_match
     
@@ -377,7 +377,7 @@ class DLContent(Content):
                 
             except Exception as e:
                 if isinstance(e, ffmpy.FFExecutableNotFoundError):
-                    Printer.hashtaged(PrintChannel.WARNING,  'FFMPEG NOT FOUND\n' +\
+                    Printer.hashtaged(PrintChannel.WARNING,  'FFMPEG NOT FOUND\n' +
                                                             f'SKIPPING CONVERSION TO {file_codec.upper()}')
                 else:
                     Printer.hashtaged(PrintChannel.WARNING, str(e) + "\n" + error_str)
@@ -516,7 +516,7 @@ class Track(DLContent):
         mismatches = self.compare_metadata()
         relpath = self.filepath.relative_to(Zotify.CONFIG.get_root_path())
         if not mismatches:
-            Printer.hashtaged(PrintChannel.DOWNLOADS, f'VERIFIED:  METADATA FOR "{relpath}"\n' +\
+            Printer.hashtaged(PrintChannel.DOWNLOADS, f'VERIFIED:  METADATA FOR "{relpath}"\n' +
                                                        '(NO UPDATES REQUIRED)')
             return
         
@@ -524,7 +524,7 @@ class Track(DLContent):
             Printer.debug(f'Metadata Mismatches:', mismatches)
             self.set_audio_tags(self.filepath)
             self.set_music_thumbnail(self.filepath)
-            Printer.hashtaged(PrintChannel.DOWNLOADS, f'VERIFIED:  METADATA FOR "{relpath}"\n' +\
+            Printer.hashtaged(PrintChannel.DOWNLOADS, f'VERIFIED:  METADATA FOR "{relpath}"\n' +
                                                       f'(UPDATED TAGS TO MATCH CURRENT API METADATA)')
         except Exception as e:
             Printer.hashtaged(PrintChannel.ERROR, F'FAILED TO CORRECT METADATA FOR "{relpath}"')
@@ -795,7 +795,7 @@ class Track(DLContent):
             # TODO: early get_content_stream() -> stricter path_exists check BUT extra internal API calls
             # stream = Zotify.get_content_stream(self)
             # if stream is None:
-            #     Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +\
+            #     Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +
             #                                          f'Track_ID: {self.id}')
             #     return
             # path_exists = Path(path).is_file() and pct_error(Path(path).stat().st_size, stream.input_stream.size) <= 0.1
@@ -803,9 +803,9 @@ class Track(DLContent):
             path_exists = Path(path).is_file() and Path(path).stat().st_size
             in_dir_songids = self.id in get_archived_song_ids(path.parent)
             in_global_songids = self.id in get_archived_song_ids()
-            Printer.debug("Duplicate Check\n" +\
-                         f"File Already Exists: {path_exists}\n" +\
-                         f"song_id in Local Archive: {in_dir_songids}\n" +\
+            Printer.debug("Duplicate Check\n" +
+                         f"File Already Exists: {path_exists}\n" +
+                         f"song_id in Local Archive: {in_dir_songids}\n" +
                          f"song_id in Global Archive: {in_global_songids}")
             
             # same path, not same song_id, rename the newcomer
@@ -838,7 +838,7 @@ class Track(DLContent):
         
         stream = Zotify.get_content_stream(self)
         if stream is None:
-            Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +\
+            Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +
                                                  f'Track_ID: {self.id}')
             return
         self.skip_wait = False
@@ -860,12 +860,12 @@ class Track(DLContent):
             self.set_audio_tags(path)
             self.set_music_thumbnail(path)
         except Exception as e:
-            Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO WRITE METADATA\n' +\
+            Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO WRITE METADATA\n' +
                                                   'Ensure FFMPEG is installed and added to your PATH')
             Printer.traceback(e)
         
-        Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{path.relative_to(Zotify.CONFIG.get_root_path())}"\n' +\
-                                                  f'DOWNLOAD TOOK {time_elapsed_dl}' + \
+        Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{path.relative_to(Zotify.CONFIG.get_root_path())}"\n' +
+                                                  f'DOWNLOAD TOOK {time_elapsed_dl}' +
                                                   f' (PLUS {time_elapsed_ffmpeg} CONVERTING)' if time_elapsed_ffmpeg else '')
         if not in_dir_songids:
             add_obj_to_song_archive(self, self.filepath.parent)
@@ -960,7 +960,7 @@ class Episode(DLContent):
         
         # this check seems useless?
         if not all((self.name, self.duration_ms, self.show)):
-            Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING EPISODE - FAILED TO QUERY METADATA\n' +\
+            Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING EPISODE - FAILED TO QUERY METADATA\n' +
                                                  f'Episode_ID: {self.id}')
             return
         
@@ -974,7 +974,7 @@ class Episode(DLContent):
             # TODO: needs to account for both download_directly() and fetch_contet_stream() cases
             # stream = Zotify.get_content_stream(self)
             # if stream is None:
-            #     Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +\
+            #     Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +
             #                                          f'Track_ID: {self.id}')
             #     return
             
@@ -987,8 +987,8 @@ class Episode(DLContent):
                         path_exists = True
                         break
             in_dir_songids = self.id in get_archived_song_ids(path.parent)
-            Printer.debug("Duplicate Check\n" +\
-                         f"File Already Exists: {path_exists}\n" +\
+            Printer.debug("Duplicate Check\n" +
+                         f"File Already Exists: {path_exists}\n" +
                          f"song_id in Local Archive: {in_dir_songids}\n")
             
             temppath = path.with_suffix(".tmp")
@@ -1012,7 +1012,7 @@ class Episode(DLContent):
         if not self.fetch_partner_url():
             stream = Zotify.get_content_stream(self)
             if stream is None:
-                Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING EPISODE - FAILED TO GET CONTENT STREAM\n' +\
+                Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING EPISODE - FAILED TO GET CONTENT STREAM\n' +
                                                      f'Episode_ID: {self.id}')
                 return
             time_elapsed_dl = self.fetch_content_stream(stream, temppath, pbar_stack)
@@ -1029,16 +1029,16 @@ class Episode(DLContent):
             with Loader(PrintChannel.PROGRESS_INFO, "Identifying episode audio codec..."):
                 codec = self.get_audio_codec(temppath)
                 ext = "." + EXT_MAP.get(codec, codec)
-            Printer.debug(f'Detected Codec: {codec}\n' +\
+            Printer.debug(f'Detected Codec: {codec}\n' +
                           f'File Extension Matched to: {ext}')
         except Exception as e:
             # assume default codec since that's what the original library did
             ext = ".mp3"
             if isinstance(e, ffmpy.FFExecutableNotFoundError):
-                Printer.hashtaged(PrintChannel.WARNING, 'FFMPEG NOT FOUND\n'+\
+                Printer.hashtaged(PrintChannel.WARNING, 'FFMPEG NOT FOUND\n'+
                                                         'SKIPPING CODEC ANALYSIS - OUTPUT ASSUMED MP3')
             else:
-                Printer.hashtaged(PrintChannel.WARNING, 'UNKNOWN ERROR\n' +\
+                Printer.hashtaged(PrintChannel.WARNING, 'UNKNOWN ERROR\n' +
                                                         'SKIPPING CODEC ANALYSIS - OUTPUT ASSUMED MP3')
                 Printer.traceback(e)
         if path.suffix == ".copy":
@@ -1051,8 +1051,8 @@ class Episode(DLContent):
                 path = PurePath(Path(temppath).rename(path.with_suffix(ext)))
             self.mark_downloaded(path)
         
-        Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{path.relative_to(Zotify.CONFIG.get_root_podcast_path())}"\n' +\
-                                                  f'DOWNLOAD TOOK {time_elapsed_dl}' + \
+        Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{path.relative_to(Zotify.CONFIG.get_root_podcast_path())}"\n' +
+                                                  f'DOWNLOAD TOOK {time_elapsed_dl}' +
                                                   f' (PLUS {time_elapsed_ffmpeg} CONVERTING)' if time_elapsed_ffmpeg else '')
         if not in_dir_songids:
             add_obj_to_song_archive(self, self.filepath.parent)
@@ -1131,7 +1131,7 @@ class Playlist(Container):
         self.snapshot_id = ""
         self.tracks_or_eps: list[Track | Episode] = []
     
-    def extChildren(self, objs: list[Content | Container] = []):
+    def extChildren(self, objs: list[Track | Episode] = []):
         return super().extChildren(self.tracks_or_eps, objs)
     
     def parse_metadata(self, playlist_resp: dict[str, str | bool]):
@@ -1188,7 +1188,7 @@ class Album(Container):
         self.artists: list[Artist] = []
         self.tracks: list[Track] = []
     
-    def extChildren(self, objs: list[Content | Container] = []):
+    def extChildren(self, objs: list[Track] = []):
         return super().extChildren(self.tracks, objs)
     
     def parse_metadata(self, album_resp: dict[str, str | bool]):
@@ -1256,7 +1256,7 @@ class Artist(Container):
         self.albums: list[Album] = []
         self.top_songs: list[Track] = []
     
-    def extChildren(self, objs: list[Content | Container] = []):
+    def extChildren(self, objs: list[Album | Track] = []):
         return super().extChildren(self.albums if not self.toptrackmode else self.top_songs, objs)
     
     def parse_metadata(self, artist_resp: dict[str, str | int | list[str]]):
@@ -1296,7 +1296,7 @@ class Show(Container):
         self.total_episodes = ""
         self.episodes: list[Episode] = []
     
-    def extChildren(self, objs: list[Content | Container] = []):
+    def extChildren(self, objs: list[Episode] = []):
         return super().extChildren(self.episodes, objs)
     
     def parse_metadata(self, show_resp: dict[str, str | bool]):
@@ -1402,7 +1402,7 @@ class Query(Container):
         return direct_reqs_objs, direct_req_item_resps
     
     def parse_direct_metadata(self, direct_reqs_objs: list[list[DLContent | Container]], direct_req_item_resps: list[list[dict]]):
-        """This sets self.extChildren == self.requested_objs"""
+        """ This sets self.requested_objs (Query's name for self.extChildren) """
         for objs, item_resps in zip(direct_reqs_objs, direct_req_item_resps):
             if not objs:
                 self.requested_objs.append([])
@@ -1416,6 +1416,7 @@ class Query(Container):
     
     def fetch_extra_metadata(self):
         alltracks = {t for t in self.subContent if isinstance(t, Track) and t.id}
+        
         if Zotify.CONFIG.get_save_genres():
             artists = set.union(set(), *(set(track.artists) for track in alltracks))
             artist_ids: dict[str, Artist] = {artist.id: artist for artist in artists if artist.id and not artist.hasMetadata}
@@ -1480,7 +1481,7 @@ class Query(Container):
             for content_list in content_lists:
                 m3u8_dir = get_m3u8_dir(content_list)
                 if m3u8_dir is None:
-                    Printer.hashtaged(PrintChannel.WARNING, f"SKIPPING M3U8 CREATION for {get_m3u8_filename(content_list)}\n" +\
+                    Printer.hashtaged(PrintChannel.WARNING, f"SKIPPING M3U8 CREATION for {get_m3u8_filename(content_list)}\n" +
                                                              "NO CONTENT WITH VALID FILEPATHS FOUND")
                     continue
                 
@@ -1586,8 +1587,8 @@ class LikedSongs(Query):
             
             raw_liked_archive = fetch_m3u8_songs(m3u8_path)
             if not raw_liked_archive:
-                Printer.hashtaged(PrintChannel.WARNING, "FAILED Liked Songs ARCHIVE M3U8 UPDATE\n" +\
-                                                        "FAILED TO READ EXISTING M3U8\n" +\
+                Printer.hashtaged(PrintChannel.WARNING, "FAILED Liked Songs ARCHIVE M3U8 UPDATE\n" +
+                                                        "FAILED TO READ EXISTING M3U8\n" +
                                                         "FALLING BACK TO STANDARD M3U8 CREATION")
                 return
             
@@ -1598,11 +1599,11 @@ class LikedSongs(Query):
                     append = raw_liked_archive[3*i:] # includes matching track m3u8 entry
                     return append
                 if i == 0:
-                    Printer.hashtaged(PrintChannel.WARNING, "FIRST TRACK IN EXISTING M3U8 NOT FOUND IN CURRENT LIKED SONGS\n" +\
+                    Printer.hashtaged(PrintChannel.WARNING, "FIRST TRACK IN EXISTING M3U8 NOT FOUND IN CURRENT LIKED SONGS\n" +
                                                             "PERFORMING DEEP SEARCH FOR SYNC POINT")
             
-            Printer.hashtaged(PrintChannel.WARNING, "FAILED Liked Songs ARCHIVE M3U8 UPDATE\n" +\
-                                                    "FAILED TO FIND SYNC POINT\n" +\
+            Printer.hashtaged(PrintChannel.WARNING, "FAILED Liked Songs ARCHIVE M3U8 UPDATE\n" +
+                                                    "FAILED TO FIND SYNC POINT\n" +
                                                     "FALLING BACK TO STANDARD M3U8 CREATION")
         
         super().create_m3u8_playlists(force_name=self.name, append=handle_archive_mode())

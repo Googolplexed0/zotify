@@ -55,9 +55,11 @@ def main():
     
     parser.add_argument('-ns', '--no-splash',
                         action='store_true',
+                        dest='no_splash',
                         help='Suppress the splash screen when loading')
     parser.add_argument('--debug',
                         action='store_true',
+                        dest='debug',
                         help='Enable debug mode, prints extra information and creates a `config_DEBUG.json` file')
     parser.add_argument('--update-config',
                         action='store_true',
@@ -67,38 +69,45 @@ def main():
                         action='store_true',
                         dest='update_archive',
                         help='Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged')
+    parser.add_argument('--persist',
+                        action='store_true',
+                        dest='persist',
+                        help='Perform multiple queries with a single persistent Session')
     
     group = parser.add_mutually_exclusive_group(required=False)
-    group.add_argument('urls',
+    group.add_argument('--url', '--urls',
                        type=str,
                        # action='extend',
-                       default='',
+                       dest="urls",
                        nargs='*',
                        help='Download track(s), album(s), playlist(s), podcast episode(s), or artist(s) specified by the URL(s) passed as a command line argument(s). If an artist\'s URL is given, all albums by the specified artist will be downloaded. Can take multiple URLs as multiple arguments.')
-    group.add_argument('-l', '--liked',
-                       dest='liked_songs',
-                       action='store_true',
-                       help='Download all Liked Songs on your account')
-    group.add_argument('-a', '--artists',
-                       dest='followed_artists',
-                       action='store_true',
-                       help='Download all songs by all followed artists')
-    group.add_argument('-p', '--playlist',
-                       action='store_true',
-                       help='Download playlist(s) saved by your account (interactive)')
-    group.add_argument('-s', '--search',
-                       type=str,
-                       nargs='?',
-                       const=' ',
-                       help='Search tracks/albums/artists/playlists based on argument (interactive)')
     group.add_argument('-f', '--file',
                        type=str,
                        dest='file_of_urls',
                        help='Download all tracks/albums/episodes/playlists URLs within the file passed as argument')
-    group.add_argument('-v', '--verify-library',
-                       dest='verify_library',
+    group.add_argument('-l', '--liked', '--liked-songs', 
                        action='store_true',
+                       dest='liked_songs',
+                       help='Download all Liked Songs on your account')
+    group.add_argument('-a', '--artist', '--artists', '--followed-artists',
+                       action='store_true',
+                       dest='followed_artists',
+                       help='Download all songs by all followed artists')
+    group.add_argument('-p', '--playlist', '--playlists',
+                       action='store_true',
+                       dest='playlists',
+                       help='Download playlist(s) saved by your account (interactive)')
+    group.add_argument('-v', '--verify-library',
+                       action='store_true',
+                       dest='verify_library',
                        help='Check metadata for all tracks in ROOT_PATH or listed in SONG_ARCHIVE, updating the metadata if necessary. This will not download any new tracks, but may take a very, very long time.')
+    group.add_argument('-s', '--search',
+                       type=str,
+                       dest='search',
+                       nargs='?',
+                       const=' ',
+                       help='Search tracks/albums/artists/playlists based on argument (interactive)')
+    modes = group._group_actions.copy()
     
     for flag in DEPRECIATED_FLAGS: 
         group.add_argument(*flag["flags"],
@@ -110,7 +119,7 @@ def main():
         parser.add_argument(*DEPRECIATED_CONFIGS[key]['arg'],
                             type=str,
                             action='depreciated_ignore_warn',
-                            help=f'Delete the {key} flag from the commandline call'
+                            help=f'Delete the `{key}` flag from the commandline call'
                             )
     
     for key in CONFIG_VALUES:
@@ -123,7 +132,7 @@ def main():
     parser.set_defaults(func=client)
     
     args = parser.parse_args()
-    args.func(args)
+    args.func(args, modes)
 
 
 if __name__ == '__main__':
