@@ -74,6 +74,7 @@ If an artist's URL is given, all albums by the specified artist will be download
 | `-s`, `--search`                   | Search tracks/albums/artists/playlists based on argument (interactive)                                    |
 | `-p`, `--playlist`                 | Download playlist(s) saved by your account (interactive)                                                  |
 | `-l`, `--liked`                    | Download all Liked Songs on your account                                                                  |
+| `-e`, `--ep`                       | Download all albums on your account                                                                       |
 | `-a`, `--artists`                  | Download all songs by all followed artists                                                                |
 | `-f`, `--file`                     | Download all tracks/albums/episodes/playlists URLs within the file passed as argument                     |
 | `-v`, `--verify-library`           | Check metadata for all tracks in ROOT_PATH or listed in SONG_ARCHIVE, updating the metadata if necessary  |
