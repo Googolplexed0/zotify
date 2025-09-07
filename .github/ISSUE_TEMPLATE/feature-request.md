@@ -7,12 +7,12 @@ assignees: ''
 
 ---
 
-**Related Problem/Issue?**
+**Related Problem/Issue**
+*Is this Feature Request related to an existing GitHub Issue or Bug Report?*
 
-- [ ] No
-- [ ] Yes
+*If Yes:* Link to the associated GitHub Issue
 
-If Yes: A clear and concise description of what the problem is.
+*If No:* A clear and concise description of what the problem is.
 
 **Ideal Solution**
 A clear and concise description of what you want to happen.
