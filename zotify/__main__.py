@@ -59,6 +59,11 @@ def main():
     parser.add_argument('--update-config',
                         action='store_true',
                         help='Updates the `config.json` file while keeping all current settings unchanged')
+    parser.add_argument("--liked-since",
+                        type=str,
+                        metavar="DATETIME",
+                        dest="liked_since",
+                        help="Filters for songs liked on or after the given date and time in ISO8601 format (only valid with --liked)")
     
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument('urls',
