@@ -10,7 +10,7 @@ from zotify.const import TRACKS, ALBUM, GENRES, NAME, DISC_NUMBER, TRACK_NUMBER,
     IS_PLAYABLE, ARTISTS, ARTIST_IDS, IMAGES, URL, RELEASE_DATE, ID, TRACK_URL, \
     CODEC_MAP, DURATION_MS, WIDTH, COMPILATION, ALBUM_TYPE, ARTIST_BULK_URL, YEAR, \
     ALBUM_ARTISTS, IMAGE_URL, EXPORT_M3U8
-from zotify.termoutput import Printer, PrintChannel, Loader
+from zotify.termoutput import Printer, PrintChannel, Loader, PrintCategory
 from zotify.utils import fill_output_template, set_audio_tags, set_music_thumbnail, create_download_directory, \
     add_to_m3u8, fetch_m3u8_songs, get_directory_song_ids, add_to_directory_song_archive, \
     get_archived_song_ids, add_to_song_archive, fmt_duration, wait_between_downloads, conv_artist_format, \
@@ -70,6 +70,7 @@ def get_track_genres(artist_ids: list[str], track_name: str) -> list[str]:
             genres = set()
             for artist in artists:
                 if GENRES in artist and len(artist[GENRES]) > 0:
+                    Printer.new_print(PrintChannel.PROGRESS_INFO, f'Found genres for artist: {artist[NAME]} - {", ".join(artist[GENRES])}', PrintCategory.GENERAL)
                     genres.update(artist[GENRES])
         
         if len(genres) == 0:

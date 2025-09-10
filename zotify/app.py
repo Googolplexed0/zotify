@@ -5,7 +5,8 @@ from pathlib import Path, PurePath
 from zotify.album import download_album, download_artist_albums
 from zotify.config import Zotify
 from zotify.const import TRACK, NAME, ID, ARTIST, ARTISTS, ITEMS, TRACKS, EXPLICIT, ALBUM, ALBUMS, OWNER, \
-    PLAYLIST, PLAYLISTS, DISPLAY_NAME, USER_FOLLOWED_ARTISTS_URL, USER_SAVED_TRACKS_URL, SEARCH_URL, TRACK_BULK_URL
+    PLAYLIST, PLAYLISTS, DISPLAY_NAME, USER_FOLLOWED_ARTISTS_URL, USER_SAVED_ALBUMS_URL, USER_SAVED_TRACKS_URL, \
+    SEARCH_URL, TRACK_BULK_URL
 from zotify.playlist import get_playlist_info, download_from_user_playlist, download_playlist
 from zotify.podcast import download_episode, download_show
 from zotify.termoutput import Printer, PrintChannel
@@ -275,7 +276,31 @@ def client(args: Namespace) -> None:
                 download_track('liked', song[TRACK][ID], None, pbar_stack)
                 pbar.set_description(song[TRACK][NAME])
                 Printer.refresh_all_pbars(pbar_stack)
-    
+
+    elif args.liked_eps:
+        album_info = []
+        limit = 50
+        offset = 0
+        while True:
+            resp = Zotify.invoke_url_with_params(USER_SAVED_ALBUMS_URL, limit=limit, offset=offset)
+            if 'items' not in resp or len(resp['items']) == 0:
+                break
+            album_info.extend([{"id": item['album']['id'], "name": item['album'].get('name', ''), 
+                               "artists": ','.join([i.get('name', '') for i in item['album'].get('artists', [])])}
+                              for item in resp['items'] if 'album' in item and 'id' in item['album']])
+            if len(resp['items']) < limit:
+                break
+            offset += limit
+        pos = 3
+        pbar = Printer.pbar(album_info, unit='album', pos=pos, 
+                            disable=not Zotify.CONFIG.get_show_album_pbar())
+        pbar_stack = [pbar]
+        # print(album_info)
+        for album_item in pbar:
+            download_album(album_item['id'], pbar_stack)
+            pbar.set_description(f'{album_item["name"]} - {album_item["artists"]}')
+            Printer.refresh_all_pbars(pbar_stack)
+
     elif args.followed_artists:
         followed_artists = Zotify.invoke_url_nextable(USER_FOLLOWED_ARTISTS_URL, ITEMS, stripper=ARTISTS)
         pos = 7

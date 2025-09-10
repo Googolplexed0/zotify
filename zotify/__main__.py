@@ -71,6 +71,10 @@ def main():
                        dest='liked_songs',
                        action='store_true',
                        help='Download all Liked Songs on your account')
+    group.add_argument('-e', '--eps-lps',
+                       dest='liked_eps',
+                       action='store_true',
+                       help='Download all albums on your account')
     group.add_argument('-a', '--artists',
                        dest='followed_artists',
                        action='store_true',
