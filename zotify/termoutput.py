@@ -1,15 +1,16 @@
 from __future__ import annotations
 import platform
-from os import get_terminal_size, system
+from enum import Enum
 from itertools import cycle
-from time import sleep
+from mutagen import FileType
+from os import get_terminal_size, system
 from pprint import pformat
 from tabulate import tabulate
 from threading import Thread
-from traceback import TracebackException
-from enum import Enum
+from time import sleep
 from tqdm import tqdm
-from mutagen import FileType
+from tqdm.auto import tqdm as tqdmauto
+from traceback import TracebackException
 
 from zotify.const import *
 
@@ -204,6 +205,16 @@ class Printer:
         Printer.hashtaged(PrintChannel.MANDATORY, title)
         Printer.new_print(PrintChannel.MANDATORY, tabulate(tabular_data, headers=headers, tablefmt='pretty'))
     
+    @staticmethod
+    def dl_complete(dlcontent, time_elapsed_dl: str, time_elapsed_ffmpeg: str | None) -> None:
+        from zotify.api import DLContent
+        dlcontent: DLContent = dlcontent
+        Interface.update(time_elapsed_dl, time_elapsed_ffmpeg, dlcontent.name)
+        dlcontent.set_dl_status("Waiting Between Downloads")
+        Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{dlcontent.filepath.relative_to(dlcontent._path_root)}"\n' +
+                                                  f'DOWNLOAD TOOK {time_elapsed_dl}' +
+                                                  f' (PLUS {time_elapsed_ffmpeg} CONVERTING)' if time_elapsed_ffmpeg else '')
+    
     # Prefabs
     @staticmethod
     def clear() -> None:
@@ -274,6 +285,10 @@ class Printer:
             pbar_stack = []
         
         return pos, pbar_stack
+    
+    @staticmethod
+    def pbar_stream(stream, desc: str = "", total: int | None = None):
+        return tqdmauto.wrapattr(stream, "read", total=total, desc=desc)
 
 
 class Loader:

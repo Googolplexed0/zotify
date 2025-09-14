@@ -3,10 +3,8 @@ import ffmpy
 import functools
 import music_tag
 import requests
-import shutil
 import subprocess
 import uuid
-from tqdm.auto import tqdm
 
 from zotify import __version__
 from zotify.const import *
@@ -125,6 +123,7 @@ class Content():
         self._clsn = self.__class__.__name__
         self._plural = self._clsn.lower() + "s"
         self._regex_flag: re.Pattern | None = None
+        self._path_root: PurePath = Zotify.CONFIG.get_root_path()
         if ":" in id_or_uri:
             self.uri = id_or_uri.split(":", 1)[-1]
             self.id = self.uri.split(":", 1)[-1] #local file URIs will have more than 2 commas
@@ -137,11 +136,12 @@ class Content():
         self._children: set[Content | Container] = set()
         self._siblings: set[Content | Container] = set()
         self._accepting_children = True
-        self.downloaded = False # self / all child DLContent must have valid Path if True
+        self._skippable = None
         self.hasMetadata = False
-        self.skip_wait = False
+        self.downloaded = False # self / all child DLContent must have valid Path if True
         self.url = ""
         self.name = ""
+        self.printing_label = ""
     
     @property
     def query(self) -> Query:
@@ -190,14 +190,15 @@ class Content():
         self.add_children(obj)
         return obj
     
-    def regex_check(self) -> bool:
+    def regex_check(self, skip_debug_print: bool = False) -> bool:
         if self._regex_flag is None:
             return False
         regex_match = self._regex_flag.search(self.name)
-        Printer.debug("Regex Check\n" +
-                     f"Pattern: {self._regex_flag.pattern}\n" +
-                     f"{self._clsn} Name: {self.name}\n" +
-                     f"Match Object: {regex_match}")
+        if not skip_debug_print:
+            Printer.debug("Regex Check\n" +
+                        f"Pattern: {self._regex_flag.pattern}\n" +
+                        f"{self._clsn} Name: {self.name}\n" +
+                        f"Match Object: {regex_match}")
         if regex_match:
             Printer.hashtaged(PrintChannel.SKIPPING, f'{self._clsn.upper()} MATCHES REGEX FILTER\n' +
                                                      f'{self._clsn}_Name: {self.name} - {self._clsn}_ID: {self.id}' +
@@ -236,6 +237,10 @@ class Content():
             objs.append(obj)
         return objs
     
+    # placeholder func, overwrite in child class
+    def check_skippable(self) -> bool:
+        pass
+    
     # placeholder func, overwrite in each child class
     def download(self, pbar_stack: list):
         pass
@@ -259,11 +264,14 @@ class Content():
                 sib.filepath = self.filepath
             else:
                 sib.filepath = check_path_dupes(sib.fill_output_template())
-                Path(sib.filepath.parent).mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(self.filepath, sib.filepath)
-                if isinstance(sib, Track):
-                    sib.set_audio_tags(sib.filepath)
-                    sib.set_music_thumbnail(sib.filepath)
+                if Path(self.filepath).exists(): # SHOULD always be true
+                    pathlike_move_safe(self.filepath, sib.filepath, copy=True)
+                    if isinstance(sib, Track):
+                        sib.set_audio_tags(sib.filepath)
+                        sib.set_music_thumbnail(sib.filepath)
+                else:
+                    Printer.hashtaged(PrintChannel.WARNING, f"SIBLING FAILED TO COPY METADATA\n" +
+                                                            f'MISSING FILE EXPECTED AT PATH "{self.filepath}"')
             sib.mark_downloaded()
         
         if self._parent and all({i.downloaded for i in self._parent._children}):
@@ -301,7 +309,9 @@ class DLContent(Content):
         self._codecs: dict[str, str] = {}
         self._ext = ""
         self._dl_status = ""
-        self.printing_label = ""
+        self._in_dir_archive = False
+        self._in_global_archive = False
+        self.is_playable = False
         self.filepath: PurePath | None = None
         self.duration_ms = 0
     
@@ -313,6 +323,57 @@ class DLContent(Content):
     
     def fill_output_template(self) -> PurePath:
         pass
+    
+    def check_skippable(self, check_path_glob: bool = False) -> bool:
+        if self._skippable is not None:
+            return self._skippable
+        self._skippable = False
+        
+        if self.downloaded:
+            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" ({self._clsn.upper()} ALREADY DOWNLOADED THIS SESSION)')
+            self._skippable = True
+        elif self.regex_check(skip_debug_print=Zotify.CONFIG.get_optimized_dl_order()):
+            self._skippable = True
+        
+        if self._skippable:
+            return self._skippable
+        
+        path = self.fill_output_template()
+        path_exists = Path(path).is_file() and Path(path).stat().st_size
+        if check_path_glob and path.suffix == ".copy":
+            # file suffix agnostic check
+            for file_match in Path(path.parent).glob(path.stem + ".*", case_sensitive=True):
+                if file_match.stat().st_size:
+                    path_exists = True
+                    break
+        
+        self._in_dir_archive = self.id in get_archived_item_ids(path.parent)
+        self._in_global_archive = self.id in get_archived_item_ids()
+        if not Zotify.CONFIG.get_optimized_dl_order():
+            Printer.debug("Duplicate Check\n" +
+                        f"File Already Exists: {path_exists}\n" +
+                        f"id in Local Archive: {self._in_dir_archive}\n" +
+                        f"id in Global Archive: {self._in_global_archive}")
+        
+        if not self.is_playable:
+            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" ({self._clsn.upper()} IS UNAVAILABLE)')
+            self._skippable = True
+        elif path_exists and Zotify.CONFIG.get_skip_existing() and Zotify.CONFIG.get_disable_directory_archives():
+            Printer.hashtaged(PrintChannel.SKIPPING, f'"{path.relative_to(self._path_root)}" (FILE ALREADY EXISTS)')
+            self.mark_downloaded(path)
+            self._skippable = True
+        elif self._in_dir_archive and Zotify.CONFIG.get_skip_existing() and not Zotify.CONFIG.get_disable_directory_archives():
+            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" ({self._clsn.upper()} ALREADY EXISTS)')
+            path = get_archived_item_paths(path.parent)[get_archived_item_ids(path.parent).index(self.id)]
+            self.mark_downloaded(path)
+            self._skippable = True
+        elif self._in_global_archive and Zotify.CONFIG.get_skip_previously_downloaded():
+            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" ({self._clsn.upper()} DOWNLOADED PREVIOUSLY)')
+            path = get_archived_item_paths()[get_archived_item_ids().index(self.id)]
+            self.mark_downloaded(path)
+            self._skippable = True
+        
+        return self._skippable
     
     def fetch_content_stream(self, stream, temppath: PurePath, pbar_stack: list) -> str:
         time_start = time.time()
@@ -344,13 +405,16 @@ class DLContent(Content):
     def get_audio_duration(self, path: PurePath) -> float:
         """ Returns the downloaded file's duration in seconds """
         
-        command = ['ffprobe', '-show_entries', 'format=duration', '-i', str(path)]
-        output = subprocess.run(command, capture_output=True)
-        
-        duration = re.search(r'[\D]=([\d\.]*)', str(output.stdout)).groups()[0]
-        duration = float(duration)
-        
-        return duration
+        ff_m = ffmpy.FFprobe(
+            global_options=['-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'],
+            inputs={path: ["-show_entries", "format=duration"]},
+        )
+        stdout, stderr = ff_m.run(stdout=subprocess.PIPE)
+        loggable_output = [stdout.decode() if stdout else "",
+                           stderr.decode() if stderr else ""]
+        Printer._logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
+        duration = re.search(r'[\D]=([\d\.]*)', str(stdout)).groups()[0]
+        return float(duration)
     
     def get_audio_codec(self, path: PurePath) -> str:
         ff_m = ffmpy.FFprobe(
@@ -431,7 +495,6 @@ class Track(DLContent):
         self.url = TRACK_URL
         
         self.disc_number = ""
-        self.is_playable = False
         self.track_number = ""
         self.year = ""
         self.album: Album = None
@@ -607,9 +670,11 @@ class Track(DLContent):
         
         return Zotify.CONFIG.get_root_path() / f"{output_template}.{self._ext}"
     
-    def fetch_lyrics(self, filedir: PurePath) -> list[str]:
+    def fetch_lyrics(self) -> list[str]:
         
-        if not Zotify.CONFIG.get_download_lyrics() and not Zotify.CONFIG.get_always_check_lyrics():
+        if self.lyrics:
+            return
+        elif not Zotify.CONFIG.get_download_lyrics() and not Zotify.CONFIG.get_always_check_lyrics():
             return
         
         try:
@@ -617,7 +682,7 @@ class Track(DLContent):
                 
                 lyricdir = Zotify.CONFIG.get_lyrics_location()
                 if lyricdir is None:
-                    lyricdir = filedir
+                    lyricdir = self.fill_output_template().parent
                 
                 Path(lyricdir).mkdir(parents=True, exist_ok=True)
                 
@@ -794,94 +859,60 @@ class Track(DLContent):
             with open(jpg_path, 'wb') as jpg_file:
                 jpg_file.write(img)
     
+    def check_skippable(self) -> bool:
+        super().check_skippable()
+        
+        if Zotify.CONFIG.get_skip_comp_albums() and self.album and self.album.compilation:
+            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK FROM COMPILATION ALBUM)')
+            self._skippable = True
+        
+        return self._skippable
+    
     def download(self, pbar_stack: list):
-        self.skip_wait = True
         if self.downloaded:
-            # okay to skip get_always_check_lyrics, since it was already checked this session
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK ALREADY DOWNLOADED THIS SESSION)')
+            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" ({self._clsn.upper()} ALREADY DOWNLOADED THIS SESSION)')
             return
-        
-        path = self.fill_output_template()
-        
-        if Zotify.CONFIG.get_always_check_lyrics():
-            self.fetch_lyrics(path.parent)
         
         if Zotify.CONFIG.get_download_parent_album() and not isinstance(self._parent, Album):
             # only called when not get_optimized_dl() since download_parent_album() replaces Tracks with optimized Albums
             self.album.download(pbar_stack)
             return
-        elif Zotify.CONFIG.get_skip_comp_albums() and self.album and self.album.compilation:
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK FROM COMPILATION ALBUM)')
-            return
-        elif self.regex_check():
-            # self.regex_check() includes print if regex matched
+        
+        if Zotify.CONFIG.get_always_check_lyrics():
+            self.fetch_lyrics()
+        
+        if self.check_skippable():
             return
         
         Interface.bind(self)
         with self.set_dl_status("Preparing Download"):
-            # TODO: early get_content_stream() -> stricter path_exists check BUT extra internal API calls
-            # stream = Zotify.get_content_stream(self)
-            # if stream is None:
-            #     Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +
-            #                                          f'Track_ID: {self.id}')
-            #     return
-            # path_exists = Path(path).is_file() and pct_error(Path(path).stat().st_size, stream.input_stream.size) <= 0.1
-            
-            path_exists = Path(path).is_file() and Path(path).stat().st_size
-            in_dir_songids = self.id in get_archived_item_ids(path.parent)
-            in_global_songids = self.id in get_archived_item_ids()
-            Printer.debug("Duplicate Check\n" +
-                         f"File Already Exists: {path_exists}\n" +
-                         f"song_id in Local Archive: {in_dir_songids}\n" +
-                         f"song_id in Global Archive: {in_global_songids}")
-            
-            # same path, not same song_id, rename the newcomer
-            if not in_dir_songids and not Zotify.CONFIG.get_disable_directory_archives():
-                path = check_path_dupes(path)
-                path_exists = False # new path guaranteed to be unique
+            path = self.fill_output_template()
+            if not self._in_dir_archive and not Zotify.CONFIG.get_disable_directory_archives():
+                path = check_path_dupes(path)  # same path, not same song_id, rename the newcomer
             
             temppath = path.with_suffix(".tmp")
             if Zotify.CONFIG.get_temp_download_dir():
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid.uuid4())}_{self.id}.tmp'
             Path(temppath.parent).mkdir(parents=True, exist_ok=True)
         
-        if not self.is_playable:
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK IS UNAVAILABLE)')
-            return
-        if path_exists and Zotify.CONFIG.get_skip_existing() and Zotify.CONFIG.get_disable_directory_archives():
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{path.relative_to(Zotify.CONFIG.get_root_path())}" (FILE ALREADY EXISTS)')
-            self.mark_downloaded(path)
-            return
-        if in_dir_songids and Zotify.CONFIG.get_skip_existing() and not Zotify.CONFIG.get_disable_directory_archives():
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK ALREADY EXISTS)')
-            path = get_archived_item_paths(path.parent)[get_archived_item_ids(path.parent).index(self.id)]
-            self.mark_downloaded(path)
-            return
-        if in_global_songids and Zotify.CONFIG.get_skip_previously_downloaded():
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (TRACK DOWNLOADED PREVIOUSLY)')
-            path = get_archived_item_paths()[get_archived_item_ids().index(self.id)]
-            self.mark_downloaded(path)
-            return
-        
         stream = Zotify.get_content_stream(self)
         if stream is None:
             Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +
                                                  f'Track_ID: {self.id}')
             return
-        self.skip_wait = False
         
         self.set_dl_status("Downloading Stream")
         time_elapsed_dl = self.fetch_content_stream(stream, temppath, pbar_stack)
         
         if not Zotify.CONFIG.get_always_check_lyrics():
-            self.fetch_lyrics(path.parent)
+            self.fetch_lyrics()
         
         with self.set_dl_status("Converting File"):
             # convert temppath -> path here
             create_download_directory(path.parent)
             time_elapsed_ffmpeg = self.convert_audio_format(temppath, path)
             if time_elapsed_ffmpeg is None:
-                path = PurePath(Path(temppath).rename(path.with_suffix(".ogg")))
+                path = pathlike_move_safe(temppath, path.with_suffix(".ogg"))
             self.mark_downloaded(path)
         
         try:
@@ -892,14 +923,10 @@ class Track(DLContent):
                                                   'Ensure FFMPEG is installed and added to your PATH')
             Printer.traceback(e)
         
-        Interface.update(time_elapsed_dl, time_elapsed_ffmpeg, self.name)
-        self.set_dl_status("Waiting Between Downloads")
-        Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{path.relative_to(Zotify.CONFIG.get_root_path())}"\n' +
-                                                  f'DOWNLOAD TOOK {time_elapsed_dl}' +
-                                                  f' (PLUS {time_elapsed_ffmpeg} CONVERTING)' if time_elapsed_ffmpeg else '')
-        if not in_dir_songids:
+        Printer.dl_complete(self, time_elapsed_dl, time_elapsed_ffmpeg)
+        if not self._in_dir_archive:
             add_obj_to_song_archive(self, self.filepath.parent)
-        if not in_global_songids:
+        if not self._in_global_archive:
             add_obj_to_song_archive(self)
 
 
@@ -909,12 +936,12 @@ class Episode(DLContent):
         self._regex_flag = Zotify.CONFIG.get_regex_episode()
         self._codecs = CODEC_MAP_EPISODE
         self._ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower(), "copy")
+        self._path_root: PurePath = Zotify.CONFIG.get_root_podcast_path()
         self.url = EPISODE_URL
         
         self.desc = ""
         self.explicit = False
         self.external = False
-        self.is_playable = False
         self.partner_url = ""
         self.release_date = ""
         self.show: Show = None
@@ -956,6 +983,17 @@ class Episode(DLContent):
         Path(root_podcast_path).mkdir(parents=True, exist_ok=True)
         return root_podcast_path / f"{self.show.name}/{self.printing_label}.{self._ext}"
     
+    def check_skippable(self) -> bool:
+        super().check_skippable(check_path_glob=True)
+        
+        # this check seems useless?
+        if not all((self.name, self.duration_ms, self.show)):
+            Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING EPISODE - FAILED TO QUERY METADATA\n' +
+                                                 f'Episode_ID: {self.id}')
+            self._skippable = True
+        
+        return self._skippable
+    
     def fetch_partner_url(self) -> str:
         (raw, resp) = Zotify.invoke_url(PARTNER_URL + self.id + '"}&extensions=' + PERSISTED_QUERY)
         direct_download_url = resp[DATA][EPISODE][AUDIO][ITEMS][-1][URL]
@@ -965,83 +1003,33 @@ class Episode(DLContent):
     
     def download_directly(self, path: PurePath) -> str:
         time_start = time.time()
+        
         r = requests.get(self.partner_url, stream=True, allow_redirects=True)
         if r.status_code != 200:
             r.raise_for_status()  # Will only raise for 4xx codes, so...
             raise RuntimeError(f"Request to {self.partner_url} returned status code {r.status_code}")
         file_size = int(r.headers.get('Content-Length', 0))
-        if not file_size:
-            file_size = int(r.headers.get('content-length', 0))
+        desc = "" if file_size else "(Unknown total file size)"
         
         path = Path(path).expanduser().resolve()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        
-        desc = "(Unknown total file size)" if file_size == 0 else ""
-        r.raw.read = functools.partial(
-            r.raw.read, decode_content=True)  # Decompress if needed
-        with tqdm.wrapattr(r.raw, "read", total=file_size, desc=desc) as r_raw:
-            with path.open("wb") as f:
-                shutil.copyfileobj(r_raw, f)
+        r.raw.read = functools.partial(r.raw.read, decode_content=True)  # Decompress if needed
+        with Printer.pbar_stream(r.raw, desc=desc, total=file_size) as r_raw:
+            pathlike_move_safe(r_raw, path)
         
         time_dl_end = time.time()
         return fmt_duration(time_dl_end - time_start)
     
     def download(self, pbar_stack: list | None):
-        if self.downloaded:
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (EPISODE ALREADY DOWNLOADED THIS SESSION)')
-            return
-        
-        # this check seems useless?
-        if not all((self.name, self.duration_ms, self.show)):
-            Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING EPISODE - FAILED TO QUERY METADATA\n' +
-                                                 f'Episode_ID: {self.id}')
-            return
-        
-        if self.regex_check():
+        if self.check_skippable():
             return
         
         Interface.bind(self)
         with self.set_dl_status("Preparing Download"):
             path = self.fill_output_template()
-            
-            # TODO: early get_content_stream() -> stricter path_exists check BUT extra internal API calls
-            # TODO: needs to account for both download_directly() and fetch_contet_stream() cases
-            # stream = Zotify.get_content_stream(self)
-            # if stream is None:
-            #     Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING SONG - FAILED TO GET CONTENT STREAM\n' +
-            #                                          f'Track_ID: {self.id}')
-            #     return
-            
-            path_exists = Path(path).is_file() and Path(path).stat().st_size
-            if path.suffix == ".copy":
-                # file suffix agnostic check
-                for file_match in Path(path.parent).glob(path.stem + ".*", case_sensitive=True):
-                    # if pct_error(Path(temppath).stat().st_size, stream.input_stream.size) <= 0.1:
-                    if file_match.stat().st_size:
-                        path_exists = True
-                        break
-            in_dir_songids = self.id in get_archived_item_ids(path.parent)
-            Printer.debug("Duplicate Check\n" +
-                         f"File Already Exists: {path_exists}\n" +
-                         f"song_id in Local Archive: {in_dir_songids}\n")
-            
             temppath = path.with_suffix(".tmp")
             if Zotify.CONFIG.get_temp_download_dir():
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid.uuid4())}_{self.id}.tmp'
             Path(temppath.parent).mkdir(parents=True, exist_ok=True)
-        
-        if not self.is_playable:
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (EPISODE IS UNAVAILABLE)')
-            return
-        if path_exists and Zotify.CONFIG.get_skip_existing() and Zotify.CONFIG.get_disable_directory_archives():
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (EPISODE ALREADY EXISTS)')
-            self.mark_downloaded(path)
-            return
-        if in_dir_songids and Zotify.CONFIG.get_skip_existing() and not Zotify.CONFIG.get_disable_directory_archives():
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" (EPISODE ALREADY EXISTS)')
-            path = get_archived_item_paths(path.parent)[get_archived_item_ids(path.parent).index(self.id)]
-            self.mark_downloaded(path)
-            return
         
         self.set_dl_status("Downloading Stream")
         if not self.fetch_partner_url():
@@ -1058,7 +1046,6 @@ class Episode(DLContent):
                 Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO DOWNLOAD EPISODE DIRECTLY')
                 Printer.traceback(e)
                 return
-        self.skip_wait = False
         
         try:
             with self.set_dl_status("Identifying Episode Audio Codec"):
@@ -1083,15 +1070,11 @@ class Episode(DLContent):
             create_download_directory(path.parent)
             time_elapsed_ffmpeg = self.convert_audio_format(temppath, path)
             if time_elapsed_ffmpeg is None:
-                path = PurePath(Path(temppath).rename(path.with_suffix(ext)))
+                path = pathlike_move_safe(temppath, path.with_suffix(ext))
             self.mark_downloaded(path)
         
-        Interface.update(time_elapsed_dl, time_elapsed_ffmpeg, self.name)
-        self.set_dl_status("Waiting Between Downloads")
-        Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{path.relative_to(Zotify.CONFIG.get_root_podcast_path())}"\n' +
-                                                  f'DOWNLOAD TOOK {time_elapsed_dl}' +
-                                                  f' (PLUS {time_elapsed_ffmpeg} CONVERTING)' if time_elapsed_ffmpeg else '')
-        if not in_dir_songids:
+        Printer.dl_complete(self, time_elapsed_dl, time_elapsed_ffmpeg)
+        if not self._in_dir_archive:
             add_obj_to_song_archive(self, self.filepath.parent)
 
 
@@ -1142,15 +1125,30 @@ class Container(Content):
         pbar_stack.append(pbar)
         return pbar, pbar_stack
     
-    def download(self, pbar_stack: list | None):
+    def check_skippable(self) -> bool:
+        if self._skippable is not None:
+            return self._skippable
+        
+        self._skippable = False
         if self.downloaded:
+            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.printing_label}" ({self._clsn.upper()} ALREADY DOWNLOADED THIS SESSION)')
+            self._skippable = True
+        
+        if self._skippable:
+            return self._skippable
+        
+        self._skippable = all([child.check_skippable() for child in self.extChildren()])
+        return self._skippable
+    
+    def download(self, pbar_stack: list | None):
+        if self.check_skippable():
             return
         
         pbar, pbar_stack = self.create_pbar(pbar_stack)
         for child in pbar:
             child.download(pbar_stack)
             Printer.refresh_all_pbars(pbar_stack)
-            wait_between_downloads(child.skip_wait)
+            wait_between_downloads(child.check_skippable())
         self.mark_downloaded() # technically should have no effect, as last child marks parent downloaded
 
 
@@ -1188,6 +1186,7 @@ class Playlist(Container):
         self.snapshot_id: str = playlist_resp[SNAPSHOT_ID]
         
         self.owner: Owner = self.parse_linked_objs([playlist_resp[OWNER]], Owner)[0]
+        self.printing_label = fix_filename(self.owner.name) + ' - ' + fix_filename(self.name)
         
         tracks_or_eps: list[dict] = [item[TRACK] for item in playlist_resp[TRACKS][ITEMS]]
         for track_or_ep, item in zip(tracks_or_eps, playlist_resp[TRACKS][ITEMS]):
@@ -1221,7 +1220,7 @@ class Album(Container):
         
         self.url = ALBUM_URL
         self.compilation = 0
-        self.estimated_duration_ms = 0
+        self.duration_ms = 0
         self.image_url = ""
         self.label = ""
         self.release_date = ""
@@ -1250,6 +1249,7 @@ class Album(Container):
         
         if ARTISTS in album_resp:
             self.artists = self.parse_linked_objs(album_resp[ARTISTS], Artist)
+            self.printing_label = fix_filename(self.artists[0].name) + ' - ' + fix_filename(self.name)
         
         if TRACKS in album_resp:
             self.label: str = album_resp[LABEL]
@@ -1258,6 +1258,7 @@ class Album(Container):
             if not self.needs_expansion:
                 # set in self.grab_more_children() if album incomplete
                 self.total_discs = str(album_resp[TRACKS][ITEMS][-1][DISC_NUMBER])
+                self.duration_ms = sum((int(t.duration_ms) for t in self.tracks))
             self.hasMetadata = True
         elif isinstance(self._parent, Artist):
             self.needs_expansion = True
@@ -1269,22 +1270,26 @@ class Album(Container):
         super().grab_more_children(hide_loader=hide_loader)
         self.needs_expansion = False
         self.total_discs = str(self.tracks[-1].disc_number)
+        self.duration_ms = sum((int(t.duration_ms) for t in self.tracks))
+    
+    def check_skippable(self) -> bool:
+        super().check_skippable()
+        
+        if Zotify.CONFIG.get_skip_comp_albums() and self.compilation:
+            self.skippable = True
+        
+        return self.skippable
     
     def download(self, pbar_stack):
-        if self.downloaded:
-            return
-        elif Zotify.CONFIG.get_skip_comp_albums() and self.compilation:
-            return
-        elif self.regex_check():
-            return
-        
         if Zotify.CONFIG.get_optimized_dl_order():
             # only called when get_download_parent_album() since get_optimized_dl() typically bypasses Containers
             tracks = self.tracks
-            downloadables = [c for c in self.tracks if c.id]
+            downloadables = [c for c in self.tracks if c.id and not c.check_skippable()]
             downloadables.sort(key=lambda x: x.duration_ms); edge_zip(downloadables)
             self.tracks = downloadables
+        
         super().download(pbar_stack)
+        
         if Zotify.CONFIG.get_optimized_dl_order():
             self.tracks = tracks
 
@@ -1318,6 +1323,7 @@ class Artist(Container):
         if GENRES in artist_resp:
             self.total_followers: int = artist_resp[FOLLOWERS][TOTAL]
             self.genres: list[str] = artist_resp[GENRES]
+            self.printing_label = fix_filename(f"{self.genres} {self.total_followers}") + ' - ' + fix_filename(self.name)
             self.hasMetadata = True
         
         self.needs_expansion = True
@@ -1338,6 +1344,7 @@ class Show(Container):
         self._contains = Episode
         self._preloaded = 50
         self._disable_flag = super()._disable_flag or not Zotify.CONFIG.get_show_album_pbar()
+        self._path_root: PurePath = Zotify.CONFIG.get_root_podcast_path()
         
         self.url = SHOW_URL
         self.desc = ""
@@ -1364,6 +1371,7 @@ class Show(Container):
         self.image_url: str = largest_image[URL]
         self.publisher: str = show_resp[PUBLISHER]
         self.total_episodes = str(show_resp[TOTAL_EPISODES]).zfill(2)
+        self.printing_label = fix_filename(self.publisher) + ' - ' + fix_filename(self.name)
         
         if EPISODES in show_resp:
             self.episodes = self.parse_linked_objs(show_resp[EPISODES][ITEMS], Episode)
@@ -1423,9 +1431,13 @@ class Query(Container):
         self.requested_urls = "" # for debug only
         self.parsed_request: list[list[str]] = []
         self.requested_objs: list[list[DLContent | Container]] = []
+        self.downloadables: set[DLContent | Container] | list[DLContent | Container] = []
     
     def extChildren(self, objs: list[Content | Container] = []):
-        return super().extChildren(self.requested_objs, objs)
+        if not self.downloadables:
+            return super().extChildren(self.requested_objs, objs)
+        else:
+            return super().extChildren(self.downloadables, objs)
     
     def request(self, requested_urls: str) -> Query:
         self.requested_urls = requested_urls # only used here, can remove later
@@ -1529,7 +1541,7 @@ class Query(Container):
     def get_m3u8_dir(self, content_list: list[DLContent]) -> str:
         m3u8_dir = Zotify.CONFIG.get_m3u8_location()
         if m3u8_dir is None: # Config calls for Output Dir
-            allpaths = {obj.filepath for obj in content_list if obj.filepath}
+            allpaths = {obj.filepath for obj in content_list if obj.filepath and obj.filepath.is_relative_to(obj._path_root)}
             if allpaths:
                 m3u8_dir = get_common_dir(allpaths)
         return m3u8_dir
@@ -1567,28 +1579,38 @@ class Query(Container):
                 add_to_m3u8(m3u8_path, content_list, append)
     
     def download(self):
-        requested_objs = self.requested_objs
         if Zotify.CONFIG.get_optimized_dl_order():
-            downloadables = [c for c in self._subContent if isinstance(c, DLContent) and c.id]
+            self.downloadables = {c for c in self._subContent if isinstance(c, DLContent) and c.id}
             
             if Zotify.CONFIG.get_download_parent_album():
-                tracks = {t for t in downloadables if isinstance(t, Track) and t.album is not None}
+                tracks = {t for t in self.downloadables if isinstance(t, Track) and t.album is not None}
                 albums = {t.album for t in tracks}
                 for album in albums:
-                    album.estimated_duration_ms = int(album.total_tracks) * 195000 # assume 3:15 average track duration
-                downloadables = [i for i in downloadables if not i in tracks]
-                downloadables.extend(albums)
+                    if not album.duration_ms: # do not overwrite fully-fetched albums' true duration
+                        album.duration_ms = int(album.total_tracks) * 195000 # assumes 3:15 average track duration
+                self.downloadables = {i for i in self.downloadables if not i in tracks}.union(albums)
+            
+            skipped = {d for d in self.downloadables if d.check_skippable()}
+            self.downloadables = [d for d in self.downloadables if d not in skipped]
+            
+            if Zotify.CONFIG.get_always_check_lyrics() and False:
+                # this will probably spam API calls
+                def get_lyr(item: DLContent | Container):
+                    if isinstance(item, Track):
+                        item.fetch_lyrics() 
+                    else:
+                        for i in item.extChildren():
+                            get_lyr(i)
+                for d in skipped:
+                    get_lyr(d)
             
             def sort_by_dur(item: DLContent | Album) -> int:
-                if isinstance(item, Album):
-                    return item.estimated_duration_ms
                 return item.duration_ms
-            downloadables.sort(key=sort_by_dur)
-            edge_zip(downloadables)
+            self.downloadables.sort(key=sort_by_dur)
+            edge_zip(self.downloadables)
         else:
-            downloadables = []
-            for cats in self.requested_objs: downloadables.extend(cats)
-        self.requested_objs = downloadables
+            for cats in self.requested_objs:
+                self.downloadables.extend(cats)
         
         if Zotify.CONFIG.get_standard_interface():
             Interface.refresh()
@@ -1599,7 +1621,6 @@ class Query(Container):
         except BaseException as e:
             interrupt = e
         
-        self.requested_objs = requested_objs
         while Printer.ACTIVE_LOADER: # catch and close any/all active loaders
             Printer.ACTIVE_LOADER.stop()
         while Printer.ACTIVE_PBARS: # catch and close any/all active pbars
@@ -1623,7 +1644,8 @@ class Query(Container):
                                                   "LOGGING ERROR AND TRACEBACK")
             # Printer.traceback(interrupt)
             Printer._logger(interrupt, PrintChannel.ERROR)
-            raise interrupt
+            if not isinstance(interrupt, KeyboardInterrupt):
+                raise interrupt
     
     def execute(self):
         direct_reqs_objs = self.create_direct_objs()

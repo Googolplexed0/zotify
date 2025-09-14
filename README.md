@@ -156,11 +156,11 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `M3U8_REL_PATHS`             | `--m3u8-relative-paths`             | List .m3u8 track paths relative to the .m3u8 file's directory                | True                      |
 | `LIKED_SONGS_ARCHIVE_M3U8`   | `--liked-songs-archive-m3u8`        | Use cumulative/archiving method when exporting .m3u8 file for Liked Songs    | True                      |
 
-| Lyric File Options           | Command Line Config Flag            | Description                                                                  | Default Value             |
-|------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
-| `DOWNLOAD_LYRICS`            | `--download-lyrics`                 | Whether lyrics should be downloaded (synced, with unsynced as fallback)      | True                      |
-| `LYRICS_LOCATION`            | `--lyrics-location`                 | Directory where .lrc files are saved, `""` being the output directory        | `""`                      |
-| `ALWAYS_CHECK_LYRICS`        | `--always-check-lyrics`             | Always try to download a song's lyrics, even if skipping the song            | False                     |
+| Lyric File Options           | Command Line Config Flag            | Description                                                                              | Default Value |
+|------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
+| `DOWNLOAD_LYRICS`            | `--download-lyrics`                 | Whether lyrics should be downloaded (synced, with unsynced as fallback)                  | True          |
+| `LYRICS_LOCATION`            | `--lyrics-location`                 | Directory where .lrc files are saved, `""` being the output directory                    | `""`          |
+| `ALWAYS_CHECK_LYRICS`        | `--always-check-lyrics`             | Always download a song's lyrics, even when skipped (unless `OPTIMIZED_DOWNLOADING`)      | False         |
 | `LYRICS_MD_HEADER`           | `--lyrics-md-header`                | Include optional metadata ([see tags here](https://en.wikipedia.org/wiki/LRC_(file_format)#Core_format)) at the start of a .lrc file                     | False                     |
 
 | Metadata Options             | Command Line Config Flag            | Description                                                                              | Default Value |

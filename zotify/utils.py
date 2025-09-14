@@ -3,7 +3,7 @@ import os
 import re
 import time
 from pathlib import Path, PurePath
-
+from shutil import move, copyfile, copyfileobj
 from zotify.config import Zotify
 from zotify.const import EXT_MAP
 from zotify.termoutput import PrintChannel, Printer
@@ -60,11 +60,28 @@ def walk_directory_for_tracks(path: str | PurePath) -> set[Path]:
     return track_paths
 
 
+def pathlike_move_safe(src: PurePath | bytes, dst: PurePath, copy: bool = False) -> PurePath:
+    Path(dst.parent).mkdir(parents=True, exist_ok=True)
+    
+    if not isinstance(src, PurePath):
+        with Path(dst).open("wb") as file:
+            copyfileobj(src, file)
+        return dst
+    
+    if not copy:
+        # Path(oldpath).rename(newpath)
+        move(src, dst)
+    else:
+        copyfile(src, dst)
+    return dst
+
+
 def check_path_dupes(path: PurePath) -> PurePath:
     if not (Path(path).is_file() and Path(path).stat().st_size):
         return path
     c = len([file for file in Path(path.parent).iterdir() if file.match(path.stem + "*")])
-    return path.with_stem(f"{path.stem}_{c}")
+    new_path = path.with_stem(f"{path.stem}_{c}") # guaranteed to be unique
+    return new_path
 
 
 def get_common_dir(allpaths: set[PurePath]) -> PurePath:
