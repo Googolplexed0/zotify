@@ -121,7 +121,7 @@ def edge_zip(sorted_list: list) -> None:
     sorted_list[::2], sorted_list[1::2] = sorted_list[:(n+1)//2], sorted_list[:(n+1)//2-1:-1]
 
 
-def select(items: list, get_input_prompt: str = 'ID(s): ') -> list:
+def select(items: list, get_input_prompt: str = 'ID(s): ', first_ID: int = 1) -> list:
     Printer.search_select()
     selection = ""
     while not selection or selection == " ":
@@ -148,7 +148,7 @@ def select(items: list, get_input_prompt: str = 'ID(s): ') -> list:
         Printer.hashtaged(PrintChannel.MANDATORY, 'INVALID SELECTION - EXITING...')
         return []
     
-    return [items[i-1] for i in indices]
+    return [items[i-first_ID] for i in indices]
 
 
 # Metadata & Codec Utils

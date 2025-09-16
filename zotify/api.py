@@ -1104,7 +1104,7 @@ class Container(Content):
         with Loader(PrintChannel.PROGRESS_INFO, f'Fetching {self._clsn.lower()} {item_key}...', disabled=hide_loader):
             if args: args = "&" + args
             return Zotify.invoke_url_nextable(f'{self.url}/{self.id}/{item_key}?{MARKET_APPEND}{args}',
-                                              ITEMS, self._fetch_q, offset=self._preloaded)
+                                              ITEMS, self._fetch_q, offset=self.len)
     
     def recurse_children(self) -> list[Content]:
         children = []
@@ -1188,14 +1188,15 @@ class Playlist(Container):
         self.owner: Owner = self.parse_linked_objs([playlist_resp[OWNER]], Owner)[0]
         self.printing_label = fix_filename(self.owner.name) + ' - ' + fix_filename(self.name)
         
-        tracks_or_eps: list[dict] = [item[TRACK] for item in playlist_resp[TRACKS][ITEMS]]
-        for track_or_ep, item in zip(tracks_or_eps, playlist_resp[TRACKS][ITEMS]):
-            track_or_ep[ADDED_AT] = item[ADDED_AT]
-            track_or_ep[ADDED_BY] = item[ADDED_BY]
-            track_or_ep[IS_LOCAL] = item[IS_LOCAL]
-        self.tracks_or_eps = self.parse_linked_objs(tracks_or_eps, (Track, Episode)) # possible underflow if len(items) > 100
-        # self.tracks_or_eps.sort(key=lambda s: strptime_utc(s[ADDED_AT]))
-        self.needs_expansion = playlist_resp[TRACKS][NEXT] is not None
+        if TRACKS in playlist_resp and ITEMS in playlist_resp[TRACKS]:
+            tracks_or_eps: list[dict] = [item[TRACK] for item in playlist_resp[TRACKS][ITEMS]]
+            for track_or_ep, item in zip(tracks_or_eps, playlist_resp[TRACKS][ITEMS]):
+                track_or_ep[ADDED_AT] = item[ADDED_AT]
+                track_or_ep[ADDED_BY] = item[ADDED_BY]
+                track_or_ep[IS_LOCAL] = item[IS_LOCAL]
+            self.tracks_or_eps = self.parse_linked_objs(tracks_or_eps, (Track, Episode)) # possible underflow if len(items) > 100
+            # self.tracks_or_eps.sort(key=lambda s: strptime_utc(s[ADDED_AT]))
+        self.needs_expansion = NEXT not in playlist_resp[TRACKS] or playlist_resp[TRACKS][NEXT] is not None
         
         self.hasMetadata = True
     
@@ -1276,9 +1277,9 @@ class Album(Container):
         super().check_skippable()
         
         if Zotify.CONFIG.get_skip_comp_albums() and self.compilation:
-            self.skippable = True
+            self._skippable = True
         
-        return self.skippable
+        return self._skippable
     
     def download(self, pbar_stack):
         if Zotify.CONFIG.get_optimized_dl_order():
@@ -1434,10 +1435,7 @@ class Query(Container):
         self.downloadables: set[DLContent | Container] | list[DLContent | Container] = []
     
     def extChildren(self, objs: list[Content | Container] = []):
-        if not self.downloadables:
-            return super().extChildren(self.requested_objs, objs)
-        else:
-            return super().extChildren(self.downloadables, objs)
+        return super().extChildren(self.downloadables if self.downloadables else self.requested_objs, objs)
     
     def request(self, requested_urls: str) -> Query:
         self.requested_urls = requested_urls # only used here, can remove later
@@ -1567,10 +1565,14 @@ class Query(Container):
                 def get_m3u8_filename(content_list: list[DLContent]) -> str:
                     return force_name
             
-            for content_list in content_lists:
+            for obj, content_list in zip(obj_list, content_lists):
+                if not content_list:
+                    Printer.hashtaged(PrintChannel.WARNING, f'SKIPPING M3U8 CREATION for "{obj.name}"\n' +
+                                                            f"{obj._clsn.upper()} CONTAINS NO CONTENT")
+                    continue
                 m3u8_dir = get_m3u8_dir(content_list)
                 if m3u8_dir is None:
-                    Printer.hashtaged(PrintChannel.WARNING, f"SKIPPING M3U8 CREATION for {get_m3u8_filename(content_list)}\n" +
+                    Printer.hashtaged(PrintChannel.WARNING, f'SKIPPING M3U8 CREATION for "{get_m3u8_filename(content_list)}"\n' +
                                                              "NO CONTENT WITH VALID FILEPATHS FOUND")
                     continue
                 
@@ -1645,6 +1647,7 @@ class Query(Container):
             # Printer.traceback(interrupt)
             Printer._logger(interrupt, PrintChannel.ERROR)
             if not isinstance(interrupt, KeyboardInterrupt):
+                Printer._logger(self.__dict__, PrintChannel.ERROR)
                 raise interrupt
     
     def execute(self):
@@ -1731,7 +1734,7 @@ class UserPlaylists(Query):
         return [None] + user_playlist_resps
     
     def select_user_playlists(self, user_playlist_resps: list[None | dict]) -> tuple[list[list[Artist]], list[list[dict]]]:
-        selected_playlist_resps: list[None | dict] = select(user_playlist_resps)
+        selected_playlist_resps: list[None | dict] = select(user_playlist_resps, first_ID=0)
         if selected_playlist_resps[0] == None:
             # option 0 == get all choices
             selected_playlist_resps = user_playlist_resps[1:]
@@ -1761,7 +1764,7 @@ class FollowedArtists(Query):
         return [None] + followed_artist_resps
     
     def select_followed_artists(self, followed_artist_resps: list[None | dict]) -> tuple[list[list[Artist]], list[list[dict]]]:
-        selected_artist_resps: list[None | dict] = select(followed_artist_resps)
+        selected_artist_resps: list[None | dict] = select(followed_artist_resps, first_ID=0)
         if selected_artist_resps[0] == None:
             # option 0 == get all choices
             selected_artist_resps = followed_artist_resps[1:]

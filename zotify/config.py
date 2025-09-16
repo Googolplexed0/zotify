@@ -779,5 +779,5 @@ class Zotify:
                 logfile.unlink()
         
         for dir in (Path(Zotify.CONFIG.get_root_path()), Path(Zotify.CONFIG.get_root_podcast_path())):
-            for tempfile in dir.glob("**.tmp"):
+            for tempfile in dir.glob("*.tmp"):
                     tempfile.unlink()

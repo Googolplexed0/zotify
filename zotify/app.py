@@ -92,7 +92,7 @@ def client(args: Namespace, modes: list[Action]) -> None:
     while args.persist or ask_mode:
         mode_data = [[i+1, mode.dest.upper().replace("_", " ")] for i, mode in enumerate(modes)]
         Printer.table("Modes", ("ID", "MODE"), mode_data + [[0, "EXIT"]])
-        selected_mode: Action | None = select(modes + [None], get_input_prompt="MODE SELECTION: ")[-1]
+        selected_mode: Action | None = select(modes + [None], get_input_prompt="MODE SELECTION: ", first_ID=0)[-1]
         ask_mode = False
         
         if selected_mode is None:
