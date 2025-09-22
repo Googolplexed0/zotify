@@ -1,6 +1,7 @@
 import time
 import uuid
 import ffmpy
+import shutil
 from pathlib import Path, PurePath
 from librespot.metadata import TrackId
 
@@ -343,7 +344,7 @@ def download_track(mode: str, track_id: str, extra_keys: dict | None = None, pba
                     if track_path_temp != track_path:
                         if Path(track_path).exists():
                             Path(track_path).unlink()
-                        Path(track_path_temp).rename(track_path)
+                        shutil.move(str(track_path_temp), str(track_path))
                     
                     Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{PurePath(track_path).relative_to(Zotify.CONFIG.get_root_path())}"\n' +\
                                                               f'DOWNLOAD TOOK {time_elapsed_dl} (PLUS {time_elapsed_ffmpeg} CONVERTING)')
@@ -367,7 +368,8 @@ def download_track(mode: str, track_id: str, extra_keys: dict | None = None, pba
 def convert_audio_format(track_path) -> None:
     """ Converts raw audio into playable file """
     temp_track_path = f'{PurePath(track_path).parent}.tmp'
-    Path(track_path).replace(temp_track_path)
+    # Use shutil.move to handle cross-device moves
+    shutil.move(str(track_path), temp_track_path)
     
     download_format = Zotify.CONFIG.get_download_format().lower()
     file_codec = CODEC_MAP.get(download_format, 'copy')
