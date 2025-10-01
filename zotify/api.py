@@ -981,7 +981,7 @@ class Episode(DLContent):
     def fill_output_template(self) -> PurePath:
         root_podcast_path = Zotify.CONFIG.get_root_podcast_path()
         Path(root_podcast_path).mkdir(parents=True, exist_ok=True)
-        return root_podcast_path / f"{self.show.name}/{self.printing_label}.{self._ext}"
+        return root_podcast_path / fix_filename(f"{self.show.name}/{self.printing_label}.{self._ext}")
     
     def check_skippable(self) -> bool:
         super().check_skippable(check_path_glob=True)
@@ -994,8 +994,12 @@ class Episode(DLContent):
         
         return self._skippable
     
-    def fetch_partner_url(self) -> str:
+    def fetch_partner_url(self) -> str | None:
         (raw, resp) = Zotify.invoke_url(PARTNER_URL + self.id + '"}&extensions=' + PERSISTED_QUERY)
+        if resp[DATA][EPISODE] is None:
+            Printer.hashtaged(PrintChannel.WARNING, 'EPISODE PARTNER DATA MISSING - ASSUMING NON-EXTERNAL HOST\n' +
+                                                   f'Episode_ID: {self.id}')
+            return None
         direct_download_url = resp[DATA][EPISODE][AUDIO][ITEMS][-1][URL]
         if STREAMABLE_PODCAST not in direct_download_url and "audio_preview_url" in resp:
             self.partner_url = direct_download_url
@@ -1435,7 +1439,8 @@ class Query(Container):
         self.downloadables: set[DLContent | Container] | list[DLContent | Container] = []
     
     def extChildren(self, objs: list[Content | Container] = []):
-        return super().extChildren(self.downloadables if self.downloadables else self.requested_objs, objs)
+        _extensibleChildren = self.downloadables if self.downloadables or self._skippable else self.requested_objs
+        return super().extChildren(_extensibleChildren, objs)
     
     def request(self, requested_urls: str) -> Query:
         self.requested_urls = requested_urls # only used here, can remove later
@@ -1552,7 +1557,7 @@ class Query(Container):
             if isinstance(obj_list[0], Container):
                 content_lists: list[list[DLContent]] = [obj.recurse_children() for obj in obj_list]
                 def get_m3u8_filename(content_list: list[DLContent]) -> str:
-                    return content_list[0]._parent.name
+                    return fix_filename(content_list[0]._parent.name)
                 def get_m3u8_dir(content_list: list[DLContent]) -> str:
                     return self.get_m3u8_dir(content_list)
             else:
@@ -1592,8 +1597,10 @@ class Query(Container):
                         album.duration_ms = int(album.total_tracks) * 195000 # assumes 3:15 average track duration
                 self.downloadables = {i for i in self.downloadables if not i in tracks}.union(albums)
             
+            # self.check_skippable()
             skipped = {d for d in self.downloadables if d.check_skippable()}
             self.downloadables = [d for d in self.downloadables if d not in skipped]
+            if not self.downloadables: self._skippable = True
             
             if Zotify.CONFIG.get_always_check_lyrics() and False:
                 # this will probably spam API calls

@@ -6,8 +6,7 @@ import sys
 import re
 import requests
 from librespot.audio.decoders import VorbisOnlyAudioQuality, AudioQuality
-from librespot.core import Session, OAuth
-from librespot.mercury import MercuryRequests
+from librespot.core import Session, OAuth, MercuryRequests
 from librespot.metadata import TrackId, EpisodeId
 from librespot.proto.Authentication_pb2 import AuthenticationType
 from pathlib import Path, PurePath

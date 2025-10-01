@@ -61,13 +61,15 @@ class Printer:
         return columns
     
     @staticmethod
-    def _logger(msg: str, channel: PrintChannel) -> None:
+    def _logger(msg: str | dict, channel: PrintChannel) -> None:
         if channel not in {PrintChannel.WARNING, PrintChannel.ERROR, PrintChannel.API_ERROR, PrintChannel.DEBUG,}:
             return
         from zotify.config import Zotify
         if Zotify.CONFIG.logger:
             if isinstance(msg, BaseException):
                 msg = "".join(TracebackException.from_exception(msg).format())
+            elif isinstance(msg, dict):
+                msg = pformat(msg, indent=2)
             msg = "\n\n" + msg.strip() + "\n"
             if channel is PrintChannel.WARNING:
                 Zotify.CONFIG.logger.warning(msg)
