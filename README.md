@@ -159,7 +159,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
 | `DOWNLOAD_LYRICS`            | `--download-lyrics`                 | Whether lyrics should be downloaded (synced, with unsynced as fallback)                  | True          |
 | `LYRICS_LOCATION`            | `--lyrics-location`                 | Directory where .lrc files are saved, `""` being the output directory                    | `""`          |
-| `LYRICS_FILENAME`            | `--lyrics-location`                 | Filename pattern for .lrc files, `""` being the Track's output pattern      | See [Output Format Examples](#example-output-values) |
+| `LYRICS_FILENAME`            | `--lyrics-filename`                 | Filename pattern for .lrc files, `""` being the Track's output pattern      | See [Output Format Examples](#example-output-values) |
 | `ALWAYS_CHECK_LYRICS`        | `--always-check-lyrics`             | Always download a song's lyrics, even when skipped (unless `OPTIMIZED_DOWNLOADING`)      | False         |
 | `LYRICS_MD_HEADER`           | `--lyrics-md-header`                | Include optional metadata ([see tags here](https://en.wikipedia.org/wiki/LRC_(file_format)#Core_format)) at the start of a .lrc file                     | False                     |
 
