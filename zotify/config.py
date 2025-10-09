@@ -25,21 +25,18 @@ CONFIG_VALUES = {
     
     # File Options
     OUTPUT:                     { 'default': '',                        'type': str,    'arg': ('--output'                               ,) },
-    OUTPUT_PLAYLIST:            { 'default': '{playlist}/{artist}_{song_name}',
-                                  'type': str, 
-                                  'arg': ('-op', '--output-playlist' ,) },
-    OUTPUT_PLAYLIST_EXT:        { 'default': '{playlist}/{playlist_num}_{artist}_{song_name}',
-                                  'type': str,  
-                                  'arg': ('-oe', '--output-ext-playlist' ,) },
-    OUTPUT_LIKED_SONGS:         { 'default': 'Liked Songs/{artist}_{song_name}',
-                                  'type': str,
-                                  'arg': ('-ol', '--output-liked-songs' ,) },
     OUTPUT_SINGLE:              { 'default': '{artist}/{album}/{artist}_{song_name}',
                                   'type': str,
                                   'arg': ('-os', '--output-single' ,) },
     OUTPUT_ALBUM:               { 'default': '{artist}/{album}/{album_num}_{artist}_{song_name}',
                                   'type': str,
                                   'arg': ('-oa', '--output-album' ,) },
+    OUTPUT_PLAYLIST_EXT:        { 'default': '{playlist}/{playlist_num}_{artist}_{song_name}',
+                                  'type': str,  
+                                  'arg': ('-oe', '--output-ext-playlist' ,) },
+    OUTPUT_LIKED_SONGS:         { 'default': 'Liked Songs/{artist}_{song_name}',
+                                  'type': str,
+                                  'arg': ('-ol', '--output-liked-songs' ,) },
     ROOT_PODCAST_PATH:          { 'default': '~/Music/Zotify Podcasts', 'type': str,    'arg': ('-rpp', '--root-podcast-path'            ,) },
     SPLIT_ALBUM_DISCS:          { 'default': 'False',                   'type': bool,   'arg': ('--split-album-discs'                    ,) },
     MAX_FILENAME_LENGTH:        { 'default': '0',                       'type': int,    'arg': ('--max-filename-length'                  ,) },
@@ -81,6 +78,7 @@ CONFIG_VALUES = {
     # Lyric File Options
     DOWNLOAD_LYRICS:            { 'default': 'True',                    'type': bool,   'arg': ('--download-lyrics'                      ,) },
     LYRICS_LOCATION:            { 'default': '',                        'type': str,    'arg': ('--lyrics-location'                      ,) },
+    LYRICS_FILENAME:            { 'default': '{artist}_{song_name}',    'type': str,    'arg': ('--lyrics-filename'                      ,) },
     ALWAYS_CHECK_LYRICS:        { 'default': 'False',                   'type': bool,   'arg': ('--always-check-lyrics'                  ,) },
     LYRICS_MD_HEADER:           { 'default': 'False',                   'type': bool,   'arg': ('--lyrics-md-header'                     ,) },
     
@@ -124,6 +122,9 @@ DEPRECIATED_CONFIGS = {
     "OVERRIDE_AUTO_WAIT":         { 'default': 'False',                   'type': bool,   'arg': ('--override-auto-wait'                   ,) },
     "REDIRECT_URI":               { 'default': '127.0.0.1:4381',          'type': str,    'arg': ('--redirect-uri'                         ,) },
     "OAUTH_ADDRESS":              { 'default': '0.0.0.0',                 'type': str,    'arg': ('--oauth-address'                        ,) },
+    OUTPUT_PLAYLIST:              { 'default': '{playlist}/{artist}_{song_name}',
+                                  'type': str, 
+                                  'arg': ('-op', '--output-playlist' ,) },
 }
 
 
@@ -403,14 +404,14 @@ class Config:
             # User must include {disc_number} in OUTPUT if they want split album discs
             return v
         
-        if dl_obj_clsn == 'Playlist':
-            v = cls.get(OUTPUT_PLAYLIST_EXT)
-        elif dl_obj_clsn == 'LikedSongs':
-            v = cls.get(OUTPUT_LIKED_SONGS)
-        elif dl_obj_clsn == 'Query':
+        if dl_obj_clsn == 'Query':
             v = cls.get(OUTPUT_SINGLE)
         elif dl_obj_clsn == 'Album':
             v = cls.get(OUTPUT_ALBUM)
+        elif dl_obj_clsn == 'Playlist':
+            v = cls.get(OUTPUT_PLAYLIST_EXT)
+        elif dl_obj_clsn == 'LikedSongs':
+            v = cls.get(OUTPUT_LIKED_SONGS)
         else:
             raise ValueError()
         
@@ -595,6 +596,10 @@ class Config:
     @classmethod
     def get_standard_interface(cls) -> bool:
         return cls.get(STANDARD_INTERFACE)
+    
+    @classmethod
+    def get_lyrics_filename(cls) -> str:
+        return cls.get(LYRICS_FILENAME)
 
 
 class Zotify:

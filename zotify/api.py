@@ -18,7 +18,7 @@ def fetch_search_display(search_term: str) -> list[str]:
               'q': search_term,
               TYPE: 'track,album,artist,playlist'}
     
-    # Parse args
+    # Parse args TODO improve or rework?
     splits = search_term.split()
     for split in splits:
         index = splits.index(split)
@@ -618,39 +618,46 @@ class Track(DLContent):
             Printer.hashtaged(PrintChannel.ERROR, F'FAILED TO CORRECT METADATA FOR "{relpath}"')
             Printer.traceback(e) 
     
-    def fill_output_template(self) -> PurePath:
+    def fill_output_template(self, output_template: str = "") -> PurePath:
         
-        try:
-            output_template = Zotify.CONFIG.get_output(self._parent._clsn)
-        except:
-            Printer.debug(f"Unexpected Track Parent: {self._parent._clsn}")
-            output_template = Zotify.CONFIG.get_output('Query')
+        if not output_template:
+            try:
+                output_template = Zotify.CONFIG.get_output(self._parent._clsn)
+            except:
+                Printer.debug(f"Unexpected Track Parent: {self._parent._clsn}")
+                output_template = Zotify.CONFIG.get_output('Query')
         
         replstrset = [
             {"{id}", "{track_id}", "{song_id}"},
             {"{name}", "{song_name}", "{track_name}", "{song_title}", "{track_title}",},
-            {"{artist}", "{track_artist}", "{song_artist}", "{main_artist}",},
-            {"{artists}", "{track_artists}", "{song_artists}",},
             {"{track_number}", "{song_number}", "{track_num}", "{song_num}", "{album_number}", "{album_num}",},
             {"{disc_number}", "{disc_num}",},
+            
+            {"{artist}", "{track_artist}", "{song_artist}", "{main_artist}",},
+            {"{artists}", "{track_artists}", "{song_artists}",},
+            
             {"{album_id}",},
             {"{album}", "{album_name}",},
             {"{album_artist}",},
             {"{album_artists}",},
+            {"{date}", "{release_date}",},
             {"{year}", "{release_year}",},
         ]
         
         repl_mds = [
             self.id,
             self.name,
-            self.artists[0].name,
-            conv_artist_format(self.artists),
             self.track_number,
             self.disc_number,
+            
+            self.artists[0].name,
+            conv_artist_format(self.artists),
+            
             self.album.id,
             self.album.name,
             self.album.artists[0].name,
             conv_artist_format(self.album.artists),
+            self.album.release_date,
             self.album.year,
         ]
         
@@ -706,16 +713,18 @@ class Track(DLContent):
                         tss.append(f"{timestamp}".zfill(5) + f" {ts.split(':')[0]} {ts.split(':')[1].replace('.', ' ')}\n")
                         lyrics.append(f'[{ts}]' + line[WORDS] + '\n')
                     # Printer.debug("Synced Lyric Timestamps:\n" + "".join(tss))
-                    
-                    lrc_header = [f"[ti: {self.name}]\n",
-                                f"[ar: {conv_artist_format(self.artists, FORCE_NO_LIST=True)}]\n",
-                                f"[al: {self.album.name}]\n",
-                                f"[length: {self.duration_ms // 60000}:{(self.duration_ms % 60000) // 1000}]\n",
-                                f"[by: Zotify v{__version__}]\n",
-                                "\n"]
                 
                 self.lyrics = lyrics
-                with open(lyricdir / f"{self.printing_label}.lrc", 'w', encoding='utf-8') as file:
+                
+                lrc_header = [f"[ti: {self.name}]\n",
+                              f"[ar: {conv_artist_format(self.artists, FORCE_NO_LIST=True)}]\n",
+                              f"[al: {self.album.name}]\n",
+                              f"[length: {self.duration_ms // 60000}:{(self.duration_ms % 60000) // 1000}]\n",
+                              f"[by: Zotify v{__version__}]\n",
+                              "\n"]
+                
+                lrc_filename = self.fill_output_template(Zotify.CONFIG.get_lyrics_filename()).stem
+                with open(lyricdir / f"{lrc_filename}.lrc", 'w', encoding='utf-8') as file:
                     if Zotify.CONFIG.get_lyrics_header():
                         file.writelines(lrc_header)
                     file.writelines(lyrics)

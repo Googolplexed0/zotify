@@ -110,11 +110,10 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | File Options                 | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
 | `OUTPUT`                     | `--output`                          | Master output file pattern (overwrites all others)    | See [Output Format Examples](#output-formatting) |
-| `OUTPUT_PLAYLIST`            | `-op`, `--output-playlist`          | Output file pattern for playlists                 | See [Output Format Examples](#example-output-values) |
-| `OUTPUT_PLAYLIST_EXT`        | `-oe`, `--output-ext-playlist`      | Output file pattern for extended playlists        | See [Output Format Examples](#example-output-values) |
-| `OUTPUT_LIKED_SONGS`         | `-ol`, `--output-liked-songs`       | Output file pattern for user's Liked Songs        | See [Output Format Examples](#example-output-values) |
 | `OUTPUT_SINGLE`              | `-os`, `--output-single`            | Output file pattern for single tracks             | See [Output Format Examples](#example-output-values) |
 | `OUTPUT_ALBUM`               | `-oa`, `--output-album`             | Output file pattern for albums                    | See [Output Format Examples](#example-output-values) |
+| `OUTPUT_PLAYLIST_EXT`        | `-oe`, `--output-ext-playlist`      | Output file pattern for playlists                 | See [Output Format Examples](#example-output-values) |
+| `OUTPUT_LIKED_SONGS`         | `-ol`, `--output-liked-songs`       | Output file pattern for user's Liked Songs        | See [Output Format Examples](#example-output-values) |
 | `ROOT_PODCAST_PATH`          | `-rpp`, `--root-podcast-path`       | Directory where podcasts are saved                                           | `~/Music/Zotify Podcasts` |
 | `SPLIT_ALBUM_DISCS`          | `--split-album-discs`               | Saves each disc of an album into its own subfolder                           | False                     |
 | `MAX_FILENAME_LENGTH`        | `--max-filename-length`             | Maximum character length of filenames, truncated to fit, 0 meaning no limit  | 0                         |
@@ -160,6 +159,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
 | `DOWNLOAD_LYRICS`            | `--download-lyrics`                 | Whether lyrics should be downloaded (synced, with unsynced as fallback)                  | True          |
 | `LYRICS_LOCATION`            | `--lyrics-location`                 | Directory where .lrc files are saved, `""` being the output directory                    | `""`          |
+| `LYRICS_FILENAME`            | `--lyrics-location`                 | Filename pattern for .lrc files, `""` being the Track's output pattern      | See [Output Format Examples](#example-output-values) |
 | `ALWAYS_CHECK_LYRICS`        | `--always-check-lyrics`             | Always download a song's lyrics, even when skipped (unless `OPTIMIZED_DOWNLOADING`)      | False         |
 | `LYRICS_MD_HEADER`           | `--lyrics-md-header`                | Include optional metadata ([see tags here](https://en.wikipedia.org/wiki/LRC_(file_format)#Core_format)) at the start of a .lrc file                     | False                     |
 
@@ -230,36 +230,49 @@ The options `CREDENTIALS_LOCATION` and `SONG_ARCHIVE_LOCATION` use the following
 
 ## Output Formatting
 
-With the option `OUTPUT` (or the commandline parameter `--output`) you can specify the pattern for the file structure of downloaded songs (not podcasts).  
-The value is relative to the `ROOT_PATH` directory and may contain the following placeholders:
+With the option `OUTPUT` (or the commandline parameter `--output`) you can specify the pattern for the file structure of downloaded items (not podcasts).
+The value is relative to the `ROOT_PATH` directory and may contain the following placeholders (`ITEMTYPE` may be `track`, `album`, `artist`, or `playlist`):
 
-| Placeholder       | Description                                                  |
-|-------------------|--------------------------------------------------------------|
-| `{artist}`        | The song artist                                              |
-| `{album_artist}`  | The album artist                                             |
-| `{album}`         | The song album                                               |
-| `{song_name}`     | The song name                                                |
-| `{release_year}`  | The song release year                                        |
-| `{disc_number}`   | The disc number                                              |
-| `{track_number}`  | The track number                                             |
-| `{id}`            | The song id                                                  |
-| `{track_id}`      | The track id                                                 |
-| `{album_id}`      | The album id                                                 |
-| `{playlist}`      | (only when downloading playlists) The playlist name          |
-| `{playlist_id}`   | (only when downloading playlists) The playlist id            |
-| `{playlist_num}`  | (only when downloading playlists) Incrementing track number  |
+| Placeholder                            | Description                                                  |
+|----------------------------------------|--------------------------------------------------------------|
+| `{id}`                                 | The downloaded item's id                                     |
+| `{name}`                               | The downloaded item's name                                   |
+| `{artist}` or `{artists}`              | The downloaded item's artist(s)                              |
+| `{date}` or  `{year}`                  | The downloaded item's release date/year                      |
+| `{track_number}` or `{disc_number}`    | (track, album, or artist only) The track/disc number         |
+| `{album}`                              | (track, album, or artist only) The album's name              |
+| `{album_artist}` or `{album_artists}`  | (track, album, or artist only) The album's artist(s)         |
+| `{playlist}`                           | (playlist only) The playlist's name                          |
+| `{playlist_num}`                       | (playlist only) Incrementing track number                    |
+| `{ITEMTYPE_id}`                        | (only when item relevant) The specific item's id             |
+| `{ITEMTYPE_name}`                      | (only when item relevant) The specific item's name           |
 
 ### Example Output Values
 
-`OUTPUT_PLAYLIST`       :   `{playlist}/{artist}_{song_name}`
+`OUTPUT_SINGLE`         :   `{artist}/{album}/{artist}_{song_name}`
+
+`OUTPUT_ALBUM`          :   `{album_artist}/{album}/{album_num}_{artist}_{song_name}`
 
 `OUTPUT_PLAYLIST_EXT`   :   `{playlist}/{playlist_num}_{artist}_{song_name}`
 
 `OUTPUT_LIKED_SONGS`    :   `Liked Songs/{artist}_{song_name}`
 
-`OUTPUT_SINGLE`         :   `{artist}/{album}/{artist}_{song_name}`
+`LYRICS_FILENAME`       :   `{artist}_{song_name}`
 
-`OUTPUT_ALBUM`          :   `{album_artist}/{album}/{album_num}_{artist}_{song_name}`
+## Search Query Formatting
+
+Searches (performed with either with the mode flag `-s` or no mode flag) can be filtered with the following general format:
+
+`<search term(s)> <{filter type} {filter value}>`
+
+Multiple filters can be stacked, with latter filters overwriting prior filters. **The `SEARCH_QUERY_SIZE` config will be overwritten by the `-limit` filter if it is set.**
+
+### Supported Filters
+
+| Filter Type    | Type       | Valid Values                           | Default Value                    |
+|----------------|------------|----------------------------------------|----------------------------------|
+| `-l`, `-limit` | int        | 0 < i <= 50                            | `SEARCH_QUERY_SIZE` Config == 10 |
+| `-t`, `-type`  | `ITEMTYPE` | `track`, `album`, `artist`, `playlist` | `track album artist playlist`    |
 
 ## Regex Formatting
 
