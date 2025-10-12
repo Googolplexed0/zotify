@@ -747,12 +747,20 @@ class Zotify:
     def invoke_url_nextable(cls, url: str, response_key: str = ITEMS, limit: int = 50, stripper: str | None = None, offset: int = 0) -> list[dict]:
         resp = cls.invoke_url_with_params(url, limit=limit, offset=offset)
         if stripper is not None:
-            resp = resp[stripper]
-        items: list = resp[response_key]
+            resp = resp.get(stripper, resp)
         
-        while resp['next'] is not None:
-            (raw, resp) = Zotify.invoke_url(resp['next'])
+        if response_key not in resp:
+            Printer.hashtaged(PrintChannel.WARNING, f'Key "{response_key}" not found in API response: {resp}')
+            return []
+        
+        items: list = resp[response_key]
+        while resp.get('next') is not None:
+            _, resp = Zotify.invoke_url(resp['next'])
+            if response_key not in resp:
+                Printer.hashtaged(PrintChannel.WARNING, f'Key "{response_key}" not found in paginated API response: {resp}')
+                break
             items.extend(resp[response_key])
+        
         return items
     
     @classmethod
@@ -763,7 +771,7 @@ class Zotify:
             bulk_items = bulk_items[limit:]
             
             (raw, resp) = Zotify.invoke_url(url + items_batch)
-            items.extend(resp[stripper])
+            items.extend(resp[stripper]) # stripper must be present, handled by the caller
         return items
     
     @classmethod
