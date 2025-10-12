@@ -691,14 +691,14 @@ class Zotify:
         if stripper is not None:
             resp = resp.get(stripper, resp)
         if response_key not in resp:
-            Printer.hashtaged(PrintChannel.WARNING, f"Key '{response_key}' not found in API response: {resp}")
+            Printer.hashtaged(PrintChannel.WARNING, f'Key "{response_key}" not found in API response: {resp}')
             return []
         items: list = resp[response_key]
     
         while resp.get('next') is not None:
             _, resp = Zotify.invoke_url(resp['next'])
             if response_key not in resp:
-                Printer.hashtaged(PrintChannel.WARNING, f"Key '{response_key}' not found in paginated API response: {resp}")
+                Printer.hashtaged(PrintChannel.WARNING, f'Key "{response_key}" not found in paginated API response: {resp}')
                 break
             items.extend(resp[response_key])
         return items

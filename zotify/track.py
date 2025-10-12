@@ -368,7 +368,6 @@ def download_track(mode: str, track_id: str, extra_keys: dict | None = None, pba
 def convert_audio_format(track_path) -> None:
     """ Converts raw audio into playable file """
     temp_track_path = f'{PurePath(track_path).parent}.tmp'
-    # Use shutil.move to handle cross-device moves
     shutil.move(str(track_path), temp_track_path)
     
     download_format = Zotify.CONFIG.get_download_format().lower()
