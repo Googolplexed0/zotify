@@ -582,17 +582,17 @@ class Zotify:
     def login(cls, args):
         """ Authenticates and saves credentials to a file """
         
-        creds = cls.CONFIG.get_credentials_location()
-        if creds and Path(creds).exists():
-            cls.SESSION = Session.Builder().stored_file(creds).create()
-            return
-        
         session_builder = Session.Builder() # stored_credentials_file == True by default
-        if creds:
+        session_builder.conf.store_credentials = False
+        
+        if Zotify.CONFIG.get_save_credentials():
+            creds = cls.CONFIG.get_credentials_location()
             session_builder.conf.stored_credentials_file = str(creds)
-        else:
-            session_builder.conf.store_credentials = False
-            session_builder.conf.stored_credentials_file = ""
+            if creds and Path(creds).exists():
+                cls.SESSION = Session.Builder().stored_file(creds).create()
+                return
+            else:
+                session_builder.conf.store_credentials = True
         
         if args.username not in {None, ""} and args.token not in {None, ""}:
             try:
