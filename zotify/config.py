@@ -689,11 +689,17 @@ class Zotify:
     def invoke_url_nextable(cls, url: str, response_key: str = ITEMS, limit: int = 50, stripper: str | None = None, offset: int = 0) -> list[dict]:
         resp = cls.invoke_url_with_params(url, limit=limit, offset=offset)
         if stripper is not None:
-            resp = resp[stripper]
+            resp = resp.get(stripper, resp)
+        if response_key not in resp:
+            Printer.hashtaged(PrintChannel.WARNING, f'Key "{response_key}" not found in API response: {resp}')
+            return []
         items: list = resp[response_key]
-        
-        while resp['next'] is not None:
-            (raw, resp) = Zotify.invoke_url(resp['next'])
+    
+        while resp.get('next') is not None:
+            _, resp = Zotify.invoke_url(resp['next'])
+            if response_key not in resp:
+                Printer.hashtaged(PrintChannel.WARNING, f'Key "{response_key}" not found in paginated API response: {resp}')
+                break
             items.extend(resp[response_key])
         return items
     
