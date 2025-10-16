@@ -151,6 +151,9 @@ def conv_artist_format(artists: list[str], FORCE_NO_LIST: bool = False) -> list[
 
 def conv_genre_format(genres: list[str]) -> list[str] | str:
     """ Returns converted genre format """
+    if not genres:
+        return ""
+    
     if not Zotify.CONFIG.get_all_genres():
         return genres[0]
     
