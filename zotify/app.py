@@ -1,7 +1,7 @@
 from argparse import Namespace, Action
 from pathlib import Path
 
-from zotify.api import Query, LikedSongs, UserPlaylists, FollowedArtists, VerifyLibrary, fetch_search_display
+from zotify.api import Query, LikedSong, UserPlaylist, FollowedArtist, SavedAlbum, VerifyLibrary, fetch_search_display
 from zotify.config import Zotify
 from zotify.termoutput import Printer, PrintChannel
 from zotify.utils import bulk_regex_urls, select
@@ -44,13 +44,16 @@ def perform_query(args: Namespace) -> None:
                 Query(Zotify.DATETIME_LAUNCH).request(urls).execute()
         
         elif args.liked_songs:
-            LikedSongs(Zotify.DATETIME_LAUNCH).execute()
+            LikedSong(Zotify.DATETIME_LAUNCH).execute()
+        
+        elif args.user_playlists:
+            UserPlaylist(Zotify.DATETIME_LAUNCH).execute()
         
         elif args.followed_artists:
-            FollowedArtists(Zotify.DATETIME_LAUNCH).execute()
+            FollowedArtist(Zotify.DATETIME_LAUNCH).execute()
         
-        elif args.playlists:
-            UserPlaylists(Zotify.DATETIME_LAUNCH).execute()
+        elif args.followed_albums:
+            SavedAlbum(Zotify.DATETIME_LAUNCH).execute()
         
         elif args.verify_library:
             VerifyLibrary(Zotify.DATETIME_LAUNCH).execute()
@@ -60,21 +63,15 @@ def perform_query(args: Namespace) -> None:
         
         else:
             search_and_select()
-        
-        Printer.debug(f"Total API Calls: {Zotify.TOTAL_API_CALLS}")
-        Zotify.TOTAL_API_CALLS = 0
     
     except BaseException as e:
-        Printer.debug(f"Total API Calls: {Zotify.TOTAL_API_CALLS}")
         Zotify.cleanup()
-        print("\n")
         raise e
 
 
 def client(args: Namespace, modes: list[Action]) -> None:
     """ Loads config, creates Session, and performs queries as needed """
     Zotify(args)
-    Printer.splash()
     
     ask_mode = False
     if any([getattr(args, mode.dest) for mode in modes]):
@@ -90,10 +87,13 @@ def client(args: Namespace, modes: list[Action]) -> None:
             # ask_mode = True
     
     while args.persist or ask_mode:
-        mode_data = [[i+1, mode.dest.upper().replace("_", " ")] for i, mode in enumerate(modes)]
-        Printer.table("Modes", ("ID", "MODE"), mode_data + [[0, "EXIT"]])
-        selected_mode: Action | None = select(modes + [None], get_input_prompt="MODE SELECTION: ", first_ID=0)[-1]
         ask_mode = False
+        mode_data = [[i+1, mode.dest.upper().replace('_', ' ')] for i, mode in enumerate(modes)]
+        Printer.table("Modes", ("ID", "MODE"), [[0, "EXIT"]] + mode_data)
+        try:
+            selected_mode: Action | None = select([None] + modes, inline_prompt="MODE SELECTION: ", first_ID=0, only_one=True)[0]
+        except KeyboardInterrupt:
+            selected_mode = None
         
         if selected_mode is None:
             Printer.hashtaged(PrintChannel.MANDATORY, "CLOSING SESSION")
@@ -108,12 +108,12 @@ def client(args: Namespace, modes: list[Action]) -> None:
         
         # set new mode
         if selected_mode.nargs:
-            mode_args = Printer.get_input(f"\nMODE ARGUMENTS ({mode.dest.upper().replace("_", " ")}): ")
-            setattr(args, mode.dest, mode_args)
+            mode_args = Printer.get_input(f"\nMODE ARGUMENTS ({selected_mode.dest.upper().replace('_', ' ')}): ")
+            setattr(args, selected_mode.dest, mode_args)
         else:
-            setattr(args, mode.dest, True)
+            setattr(args, selected_mode.dest, True)
         
+        Zotify.start()
         perform_query(args)
     
     Zotify.cleanup()
-    print("\n")

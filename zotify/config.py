@@ -410,7 +410,7 @@ class Config:
             v = cls.get(OUTPUT_ALBUM)
         elif dl_obj_clsn == 'Playlist':
             v = cls.get(OUTPUT_PLAYLIST_EXT)
-        elif dl_obj_clsn == 'LikedSongs':
+        elif dl_obj_clsn == 'Liked Song':
             v = cls.get(OUTPUT_LIKED_SONGS)
         else:
             raise ValueError()
@@ -603,28 +603,41 @@ class Config:
 
 
 class Zotify:
-    SESSION: Session = None
-    DOWNLOAD_QUALITY = None
-    TOTAL_API_CALLS = 0
-    DATETIME_LAUNCH = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    CONFIG: Config = Config()
+    SESSION: Session     = None
+    DOWNLOAD_QUALITY     = None
+    DOWNLOAD_BITRATE     = None
+    DATETIME_LAUNCH: str = None
+    TOTAL_API_CALLS: int = None
+    CONFIG: Config       = Config()
     
     def __init__(self, args):
+        Zotify.start()
         Zotify.CONFIG.load(args)
         
         with Loader(PrintChannel.MANDATORY, "Logging in..."):
             Zotify.login(args)
         
+        prem: bool = self.SESSION.get_user_attribute(TYPE) == PREMIUM
         quality_options = {
-        'auto': AudioQuality.VERY_HIGH if Zotify.check_premium() else AudioQuality.HIGH,
-        'normal': AudioQuality.NORMAL,
-        'high': AudioQuality.HIGH,
-        'very_high': AudioQuality.VERY_HIGH
+        'very_high': (AudioQuality.VERY_HIGH, '320k'),
+        'auto':      (AudioQuality.VERY_HIGH, '320k') if prem else (AudioQuality.HIGH, '160k'),
+        'high':      (AudioQuality.HIGH, '160k'),
+        'normal':    (AudioQuality.NORMAL, '96k'),
         }
         preference = quality_options.get(Zotify.CONFIG.get_download_quality(), quality_options["auto"])
-        Zotify.DOWNLOAD_QUALITY = VorbisOnlyAudioQuality(preference)
+        Zotify.DOWNLOAD_QUALITY = VorbisOnlyAudioQuality(preference[0])
+        Zotify.DOWNLOAD_BITRATE = preference[1]
         
         Printer.debug("Session Initialized Successfully")
+    
+    @classmethod
+    def start(cls) -> None:
+        if not Zotify.TOTAL_API_CALLS:
+            Printer.splash() 
+        else:
+            Printer.debug(f"Total API Calls: {Zotify.TOTAL_API_CALLS}")
+        Zotify.DATETIME_LAUNCH = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        Zotify.TOTAL_API_CALLS = 0
     
     @classmethod
     def login(cls, args):
@@ -682,28 +695,21 @@ class Zotify:
                 Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +
                                                       'MAY BE CAUSED BY RATE LIMITS - CONSIDER INCREASING `BULK_WAIT_TIME`\n' +
                                                      f'GID: {gid[5:]} - File_ID: {fileid[8:]}')
+                Printer._logger("\n".join(e.args), PrintChannel.ERROR)
             else:        
                 raise e
     
     @classmethod
-    def __get_auth_token(cls) -> str:
-        return cls.SESSION.tokens().get_token(
-            USER_READ_EMAIL, PLAYLIST_READ_PRIVATE, USER_LIBRARY_READ, USER_FOLLOW_READ
-        ).access_token
-    
-    @classmethod
-    def get_auth_header(cls) -> str:
-        return {
-            'Authorization': f'Bearer {cls.__get_auth_token()}',
+    def invoke_url(cls, url: str, _params: dict | None = None, expectFail: bool = False) -> tuple[str, dict]:
+        scopes = USER_READ_EMAIL, PLAYLIST_READ_PRIVATE, USER_LIBRARY_READ, USER_FOLLOW_READ
+        token = cls.SESSION.tokens().get_token(scopes).access_token
+        headers = {
+            'Authorization': f'Bearer {token}',
             'Accept-Language': f'{cls.CONFIG.get_language()}',
             'Accept': 'application/json',
             'app-platform': 'WebPlayer',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0'
         }
-    
-    @classmethod
-    def invoke_url(cls, url: str, _params: dict | None = None, expectFail: bool = False) -> tuple[str, dict]:
-        headers = cls.get_auth_header()
         
         tryCount = 0
         while tryCount <= cls.CONFIG.get_retry_attempts():
@@ -775,11 +781,8 @@ class Zotify:
         return items
     
     @classmethod
-    def check_premium(cls) -> bool:
-        return (cls.SESSION.get_user_attribute(TYPE) == PREMIUM)
-    
-    @classmethod
     def cleanup(cls) -> None:
+        Zotify.start()
         logging.shutdown()
         
         # delete non-debug logfiles if empty (no critical errors)
@@ -793,3 +796,5 @@ class Zotify:
         for dir in (Path(Zotify.CONFIG.get_root_path()), Path(Zotify.CONFIG.get_root_podcast_path())):
             for tempfile in dir.glob("*.tmp"):
                     tempfile.unlink()
+        
+        print("\n")

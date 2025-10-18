@@ -23,7 +23,7 @@ def create_download_directory(dir_path: str | PurePath) -> None:
             pass
 
 
-def fix_filename(name: str | PurePath | Path ):
+def fix_filename(name: str | PurePath | Path ) -> str:
     """
     Replace invalid characters on Linux/Windows/MacOS with underscores.
     list from https://stackoverflow.com/a/31976060/819417
@@ -46,6 +46,12 @@ def fix_filename(name: str | PurePath | Path ):
         name = name[:maxlen]
     
     return name
+
+
+def fix_filepath(path: PurePath, rel_to: PurePath) -> PurePath:
+    """ Fix all parts of a filepath """
+    fixed_parts = [fix_filename(part) for part in path.relative_to(rel_to).parts]
+    return rel_to / fixed_parts
 
 
 def walk_directory_for_tracks(path: str | PurePath) -> set[Path]:
@@ -121,14 +127,18 @@ def edge_zip(sorted_list: list) -> None:
     sorted_list[::2], sorted_list[1::2] = sorted_list[:(n+1)//2], sorted_list[:(n+1)//2-1:-1]
 
 
-def select(items: list, get_input_prompt: str = 'ID(s): ', first_ID: int = 1) -> list:
-    Printer.search_select()
-    selection = ""
-    while not selection or selection == " ":
-        selection = Printer.get_input(get_input_prompt)
-    
-    # removes all non-numeric characters except for commas and hyphens
-    sanitized = re.sub(r"[^\d\-,]*", "", selection.strip())
+def select(items: list, inline_prompt: str = 'ID(s): ', first_ID: int = 1, only_one: bool = False) -> list:
+    Printer.user_make_select_prompt(only_one)
+    while True:
+        selection = ""
+        while not selection or selection == " ":
+            selection = Printer.get_input(inline_prompt)
+        
+        # only allow digits and commas and hyphens
+        sanitized = re.sub(r"[^\d\-,]*", "", selection.strip())
+        if [s for s in sanitized if s.isdigit()]:
+            break # at least one digit
+        Printer.hashtaged(PrintChannel.MANDATORY, 'INVALID SELECTION')
     
     if "," in sanitized:
         IDranges = sanitized.split(',')
@@ -143,12 +153,7 @@ def select(items: list, get_input_prompt: str = 'ID(s): ', first_ID: int = 1) ->
         else:
             indices.append(int(ids))
     indices.sort()
-    
-    if not indices:
-        Printer.hashtaged(PrintChannel.MANDATORY, 'INVALID SELECTION - EXITING...')
-        return []
-    
-    return [items[i-first_ID] for i in indices]
+    return [items[i-first_ID] for i in (indices[:1] if only_one else indices)]
 
 
 # Metadata & Codec Utils
@@ -377,7 +382,7 @@ def fetch_m3u8_songs(m3u8_path: PurePath) -> list[str]:
         return []
     
     with open(m3u8_path, 'r', encoding='utf-8') as file:
-        linesraw = file.readlines()[2:-1]
+        linesraw = file.readlines()[2:]
         # group by song and filepath
         # songsgrouped = []
         # for i in range(len(linesraw)//3):

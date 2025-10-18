@@ -239,13 +239,14 @@ class Printer:
         PrintCategory.MANDATORY)
     
     @staticmethod
-    def search_select() -> None:
-        """ Displays splash screen """
+    def user_make_select_prompt(only_one: bool = False) -> None:
+        """ Displays choice selection instructions to the user """
+        msg = "> SELECT A SINGLE OPTION BY ID\n" +\
+              "> SELECT A RANGE BY ADDING A DASH BETWEEN BOTH IDs\n" +\
+              "> MAKE MULTIPLE SELECTIONS BY ADDING A COMMA BETWEEN IDs OR RANGES\n"
         Printer.new_print(PrintChannel.MANDATORY,
-        "> SELECT A SINGLE OPTION BY ID\n" +
-        "> SELECT A RANGE BY ADDING A DASH BETWEEN BOTH IDs\n" +
-        "> MAKE MULTIPLE SELECTIONS BY ADDING A COMMA BETWEEN IDs OR RANGES\n",
-        PrintCategory.MANDATORY)
+                          msg.splitlines()[0] if only_one else msg,
+                          PrintCategory.MANDATORY)
     
     @staticmethod
     def newline() -> None:

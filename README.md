@@ -71,26 +71,30 @@ If an artist's URL is given, all albums by the specified artist will be download
 
 `(python -m) zotify <{config flag} {config value}> <{mode flag}> <track/album/playlist/episode/artist url>`
 
-| Command Line Config Flag           | Function                                                                                                                |
-|------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
-| `-h`, `--help`                     | See this message                                                                                                        |
-| `--version`                        | Show the version of Zotify                                                                                              |
-| `-c`, `--config-location`          | Specify a directory containing a Zotify `config.json` file to load settings (Also accepts a filepath to a `.json` file) |
-| `-u`, `--username`                 | Account username                                                                                                        |
-| `--token`                          | Authentication token                                                                                                    |
-| `--persist`                        | Perform multiple Queries on the same Session, requiring only one account login                                          |
-| `--debug`                          | Enable debug mode, prints extra information and creates a `config_DEBUG.json` file                                      |
-| `--update-config`                  | Updates the `config.json` file while keeping all current settings unchanged                                             |
-| `--update-archive`                 | Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged                   |
+| Command Line Config Flag (no value) | Function                                                                                                       |
+|-------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `-h`, `--help`                      | See this message                                                                                               |
+| `--version`                         | Show the version of Zotify                                                                                     |
+| `--persist`                         | Perform multiple Queries on the same Session, requiring only one account login                                 |
+| `--update-config`                   | Updates the `config.json` file while keeping all current settings unchanged                                    |
+| `--update-archive`                  | Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged          |
+| `--debug`                           | Enable debug mode, printing extra information and createing a `config_DEBUG.json` file                         |
 
-| Command Line Mode Flag (exclusive) | Mode                                                                                                      |
-|------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| `-s`, `--search`                   | Search tracks/albums/artists/playlists based on argument (interactive)                                    |
-| `-p`, `--playlist`                 | Download playlist(s) saved by your account (interactive)                                                  |
-| `-l`, `--liked`                    | Download all Liked Songs on your account                                                                  |
-| `-a`, `--artists`                  | Download all songs by all followed artists                                                                |
-| `-f`, `--file`                     | Download all tracks/albums/episodes/playlists URLs within the file passed as argument                     |
-| `-v`, `--verify-library`           | Check metadata for all tracks in ROOT_PATH or listed in SONG_ARCHIVE, updating the metadata if necessary  |
+| Command Line Config Flag            | Value                                                                                                          |
+|-------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `-c`, `--config-location`           | Specify a directory containing a Zotify `config.json` file (or a filepath to a `.json` file) to load settings  |
+| `-u`, `--username`                  | Account username                                                                                               |
+| `--token`                           | Authentication token                                                                                           |
+
+| Command Line Mode Flag (exclusive)  | Mode                                                                                                           |
+|-------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `-s`, `--search`                    | Search tracks/albums/artists/playlists based on passed argument (interactive)                                  |
+| `-p`, `--playlist`                  | Download playlist(s) created/saved by your account (interactive)                                               |
+| `-a`, `--artists`                   | Download all songs by followed artist(s) (interactive)                                                         |
+| `-m`, `--albums`                    | Download followed albums (interactive)                                                                         |
+| `-l`, `--liked`                     | Download all Liked Songs on your account                                                                       |
+| `-f`, `--file`                      | Download all tracks/albums/episodes/playlists URLs within the file passed as argument                          |
+| `-v`, `--verify-library`            | Check metadata for all tracks in ROOT_PATH or listed in SONG_ARCHIVE, updating the metadata if necessary       |
 
 <details><summary>
 
@@ -135,9 +139,9 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 
 | Encoding Options             | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
-| `DOWNLOAD_FORMAT`            | `--codec`, `--download-format`      | Audio codec of downloads, copy avoids remuxing (aac, fdk_aac, mp3, ogg, opus, vorbis)    | copy          |
-| `DOWNLOAD_QUALITY`           | `-q`, `--download-quality`          | Audio quality of downloads, auto selects highest available (normal, high, very_high*)    | auto          |
-| `TRANSCODE_BITRATE`          | `-b`, `--bitrate`                   | Overwrite the bitrate for FFMPEG encoding (not recommended)                              |               |
+| `DOWNLOAD_FORMAT`            | `--codec`, `--download-format`      | Audio codec, copy avoids remuxing (aac, fdk_aac, mp3, ogg, opus, vorbis)                 | copy          |
+| `DOWNLOAD_QUALITY`           | `-q`, `--download-quality`          | Source audio quality, auto selects highest available (normal, high, very_high*)          | auto          |
+| `TRANSCODE_BITRATE`          | `-b`, `--bitrate`                   | Overwrite the bitrate for FFMPEG encoding (NOT RECOMMENDED)                              |               |
 | `CUSTOM_FFMEPG_ARGS`         | `--custom-ffmpeg-args`              | Additional FFMPEG functions or filters to apply to downloaded audio (space delimited)    |  `""`         |
 
 | Archive Options              | Command Line Config Flag            | Description                                                                  | Default Value             |
@@ -180,7 +184,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `SEARCH_QUERY_SIZE`          | `--search-query-size`               | Number of items to fetch per category when performing a search               | 10                        |
 | `RETRY_ATTEMPTS`             | `--retry-attempts`                  | Number of times to retry failed API requests                                 | 1                         |
 | `CHUNK_SIZE`                 | `--chunk-size`                      | Chunk size for downloading                                                   | 20000                     |
-| `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests                                | 127.0.0.1                 |
+| `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests (port is handled internally)   | 127.0.0.1                 |
 
 | Terminal & Logging Options   | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
