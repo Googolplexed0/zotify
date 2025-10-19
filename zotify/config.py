@@ -700,7 +700,7 @@ class Zotify:
                 raise e
     
     @classmethod
-    def invoke_url(cls, url: str, _params: dict | None = None, expectFail: bool = False) -> tuple[str, dict]:
+    def invoke_url(cls, url: str, params: dict | None = None, expectFail: bool = False) -> tuple[str, dict]:
         scopes = USER_READ_EMAIL, PLAYLIST_READ_PRIVATE, USER_LIBRARY_READ, USER_FOLLOW_READ
         token = cls.SESSION.tokens().get_token(scopes).access_token
         headers = {
@@ -713,7 +713,7 @@ class Zotify:
         
         tryCount = 0
         while tryCount <= cls.CONFIG.get_retry_attempts():
-            response = requests.get(url, headers=headers, params=_params)
+            response = requests.get(url, headers=headers, params=params)
             cls.TOTAL_API_CALLS += 1
             
             try:
@@ -742,32 +742,33 @@ class Zotify:
         return responsetext, responsejson
     
     @classmethod
-    def invoke_url_with_params(cls, url, limit, offset, **kwargs) -> dict:
-        params = {LIMIT: limit, OFFSET: offset}
-        params.update(kwargs)
+    def invoke_url_nextable(cls, url: str, response_key: str = ITEMS, stop: int = 0, limit: int = 50, offset: int = 0,
+                            stripper: str | tuple[str] | None = None, params: dict | None = None) -> list[dict] | dict[list[dict]]:
+        p = {LIMIT: limit, OFFSET: offset}
+        if params: p.update(params)
+        _, resp = cls.invoke_url(url, p)
         
-        _, responsejson = cls.invoke_url(url, params)
-        return responsejson
-    
-    @classmethod
-    def invoke_url_nextable(cls, url: str, response_key: str = ITEMS, limit: int = 50, stripper: str | None = None, offset: int = 0) -> list[dict]:
-        resp = cls.invoke_url_with_params(url, limit=limit, offset=offset)
-        if stripper is not None:
-            resp = resp.get(stripper, resp)
+        items: dict[str | None, list[dict]] = dict()
+        strippers = stripper if isinstance(stripper, tuple) else (stripper,)
+        for strip in strippers:
+            nextable: dict = resp.get(strip, resp)
+            
+            if response_key not in nextable:
+                Printer.hashtaged(PrintChannel.WARNING, f'Key "{response_key}" not found in API response: {nextable}')
+                continue
+            
+            items[strip] = nextable[response_key]
+            while nextable.get('next') is not None and not (stop and len(items[strip]) >= stop):
+                _, nextable = Zotify.invoke_url(nextable['next'])
+                if len(strippers) > 1: nextable: dict = nextable.get(strip, nextable)
+                if response_key not in nextable:
+                    Printer.hashtaged(PrintChannel.WARNING, f'Key "{response_key}" not found in paginated API response: {nextable}')
+                    break
+                items[strip].extend(nextable[response_key])
+            if stop:
+                items[strip] = items[strip][:stop]
         
-        if response_key not in resp:
-            Printer.hashtaged(PrintChannel.WARNING, f'Key "{response_key}" not found in API response: {resp}')
-            return []
-        
-        items: list = resp[response_key]
-        while resp.get('next') is not None:
-            _, resp = Zotify.invoke_url(resp['next'])
-            if response_key not in resp:
-                Printer.hashtaged(PrintChannel.WARNING, f'Key "{response_key}" not found in paginated API response: {resp}')
-                break
-            items.extend(resp[response_key])
-        
-        return items
+        return items[strip] if len(strippers) == 1 else items
     
     @classmethod
     def invoke_url_bulk(cls, url: str, bulk_items: list[str], stripper: str, limit: int = 50) -> list[dict]:
@@ -776,7 +777,7 @@ class Zotify:
             items_batch = '%2c'.join(bulk_items[:limit])
             bulk_items = bulk_items[limit:]
             
-            (raw, resp) = Zotify.invoke_url(url + items_batch)
+            _, resp = Zotify.invoke_url(url + items_batch)
             items.extend(resp[stripper]) # stripper must be present, handled by the caller
         return items
     

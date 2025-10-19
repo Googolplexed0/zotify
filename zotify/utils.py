@@ -153,7 +153,7 @@ def select(items: list, inline_prompt: str = 'ID(s): ', first_ID: int = 1, only_
         else:
             indices.append(int(ids))
     indices.sort()
-    return [items[i-first_ID] for i in (indices[:1] if only_one else indices)]
+    return [items[i-first_ID] for i in (indices[:1] if only_one else indices) if i-first_ID >= 0]
 
 
 # Metadata & Codec Utils

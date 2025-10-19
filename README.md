@@ -267,16 +267,18 @@ The value is relative to the `ROOT_PATH` directory and may contain the following
 
 Searches (performed with either with the mode flag `-s` or no mode flag) can be filtered with the following general format:
 
-`<search term(s)> <{filter type} {filter value}>`
+`<search term(s)> <{filter tag} {filter value}>`
 
-Multiple filters can be stacked, with latter filters overwriting prior filters. **The `SEARCH_QUERY_SIZE` config will be overwritten by the `-limit` filter if it is set.**
+Multiple filters can be stacked, with latter filters overwriting prior filters. **The `SEARCH_QUERY_SIZE` config will be overwritten by the `/limit` filter if it is set.**
 
 ### Supported Filters
 
-| Filter Type    | Type       | Valid Values                           | Default Value                    |
-|----------------|------------|----------------------------------------|----------------------------------|
-| `-l`, `-limit` | int        | 0 < i <= 50                            | `SEARCH_QUERY_SIZE` Config == 10 |
-| `-t`, `-type`  | `ITEMTYPE` | `track`, `album`, `artist`, `playlist` | `track album artist playlist`    |
+| Filter Tag                  | Type       | Valid Values                                              | Default Value                    |
+|-----------------------------|------------|-----------------------------------------------------------|----------------------------------|
+| `/t`, `/type`               | `ITEMTYPE` | `track`, `album`, `artist`, `playlist`, `show`, `episode` | `track album artist playlist`    |
+| `/s`, `/size`               | int        | 0 < i <= 1050                                             | `SEARCH_QUERY_SIZE` Config == 10 |
+| `/o`, `/offset`             | int        | 0 < i <= 1000                                             | 0                                |
+| `/ie`, `/include-external`  | bool       | True, False                                               | False                            |
 
 ## Regex Formatting
 

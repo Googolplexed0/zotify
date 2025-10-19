@@ -13,93 +13,111 @@ from zotify.termoutput import PrintChannel, Printer, Loader, Interface
 from zotify.utils import *
 
 
-def fetch_search_display(search_term: str) -> list[str]:
-    params = {LIMIT: Zotify.CONFIG.get_search_query_size(),
-              OFFSET: '0',
-              'q': search_term,
-              TYPE: 'track,album,artist,playlist'}
+def filter_search_query(search_query: str, item_types: tuple[str]) -> dict[str, str]:
     
-    # Parse args TODO improve or rework?
-    splits = search_term.split()
-    for split in splits:
-        index = splits.index(split)
-        
-        if split[0] == '-' and len(split) > 1:
-            if len(splits)-1 == index:
-                raise IndexError(f'No parameters passed after option: {split}')
-        
-        if split == '-l' or split == '-limit':
-            try:
-                int(splits[index+1])
-            except ValueError:
-                raise ValueError(f'Parameter passed after {split} option must be an integer')
-            if int(splits[index+1]) > 50:
-                raise ValueError('Invalid limit passed. Max is 50')
-            params['limit'] = splits[index+1]
-        
-        if split == '-t' or split == '-type':
-            allowed_types = ['track', 'playlist', 'album', 'artist']
-            passed_types = []
-            for i in range(index+1, len(splits)):
-                if splits[i][0] == '-':
-                    break
-                if splits[i] not in allowed_types:
-                    raise ValueError(f'Parameters passed after {split} option must be from this list:\n' +
-                                     f'{'\n'.join(allowed_types)}')
-                passed_types.append(splits[i])
-            params[TYPE] = ','.join(passed_types)
+    search_filters: dict[str, list[set | str]] = {
+        TYPE: [
+            {'/t', '/type',},                 ','.join(item_types[:4])
+        ],
+        SEARCH_QUERY_SIZE: [
+            {'/l', '/limit', '/s', '/size',}, Zotify.CONFIG.get_search_query_size()
+        ],
+        OFFSET: [
+            {'/o', '/offset',},               "0"
+        ],
+        INCLUDE_EXTERNAL: [
+            {'/ie', '/include-external',},    "False"
+        ],
+        'q': [
+            {},                           search_query
+        ],
+    }
+    for k, v in search_filters.items():
+        search_filters[k][0] = {" " + flag + " " for flag in v[0]}
     
-    if len(params[TYPE]) == 0:
-        params[TYPE] = 'track,album,artist,playlist'
+    if "/" not in search_query:
+        return {k: v[-1] for k, v in search_filters.items() if v[-1]}
     
-    # Clean search term
-    search_term_list = []
-    for split in splits:
-        if split[0] == "-":
-            break
-        search_term_list.append(split)
-    if not search_term_list:
-        raise ValueError("Invalid query")
-    params["q"] = ' '.join(search_term_list)
+    parsed_query = [search_query]
+    for filter_param in search_filters:
+        filter_flags = search_filters[filter_param][0]
+        for filter_flag in filter_flags:
+            val_and_suffix = None
+            for i, part in enumerate(parsed_query):
+                if filter_flag not in part:
+                    continue
+                parsed_query.remove(part)
+                prefix, val_and_suffix = part.split(filter_flag, 1)
+                parsed_query.insert(i, val_and_suffix)
+                parsed_query.insert(i, prefix)
+                for k, v in search_filters.items():
+                    search_filters[k][-1] = val_and_suffix if k == filter_param \
+                                      else v[-1].replace(filter_flag + val_and_suffix, "").strip()
+                break
+            if val_and_suffix:
+                break
     
-    resp = Zotify.invoke_url_with_params(SEARCH_URL, **params)
+    # type / value validation
+    max_offset = 1000
+    max_limit = 50
+    search_filters[TYPE][-1] = ",".join([t for t in search_filters[TYPE][-1].split() if t in item_types])
+    search_filters[SEARCH_QUERY_SIZE][-1] = str(max(0, min(int(search_filters[SEARCH_QUERY_SIZE][-1]), max_offset + max_limit)))
+    search_filters[OFFSET][-1] = str(max(0, min(int(search_filters[OFFSET][-1]), max_offset)))
+    search_filters[INCLUDE_EXTERNAL][-1] = "audio" if search_filters[INCLUDE_EXTERNAL][-1].lower() == "true" else ""
+    
+    return {k: v[-1] for k, v in search_filters.items() if v[-1]}
+
+
+def fetch_search_display(search_query: str) -> list[str]:
+    # example search query: working in a coal mine /l 5 /type track album
+    
+    table_headers = {
+        TRACKS:     ('ID', 'Name', 'Artists'    ),
+        ALBUMS:     ('ID', 'Name', 'Artists'    ),
+        ARTISTS:    ('ID', 'Name'               ),
+        PLAYLISTS:  ('ID', 'Name', 'Owner'      ),
+        EPISODES:   ('ID', 'Name', 'Show'       ),
+        SHOWS:      ('ID', 'Name', 'Publisher'  ),
+    }
+    
+    params = filter_search_query(search_query, tuple(t[:-1] for t in table_headers))
+    stop = int(params.pop(SEARCH_QUERY_SIZE))
+    url = f"{SEARCH_URL}?{MARKET_APPEND}"
+    items = Zotify.invoke_url_nextable(url, stop=stop, stripper=tuple(t for t in table_headers if t[:-1] in params[TYPE]), params=params)
+    
     search_result_uris = []
-    counter = 1
-    
-    if TRACK in params[TYPE].split(',') and len(resp[TRACKS][ITEMS]):
-        track_resps: list[dict] = resp[TRACKS][ITEMS]
-        track_data = [ [track_resps.index(t) + counter,
-                        str(t[NAME]) + (" [E]" if t[EXPLICIT] else ""),
-                        ','.join([artist[NAME] for artist in t[ARTISTS]])   ] for t in track_resps]
-        search_result_uris.extend([t[URI] for t in track_resps])
-        counter += len(track_resps)
-        Printer.table("Tracks", ('ID', 'Name', 'Artists'), track_data)
-    
-    if ALBUM in params[TYPE].split(',') and len(resp[ALBUMS][ITEMS]):
-        album_resps: list[dict] = resp[ALBUMS][ITEMS]
-        album_data = [ [album_resps.index(a) + counter,
-                        str(a[NAME]),
-                        ','.join([artist[NAME] for artist in a[ARTISTS]])   ] for a in album_resps]
-        search_result_uris.extend([a[URI] for a in album_resps])
-        counter += len(album_resps)
-        Printer.table("Albums", ('ID', 'Name', 'Artists'), album_data)
-    
-    if ARTIST in params[TYPE].split(',') and len(resp[ARTISTS][ITEMS]):
-        artist_resps: list[dict] = resp[ARTISTS][ITEMS]
-        artist_data = [ [artist_resps.index(a) + counter,
-                         str(a[NAME])                                       ] for a in artist_resps]
-        search_result_uris.extend([a[URI] for a in artist_resps])
-        counter += len(artist_resps)
-        Printer.table("Artists", ('ID', 'Name'), artist_data)
-    
-    if PLAYLIST in params[TYPE].split(',') and len(resp[PLAYLISTS][ITEMS]):
-        playlist_resps: list[dict] = resp[PLAYLISTS][ITEMS]
-        playlist_data = [ [playlist_resps.index(p) + counter,
-                           str(p[NAME]),
-                           str(p[OWNER][DISPLAY_NAME])                      ] for p in playlist_resps]
-        search_result_uris.extend([p[URI] for p in playlist_resps])
-        counter += len(playlist_resps)
-        Printer.table("Playlists", ('ID', 'Name', 'Owner'), playlist_data)
+    for item_type, headers in table_headers.items():
+        if item_type not in items or not len(items[item_type]):
+            continue
+        
+        resps: list[dict] = items[item_type]
+        counter = len(search_result_uris) + 1
+        if item_type == TRACKS:
+            data = [ [resps.index(t) + counter,
+                      str(t[NAME]) + (" [E]" if t[EXPLICIT] else ""),
+                      ','.join([artist[NAME] for artist in t[ARTISTS]]) ] for t in resps]
+        elif item_type == ALBUMS:
+            data = [ [resps.index(m) + counter,
+                      str(m[NAME]),
+                      ','.join([artist[NAME] for artist in m[ARTISTS]]) ] for m in resps]
+        elif item_type == ARTISTS:
+            data = [ [resps.index(a) + counter,
+                      str(a[NAME])                                      ] for a in resps]
+        elif item_type == PLAYLISTS:
+            data = [ [resps.index(p) + counter,
+                      str(p[NAME]),
+                      str(p[OWNER][DISPLAY_NAME])                       ] for p in resps]
+        if item_type == EPISODES:
+            data = [ [resps.index(e) + counter,
+                      str(e[NAME]) + (" [E]" if e[EXPLICIT] else ""),
+                      str(e[SHOW][NAME])                                ] for e in resps]
+        elif item_type == SHOWS:
+            data = [ [resps.index(s) + counter,
+                      str(s[NAME]) + (" [E]" if s[EXPLICIT] else ""),
+                      str(s[PUBLISHER])                                 ] for s in resps]
+        
+        search_result_uris.extend([i[URI] for i in resps])
+        Printer.table(item_type.capitalize(), headers, data)
     
     return search_result_uris
 
@@ -209,9 +227,9 @@ class Content():
     
     def fetch_metadata(self) -> dict[str]:
         with Loader(PrintChannel.PROGRESS_INFO, f"Fetching {self._clsn.lower()} information..."):
-            (raw, info) = Zotify.invoke_url(f'{self.url}/{self.id}?{MARKET_APPEND}')
-        if info:
-            return info
+            _, resp = Zotify.invoke_url(f'{self.url}/{self.id}?{MARKET_APPEND}')
+        if resp:
+            return resp
         else:
             raise ValueError("No Metadata Fetched")
     
@@ -687,7 +705,7 @@ class Track(DLContent):
                 Path(lyricdir).mkdir(parents=True, exist_ok=True)
                 
                 # expect failure here, lyrics are not guaranteed to be available
-                (raw, lyrics_dict) = Zotify.invoke_url(LYRICS_URL + self.id, expectFail=True)
+                _, lyrics_dict = Zotify.invoke_url(LYRICS_URL + self.id, expectFail=True)
                 if not lyrics_dict:
                     raise ValueError(f'Failed to fetch lyrics: {self.id}')
                 try:
@@ -997,7 +1015,7 @@ class Episode(DLContent):
         return self._skippable
     
     def fetch_partner_url(self) -> str | None:
-        (raw, resp) = Zotify.invoke_url(PARTNER_URL + self.id + '"}&extensions=' + PERSISTED_QUERY)
+        _, resp = Zotify.invoke_url(PARTNER_URL + self.id + '"}&extensions=' + PERSISTED_QUERY)
         if resp[DATA][EPISODE] is None:
             Printer.hashtaged(PrintChannel.WARNING, 'EPISODE PARTNER DATA MISSING - ASSUMING NON-EXTERNAL HOST\n' +
                                                    f'Episode_ID: {self.id}')
@@ -1110,7 +1128,7 @@ class Container(Content):
         with Loader(PrintChannel.PROGRESS_INFO, f'Fetching {self._clsn.lower()} {item_key}...', disabled=hide_loader):
             if args: args = "&" + args
             return Zotify.invoke_url_nextable(f'{self.url}/{self.id}/{item_key}?{MARKET_APPEND}{args}',
-                                              ITEMS, self._fetch_q, offset=self.len)
+                                              limit=self._fetch_q, offset=self.len)
     
     def recurse_children(self) -> list[Content]:
         children = []
@@ -1342,8 +1360,8 @@ class Artist(Container):
     def fetch_items(self, hide_loader: bool = False) -> list[dict | None]:
         if self.toptrackmode:
             with Loader(PrintChannel.PROGRESS_INFO, f"Fetching {self._clsn.lower()} top tracks...", disabled=hide_loader):
-                top_track_url = f'{self.url}/{self.id}/top-tracks&{MARKET_APPEND}'
-                artist_items = Zotify.invoke_url(top_track_url, None, {"limit": self._fetch_q})
+                _, resp = Zotify.invoke_url(f'{self.url}/{self.id}/top-tracks?{MARKET_APPEND}')
+                artist_items = resp[TRACKS]
         else:
             artist_items = super().fetch_items(ALBUMS, hide_loader=hide_loader)
         return artist_items
