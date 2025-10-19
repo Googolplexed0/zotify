@@ -16,21 +16,11 @@ from zotify.utils import *
 def filter_search_query(search_query: str, item_types: tuple[str]) -> dict[str, str]:
     
     search_filters: dict[str, list[set | str]] = {
-        TYPE: [
-            {'/t', '/type',},                 ','.join(item_types[:4])
-        ],
-        SEARCH_QUERY_SIZE: [
-            {'/l', '/limit', '/s', '/size',}, Zotify.CONFIG.get_search_query_size()
-        ],
-        OFFSET: [
-            {'/o', '/offset',},               "0"
-        ],
-        INCLUDE_EXTERNAL: [
-            {'/ie', '/include-external',},    "False"
-        ],
-        'q': [
-            {},                           search_query
-        ],
+        TYPE:               [{'/t',  '/type',},                  ','.join(item_types[:4])             ],
+        SEARCH_QUERY_SIZE:  [{'/l',  '/limit', '/s', '/size',},  Zotify.CONFIG.get_search_query_size()],
+        OFFSET:             [{'/o',  '/offset',},                "0"                                  ],
+        INCLUDE_EXTERNAL:   [{'/ie', '/include-external',},      "False"                              ],
+        'q':                [{},                                 search_query                         ],
     }
     for k, v in search_filters.items():
         search_filters[k][0] = {" " + flag + " " for flag in v[0]}
@@ -60,10 +50,13 @@ def filter_search_query(search_query: str, item_types: tuple[str]) -> dict[str, 
     # type / value validation
     max_offset = 1000
     max_limit = 50
-    search_filters[TYPE][-1] = ",".join([t for t in search_filters[TYPE][-1].split() if t in item_types])
-    search_filters[SEARCH_QUERY_SIZE][-1] = str(max(0, min(int(search_filters[SEARCH_QUERY_SIZE][-1]), max_offset + max_limit)))
-    search_filters[OFFSET][-1] = str(max(0, min(int(search_filters[OFFSET][-1]), max_offset)))
-    search_filters[INCLUDE_EXTERNAL][-1] = "audio" if search_filters[INCLUDE_EXTERNAL][-1].lower() == "true" else ""
+    for k, v in search_filters.items():
+        if   k == TYPE:              fv = ",".join([t for t in v[-1].split() if t in item_types])
+        elif k == SEARCH_QUERY_SIZE: fv = str(clamp(0, int(v[-1]), max_offset + max_limit))
+        elif k == OFFSET:            fv = str(clamp(0, int(v[-1]), max_offset            ))
+        elif k == INCLUDE_EXTERNAL:  fv = "audio" if v[-1].lower() == "true" else ""
+        else: fv = v[-1]
+        search_filters[k][-1] = fv
     
     return {k: v[-1] for k, v in search_filters.items() if v[-1]}
 

@@ -280,6 +280,18 @@ Multiple filters can be stacked, with latter filters overwriting prior filters. 
 | `/o`, `/offset`             | int        | 0 < i <= 1000                                             | 0                                |
 | `/ie`, `/include-external`  | bool       | True, False                                               | False                            |
 
+### Example Filtered Search Queries
+
+Only Search for Playlists                    :   `Awesome Tunes /t playlist`
+
+Search for Lots of Artists                   :   `Taylor /t artist /s 50`
+
+Skip the First 100 Search Results            :   `LMFAO Party Rock /o 100`
+
+Smaller Default Search, Including Podcasts   :   `Country /t track album artist playlist episode /s 5`
+
+Search for Externally-Hosted Podcasts        :   `Life is Crazy Sometimes /t show /ie True /s 30`
+
 ## Regex Formatting
 
 With `REGEX_ENABLED` (or the commandline parameter `--regex-enabled`) and its child config options, you can specify a Regex pattern for the titles of different items (tracks, albums, playlists, etc.) to be filtered against. To understand the Regex language and build/test your own, see [regex101](https://regex101.com/). Make sure to escape any backslashes `\` used in the Regex, as a `config.json` will not accept lone backslashes. **All Regex patterns/matches are case-insensitive**.

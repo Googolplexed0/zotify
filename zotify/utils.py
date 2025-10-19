@@ -127,6 +127,10 @@ def edge_zip(sorted_list: list) -> None:
     sorted_list[::2], sorted_list[1::2] = sorted_list[:(n+1)//2], sorted_list[:(n+1)//2-1:-1]
 
 
+def clamp(low: int, i: int, high: int) -> int:
+    return max(low, min(i, high))
+
+
 def select(items: list, inline_prompt: str = 'ID(s): ', first_ID: int = 1, only_one: bool = False) -> list:
     Printer.user_make_select_prompt(only_one)
     while True:
