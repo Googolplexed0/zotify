@@ -28,6 +28,7 @@ def filter_search_query(search_query: str, item_types: tuple[str]) -> dict[str, 
     if "/" not in search_query:
         return {k: v[-1] for k, v in search_filters.items() if v[-1]}
     
+    Printer.debug(f"Filtering Search Query: {search_query}")
     parsed_query = [search_query]
     for filter_param in search_filters:
         filter_flags = search_filters[filter_param][0]
@@ -50,15 +51,19 @@ def filter_search_query(search_query: str, item_types: tuple[str]) -> dict[str, 
     # type / value validation
     max_offset = 1000
     max_limit = 50
-    for k, v in search_filters.items():
+    for k, v in list(search_filters.items()):
         if   k == TYPE:              fv = ",".join([t for t in v[-1].split() if t in item_types])
         elif k == SEARCH_QUERY_SIZE: fv = str(clamp(0, int(v[-1]), max_offset + max_limit))
         elif k == OFFSET:            fv = str(clamp(0, int(v[-1]), max_offset            ))
         elif k == INCLUDE_EXTERNAL:  fv = "audio" if v[-1].lower() == "true" else ""
-        else: fv = v[-1]
-        search_filters[k][-1] = fv
+        else:                        fv = v[-1]
+        if fv:
+            search_filters[k] = fv
+        else:
+            del search_filters[k]
     
-    return {k: v[-1] for k, v in search_filters.items() if v[-1]}
+    Printer.debug(search_filters)
+    return search_filters
 
 
 def fetch_search_display(search_query: str) -> list[str]:

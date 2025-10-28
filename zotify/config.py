@@ -796,7 +796,7 @@ class Zotify:
             if stop:
                 items[strip] = items[strip][:stop]
         
-        return items[strip] if len(strippers) == 1 else items
+        return items[strip] if len(strippers) == 1 and not isinstance(stripper, tuple) else items
     
     @classmethod
     def invoke_url_bulk(cls, url: str, bulk_items: list[str], stripper: str, limit: int = 50) -> list[dict]:
