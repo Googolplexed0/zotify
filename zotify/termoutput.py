@@ -197,7 +197,7 @@ class Printer:
     @staticmethod
     def depreciated_warning(option_string: str, help_msg: str = None, CONFIG = True) -> None:
         Printer.hashtaged(PrintChannel.MANDATORY, 
-        f"WARNING: {"CONFIG" if CONFIG else "ARGUMENT"} `{option_string}` IS DEPRECIATED, IGNORING\n" +
+        f"WARNING: {'CONFIG' if CONFIG else 'ARGUMENT'} `{option_string}` IS DEPRECIATED, IGNORING\n" +
         f"THIS WILL BE REMOVED IN FUTURE VERSIONS\n" +
         f"{help_msg}" if help_msg else ""
         )

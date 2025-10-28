@@ -5,7 +5,8 @@ import base64
 import sys
 import re
 import requests
-from librespot.audio.decoders import VorbisOnlyAudioQuality, AudioQuality
+from librespot.audio import FeederException
+from librespot.audio.decoders import AudioQuality, SuperAudioFormat, FormatOnlyAudioQuality
 from librespot.core import Session, OAuth, MercuryRequests
 from librespot.metadata import TrackId, EpisodeId
 from librespot.proto.Authentication_pb2 import AuthenticationType
@@ -317,7 +318,7 @@ class Config:
         return cls.get(DOWNLOAD_REAL_TIME)
     
     @classmethod
-    def get_download_quality(cls) -> str:
+    def get_download_qual_pref(cls) -> str:
         return cls.get(DOWNLOAD_QUALITY)
     
     @classmethod
@@ -617,16 +618,9 @@ class Zotify:
         with Loader(PrintChannel.MANDATORY, "Logging in..."):
             Zotify.login(args)
         
-        prem: bool = self.SESSION.get_user_attribute(TYPE) == PREMIUM
-        quality_options = {
-        'very_high': (AudioQuality.VERY_HIGH, '320k'),
-        'auto':      (AudioQuality.VERY_HIGH, '320k') if prem else (AudioQuality.HIGH, '160k'),
-        'high':      (AudioQuality.HIGH, '160k'),
-        'normal':    (AudioQuality.NORMAL, '96k'),
-        }
-        preference = quality_options.get(Zotify.CONFIG.get_download_quality(), quality_options["auto"])
-        Zotify.DOWNLOAD_QUALITY = VorbisOnlyAudioQuality(preference[0])
-        Zotify.DOWNLOAD_BITRATE = preference[1]
+        quality, bitrate = self.get_download_quality(Zotify.CONFIG.get_download_qual_pref())
+        Zotify.DOWNLOAD_QUALITY = quality
+        Zotify.DOWNLOAD_BITRATE = bitrate
         
         Printer.debug("Session Initialized Successfully")
     
@@ -676,6 +670,30 @@ class Zotify:
         return
     
     @classmethod
+    def get_download_quality(cls, preference: str | None = None) -> tuple[FormatOnlyAudioQuality, str | None]:
+        
+        def format_filter(quality: AudioQuality) -> FormatOnlyAudioQuality:
+           codec = SuperAudioFormat.FLAC if quality is AudioQuality.LOSSLESS else SuperAudioFormat.VORBIS
+           return FormatOnlyAudioQuality(quality, codec)
+        
+        prem: bool = cls.SESSION.get_user_attribute(TYPE) == PREMIUM
+        quality_options: dict[str, tuple[AudioQuality, str | None]] = {
+        'lossless':  (AudioQuality.LOSSLESS,     None ), # upstream API does not yet support lossless, will fallback to auto 
+        'very_high': (AudioQuality.VERY_HIGH,   '320k'),
+        'auto':      (AudioQuality.VERY_HIGH,   '320k') if prem else (AudioQuality.HIGH, '160k'),
+        'high':      (AudioQuality.HIGH,        '160k'),
+        'normal':    (AudioQuality.NORMAL,      '96k' ),
+        }
+        
+        if preference is None:
+            quality, bitrate = quality_options["auto"]
+            return format_filter(quality), bitrate
+        
+        pref = quality_options.get(preference, quality_options["auto"])
+        quality, bitrate = quality_options["high"] if (pref[-1] is None or int(pref[-1][:-1]) > 160) and not prem else pref
+        return format_filter(quality), bitrate
+    
+    @classmethod
     def get_content_stream(cls, content):
         from zotify.api import DLContent, Track, Episode
         content: DLContent = content
@@ -698,6 +716,16 @@ class Zotify:
                 Printer._logger("\n".join(e.args), PrintChannel.ERROR)
             else:        
                 raise e
+        except FeederException as e:
+            preference = Zotify.DOWNLOAD_QUALITY.preferred.name
+            Printer.hashtaged(PrintChannel.WARNING, 'FAILED TO FETCH AUDIO FILE\n' +
+                                                   f'PREFERED AUDIO QUALITY {preference} NOT AVAILABLE - FALLING BACK TO AUTO')
+            auto_qual = cls.get_download_quality()
+            try:
+                return cls.SESSION.content_feeder().load(content_id, auto_qual[0], False, None)
+            except FeederException as e:
+                Printer.hashtaged(PrintChannel.WARNING, 'FAILED TO FETCH AUDIO FILE\n' +
+                                                       f'FALLBACK AUTO AUDIO QUALITY NOT AVAILABLE')
     
     @classmethod
     def invoke_url(cls, url: str, params: dict | None = None, expectFail: bool = False) -> tuple[str, dict]:

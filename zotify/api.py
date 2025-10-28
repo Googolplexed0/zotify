@@ -448,7 +448,8 @@ class DLContent(Content):
             bitrate = Zotify.CONFIG.get_transcode_bitrate()
             if bitrate in {"auto", ""}:
                 bitrate = Zotify.DOWNLOAD_BITRATE
-            output_params += ['-b:a', bitrate]
+            if bitrate:
+                output_params += ['-b:a', bitrate]
         
         def run_ffmpeg(output_params: list[str], error_str: str) -> float | Exception:
             try:
