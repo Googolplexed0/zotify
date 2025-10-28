@@ -282,6 +282,57 @@ class Config:
         return root_podcast_path
     
     @classmethod
+    def get_save_credentials(cls) -> bool:
+        return cls.get(SAVE_CREDENTIALS)
+    
+    @classmethod
+    def get_credentials_location(cls) -> PurePath:
+        if cls.get(CREDENTIALS_LOCATION) == '':
+            system_paths = {
+                'win32': Path.home() / 'AppData/Roaming/Zotify',
+                'linux': Path.home() / '.local/share/zotify',
+                'darwin': Path.home() / 'Library/Application Support/Zotify'
+            }
+            if sys.platform not in system_paths:
+                credentials_path = PurePath(Path.cwd() / '.zotify')
+            else:
+                credentials_path = PurePath(system_paths[sys.platform])
+        else:
+            cred_path_str: str = cls.get(CREDENTIALS_LOCATION)
+            if cred_path_str[0] == ".":
+                credentials_path = cls.get_root_path() / PurePath(cred_path_str).relative_to(".")
+            else:
+                credentials_path = PurePath(cred_path_str)
+        
+        credentials = Path(credentials_path).expanduser()
+        if credentials.is_dir():
+            credentials = credentials / 'credentials.json'
+        credentials.parent.mkdir(parents=True, exist_ok=True)
+        return PurePath(credentials)
+    
+    @classmethod
+    def get_output(cls, dl_obj_clsn: str) -> str:
+        v = cls.get(OUTPUT)
+        if v:
+            # User must include {disc_number} in OUTPUT if they want split album discs
+            return v
+        
+        if dl_obj_clsn == 'Query':
+            v = cls.get(OUTPUT_SINGLE)
+        elif dl_obj_clsn == 'Album':
+            v = cls.get(OUTPUT_ALBUM)
+        elif dl_obj_clsn == 'Playlist':
+            v = cls.get(OUTPUT_PLAYLIST_EXT)
+        elif dl_obj_clsn == 'Liked Song':
+            v = cls.get(OUTPUT_LIKED_SONGS)
+        else:
+            raise ValueError()
+        
+        if cls.get_split_album_discs() and dl_obj_clsn == "Album":
+            return str(PurePath(v).parent / 'Disc {disc_number}' / PurePath(v).name)
+        return v
+    
+    @classmethod
     def get_skip_existing(cls) -> bool:
         return cls.get(SKIP_EXISTING)
     
@@ -346,30 +397,6 @@ class Config:
         return song_archive
     
     @classmethod
-    def get_save_credentials(cls) -> bool:
-        return cls.get(SAVE_CREDENTIALS)
-    
-    @classmethod
-    def get_credentials_location(cls) -> PurePath:
-        if cls.get(CREDENTIALS_LOCATION) == '':
-            system_paths = {
-                'win32': Path.home() / 'AppData/Roaming/Zotify',
-                'linux': Path.home() / '.local/share/zotify',
-                'darwin': Path.home() / 'Library/Application Support/Zotify'
-            }
-            if sys.platform not in system_paths:
-                credentials = PurePath(Path.cwd() / '.zotify/credentials.json')
-            else:
-                credentials = PurePath(system_paths[sys.platform] / 'credentials.json')
-        else:
-            credentials_path: str = cls.get(CREDENTIALS_LOCATION)
-            if credentials_path[0] == ".":
-                credentials_path = cls.get_root_path() / PurePath(credentials_path).relative_to(".")
-            credentials = PurePath(Path(credentials_path).expanduser() / 'credentials.json')
-        Path(credentials.parent).mkdir(parents=True, exist_ok=True)
-        return credentials
-    
-    @classmethod
     def get_temp_download_dir(cls) -> str | PurePath:
         if cls.get(TEMP_DOWNLOAD_DIR) == '':
             return ''
@@ -397,28 +424,6 @@ class Config:
     @classmethod
     def get_artist_delimiter(cls) -> str:
         return cls.get(MD_ARTISTDELIMITER)
-    
-    @classmethod
-    def get_output(cls, dl_obj_clsn: str) -> str:
-        v = cls.get(OUTPUT)
-        if v:
-            # User must include {disc_number} in OUTPUT if they want split album discs
-            return v
-        
-        if dl_obj_clsn == 'Query':
-            v = cls.get(OUTPUT_SINGLE)
-        elif dl_obj_clsn == 'Album':
-            v = cls.get(OUTPUT_ALBUM)
-        elif dl_obj_clsn == 'Playlist':
-            v = cls.get(OUTPUT_PLAYLIST_EXT)
-        elif dl_obj_clsn == 'Liked Song':
-            v = cls.get(OUTPUT_LIKED_SONGS)
-        else:
-            raise ValueError()
-        
-        if cls.get_split_album_discs() and dl_obj_clsn == "Album":
-            return str(PurePath(v).parent / 'Disc {disc_number}' / PurePath(v).name)
-        return v
     
     @classmethod
     def get_retry_attempts(cls) -> int:

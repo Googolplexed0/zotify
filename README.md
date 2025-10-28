@@ -78,7 +78,7 @@ If an artist's URL is given, all albums by the specified artist will be download
 | `--persist`                         | Perform multiple Queries on the same Session, requiring only one account login                                 |
 | `--update-config`                   | Updates the `config.json` file while keeping all current settings unchanged                                    |
 | `--update-archive`                  | Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged          |
-| `--debug`                           | Enable debug mode, printing extra information and createing a `config_DEBUG.json` file                         |
+| `--debug`                           | Enable debug mode, printing extra information and creating a `config_DEBUG.json` file                         |
 
 | Command Line Config Flag            | Value                                                                                                          |
 |-------------------------------------|----------------------------------------------------------------------------------------------------------------|
@@ -109,7 +109,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
 | `ROOT_PATH`                  | `-rp`, `--root-path`                | Directory where music is saved (replaces `.` in other path configs)          | `~/Music/Zotify Music`    |
 | `SAVE_CREDENTIALS`           | `--save-credentials`                | Whether login credentials should be saved                                    | True                      |
-| `CREDENTIALS_LOCATION`       | `--creds`, `--credentials-location` | Directory containing credentials.json                    | See [Path Option Parser](#path-option-parser) |
+| `CREDENTIALS_LOCATION`       | `--creds`, `--credentials-location` | Directory/Filepath to store/load a Zotify `credentials.json` file | See [Path Option Parser](#path-option-parser) |
 
 | File Options                 | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
