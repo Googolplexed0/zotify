@@ -458,7 +458,7 @@ class Interface:
         
         from zotify.api import DLContent
         obj: DLContent = Interface.CURRENT_ITEM; subc = obj.query._subContent
-        dashboard = f"Query Tree: {" -> ".join([i._clsn for i in obj.parent_tree])}\n" +\
+        dashboard = f"Query Tree: {' -> '.join([i._clsn for i in obj.parent_tree])}\n" +\
                     f"\n" +\
                     f"Current DLContent: {obj._clsn}\n" +\
                     f"{obj.dashboard()}\n" +\
