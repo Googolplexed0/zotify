@@ -332,19 +332,19 @@ def download_track(mode: str, track_id: str, extra_keys: dict | None = None, pba
                     
                     # no metadata is written to track prior to conversion
                     time_elapsed_ffmpeg = convert_audio_format(track_path_temp)
-                    
-                    try:
-                        set_audio_tags(track_path_temp, track_metadata, total_discs, genres, lyrics)
-                        set_music_thumbnail(track_path_temp, track_metadata[IMAGE_URL], mode)
-                    except Exception as e:
-                        Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO WRITE METADATA\n' +\
-                                                              'Ensure FFMPEG is installed and added to your PATH')
-                        Printer.traceback(e)
-                    
+
                     if track_path_temp != track_path:
                         if Path(track_path).exists():
                             Path(track_path).unlink()
                         shutil.move(str(track_path_temp), str(track_path))
+                    
+                    try:
+                        set_audio_tags(track_path, track_metadata, total_discs, genres, lyrics)
+                        set_music_thumbnail(track_path, track_metadata[IMAGE_URL], mode)
+                    except Exception as e:
+                        Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO WRITE METADATA\n' +\
+                                                              'Ensure FFMPEG is installed and added to your PATH')
+                        Printer.traceback(e)
                     
                     Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{PurePath(track_path).relative_to(Zotify.CONFIG.get_root_path())}"\n' +\
                                                               f'DOWNLOAD TOOK {time_elapsed_dl} (PLUS {time_elapsed_ffmpeg} CONVERTING)')
