@@ -230,10 +230,11 @@ def client(args: Namespace) -> None:
     Printer.splash()
     
     quality_options = {
-        'auto': AudioQuality.VERY_HIGH if Zotify.check_premium() else AudioQuality.HIGH,
-        'normal': AudioQuality.NORMAL,
-        'high': AudioQuality.HIGH,
-        'very_high': AudioQuality.VERY_HIGH
+        "auto": AudioQuality.VERY_HIGH if Zotify.check_premium() else AudioQuality.HIGH,
+        "normal": AudioQuality.NORMAL,
+        "high": AudioQuality.HIGH,
+        "very_high": AudioQuality.VERY_HIGH,
+        "lossless": AudioQuality.LOSSLESS,
     }
     Zotify.DOWNLOAD_QUALITY = quality_options.get(Zotify.CONFIG.get_download_quality(),
                                                   quality_options["auto"])
