@@ -243,6 +243,9 @@ class Content():
         pass
     
     def parse_linked_objs(self, resps: list[dict], obj: Content | Container | tuple[Content | Container]) -> list[Content | Container]:
+        # Filter out None values from resps
+        resps = [resp for resp in resps if resp is not None]
+        
         if isinstance(obj, tuple):
             type_select = tuple(cls.__name__.lower() for cls in obj)
             rawobjs: list[Content | Container] = [obj[type_select.index(resp[TYPE])](resp[URI], self) for resp in resps]
@@ -1228,9 +1231,10 @@ class Playlist(Container):
     def fetch_items(self, hide_loader: bool = False) -> list[dict | None]:
         playlist_items = super().fetch_items(TRACKS, "additional_types=track%2Cepisode", hide_loader)
         for item in playlist_items:
-            item[TRACK][ADDED_AT] = item[ADDED_AT]
-            item[TRACK][ADDED_BY] = item[ADDED_BY]
-            item[TRACK][IS_LOCAL] = item[IS_LOCAL]
+            if item[TRACK] is not None:
+                item[TRACK][ADDED_AT] = item[ADDED_AT]
+                item[TRACK][ADDED_BY] = item[ADDED_BY]
+                item[TRACK][IS_LOCAL] = item[IS_LOCAL]
         track_or_episode_resps = [item[TRACK] if item[TRACK] is not None and item[TRACK][URI] else None for item in playlist_items]
         # playlist_items.sort(key=lambda s: strptime_utc(s[ADDED_AT]))
         return track_or_episode_resps
