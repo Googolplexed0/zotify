@@ -378,8 +378,11 @@ Ultimately, you use this program at your own risk.
 
 ## Disclaimer
 
-Zotify is intended to be used in compliance with DMCA, Section 1201, for educational, private, and fair use. \
+Zotify is intended to be used in compliance with DMCA, Section 1201, for educational, private, and fair use.
+
 Zotify contributors are not responsible for any misuse of this program or source code.
+
+Zotify is not associated with any external entities, organizations, companies, or services.
 
 ## Contributing
 

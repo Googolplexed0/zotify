@@ -233,12 +233,12 @@ class Printer:
         Printer.new_print(PrintChannel.MANDATORY, tabulate(tabular_data, headers=headers, tablefmt='pretty'))
     
     @staticmethod
-    def dl_complete(dlcontent, time_elapsed_dl: str, time_elapsed_ffmpeg: str | None) -> None:
+    def dl_complete(dlcontent, path, time_elapsed_dl: str, time_elapsed_ffmpeg: str | None) -> None:
         from zotify.api import DLContent
         dlcontent: DLContent = dlcontent
         Interface.update(time_elapsed_dl, time_elapsed_ffmpeg, dlcontent.name)
         dlcontent.set_dl_status("Waiting Between Downloads")
-        Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{dlcontent.filepath.relative_to(dlcontent._path_root)}"\n' +
+        Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{dlcontent.rel_path(path)}"\n' +
                                                   f'DOWNLOAD TOOK {time_elapsed_dl}' +
                                                   f' (PLUS {time_elapsed_ffmpeg} CONVERTING)' if time_elapsed_ffmpeg else '')
     
@@ -283,8 +283,11 @@ class Printer:
     
     # Progress Bars
     @staticmethod
-    def pbar(iterable=None, desc=None, total=None, unit='it', 
-             disable=False, unit_scale=False, unit_divisor=1000, pos=1) -> tqdm:
+    def pbar(iterable=None, desc=None, total=None, unit='it', disable=False,
+              unit_scale=False, unit_divisor=1000, default_pos=1, pbar_stack=[]) -> tqdm:
+        pos = default_pos
+        if pbar_stack:
+            pos = -pbar_stack[-1].pos + (0 if pbar_stack[-1].disable else -2)
         if iterable and len(iterable) == 1 and len(Printer.ACTIVE_PBARS) > 0:
             disable = True # minimize clutter
         new_pbar = tqdm(iterable=iterable, desc=desc, total=total, disable=disable, position=pos, 
@@ -302,17 +305,6 @@ class Printer:
             if pbar_stack[-1].n == pbar_stack[-1].total: 
                 pbar_stack.pop()
                 if not pbar_stack[-1].disable: Printer.ACTIVE_PBARS.pop()
-    
-    @staticmethod
-    def pbar_position_handler(default_pos: int, pbar_stack: list[tqdm] | None) -> tuple[int, list[tqdm]]:
-        pos = default_pos
-        if pbar_stack is not None:
-            pos = -pbar_stack[-1].pos + (0 if pbar_stack[-1].disable else -2)
-        else:
-            # next bar must be appended to this empty list
-            pbar_stack = []
-        
-        return pos, pbar_stack
     
     @staticmethod
     def pbar_stream(stream, desc: str = "", total: int | None = None):
@@ -424,11 +416,12 @@ class Loader:
 
 
 class Interface:
-    CURRENT_ITEM = None
-    LAST_DL_TIME: int | None = None
-    LAST_CONVERTING_TIME: int | None = None
-    LAST_DL_ITEM_NAME: str | None = None
-    LAST_ERROR: str | None = None
+    ALL_CONTENT         : set           = None
+    CURRENT_BRANCH      : list          = None
+    LAST_DL_TIME        : int | None    = None
+    LAST_CONV_TIME      : int | None    = None
+    LAST_DL_ITEM_NAME   : str | None    = None
+    LAST_ERROR          : str | None    = None
     
     @staticmethod
     def _term_lines() -> int:
@@ -442,7 +435,7 @@ class Interface:
     def parse_dbs(obj, attr: str) -> str:
         from zotify.api import Content
         obj: Content = obj
-        prefix = f"{obj._clsn} " if obj._clsn.lower() not in attr else ""
+        prefix = f"{obj.clsn} " if obj.type_attr not in attr else ""
         val: str | Content | list[str | Content] = getattr(obj, attr)
         
         if isinstance(val, Content):
@@ -470,26 +463,33 @@ class Interface:
             tqdm.write(line.ljust(Printer._term_cols()))
     
     @staticmethod
-    def bind(currentobj) -> None:
-        Interface.CURRENT_ITEM = currentobj
+    def reset(all_nodes: dict) -> None:
+        from zotify.api import DLContent
+        Interface.ALL_CONTENT = {n for n in all_nodes if isinstance(n, DLContent)}
+        Interface.refresh()
+    
+    @staticmethod
+    def bind(parent_stack) -> None:
+        Interface.CURRENT_BRANCH = parent_stack
     
     @staticmethod
     def refresh() -> None:
-        if Interface.CURRENT_ITEM is None:
+        if Interface.CURRENT_BRANCH is None:
             # attempt to preserve terminal history 
             Printer.new_print(PrintChannel.MANDATORY, "\n"*(Interface._term_lines()))
             Printer.clear()
             return
         
         from zotify.api import DLContent
-        obj: DLContent = Interface.CURRENT_ITEM; subc = obj.query._subContent
-        dashboard = f"Query Tree: {obj.parent_tree_str}\n" +\
+        obj: DLContent = Interface.CURRENT_BRANCH[-1]
+        dl_prog = len({c for c in Interface.ALL_CONTENT if c.downloaded})
+        dashboard = f"Query Tree: {Interface.CURRENT_BRANCH}\n" +\
                     f"\n" +\
-                    f"Current DLContent: {obj._clsn}\n" +\
+                    f"Current DLContent: {obj.clsn}\n" +\
                     f"{obj.dashboard()}\n" +\
                     f"\n" +\
                     f"Status: {obj.dl_status}\n" +\
-                    f"Total Query Progress: {len({c for c in subc if c.downloaded})}/{len(subc)}\n" +\
+                    f"Total Query Progress: {dl_prog}/{len(Interface.ALL_CONTENT)}\n" +\
                     f"\n" +\
                     f"Last Download Time: {Interface.LAST_DL_TIME}\n" +\
                     f"Last Conversion Time: {Interface.LAST_CONVERTING_TIME}\n" +\

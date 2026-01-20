@@ -64,16 +64,12 @@ def fix_filepath(path: PurePath, rel_to: PurePath) -> PurePath:
     return rel_to.joinpath(*fixed_parts)
 
 
-def walk_directory_for_tracks(path: str | PurePath) -> set[Path]:
-    # path must already exist
-    track_paths = set()
-    
-    for dirpath, dirnames, filenames in os.walk(Path(path)):
+def walk_directory_for_tracks(root_path: PurePath):
+    Path(root_path).mkdir(parents=True, exist_ok=True)
+    for dirpath, dirnames, filenames in os.walk(Path(root_path)):
         for filename in filenames:
-            if filename.endswith(tuple(set(EXT_MAP.values()))):
-                track_paths.update({Path(dirpath) / filename,})
-    
-    return track_paths
+            if filename.endswith(tuple(EXT_MAP.values())):
+                yield PurePath(dirpath) / filename
 
 
 def pathlike_move_safe(src: PurePath | bytes, dst: PurePath, copy: bool = False) -> PurePath:
@@ -108,6 +104,23 @@ def get_common_dir(allpaths: set[PurePath]) -> PurePath:
 
 
 # Input Processing Utils
+def safe_typecast(d: dict, k: str, to_cast: type, except_channel: PrintChannel = PrintChannel.WARNING):
+    raw_val = d.get(k)
+    if raw_val is None:
+        return None
+    elif isinstance(raw_val, to_cast):
+        return raw_val
+    elif to_cast is bool:
+        if str(raw_val).lower() in {"0", "no", "false"}:
+            return False
+        return True
+    try:
+        return to_cast(raw_val)
+    except Exception as e:
+        Printer.hashtaged(except_channel, f'COULD NOT CAST VALUE OF KEY "{k}" TO TYPE {str(to_cast).upper()}')
+        raise e
+
+
 def strlist_compressor(strs: list[str]) -> str:
     res = []
     for s in strs:
@@ -124,17 +137,20 @@ def bulk_regex_urls(urls: str | list[str]) -> list[list[str]]:
     base_uri = r'(?:sp'+r'otify:)?%s:([0-9a-zA-Z]{22})'
     base_url = r'(?:https?://)?open\.' + base_uri.split(':')[1] + r'\.com(?:/intl-\w+)?/%s/([0-9a-zA-Z]{22})(?:\?si=.+?)?'
     
-    from zotify.api import ITEM_NAMES
-    matched_ids = [[]]*len(ITEM_NAMES)
-    for i, req_type in enumerate(ITEM_NAMES):
-        matched_ids[i] = re.findall(base_uri % req_type, urls) + re.findall(base_url % req_type, urls)
-    return matched_ids
+    matched_uris = []
+    from zotify.api import ITEM_FETCH
+    for req_type in ITEM_FETCH:
+        ids_by_type = re.findall(base_uri % req_type.type_attr, urls) +\
+                      re.findall(base_url % req_type.type_attr, urls)
+        matched_uris.append([f"{req_type.type_attr}:{s}" for s in ids_by_type])
+    return matched_uris
 
 
-def edge_zip(sorted_list: list) -> None:
+def edge_zip(sorted_list: list) -> list:
     # presorted small to big, in place, [1,2,3,4,5] -> [1,5,2,4,3],
     n = len(sorted_list)
     sorted_list[::2], sorted_list[1::2] = sorted_list[:(n+1)//2], sorted_list[:(n+1)//2-1:-1]
+    return sorted_list
 
 
 def clamp(low: int, i: int, high: int) -> int:
@@ -273,7 +289,7 @@ def upgrade_legacy_archive(entries: list[str], archive_path: PurePath) -> None:
         rewrite_legacy = True
         path_entry = filename_or_path
         for glob_path in Path(Zotify.CONFIG.get_root_path()).glob('**/' + str(filename_or_path)):
-            reliable_tags, unreliable_tags = Track.parse_audio_tags(PurePath(glob_path))
+            reliable_tags, unreliable_tags = Track.read_audio_tags(PurePath(glob_path))
             if ("trackid" in unreliable_tags and unreliable_tags["trackid"] == entry_items[0]
             or  unconv_artist_format(reliable_tags[0])[0] == entry_items[2]
             or  reliable_tags[2] == entry_items[3]):
@@ -339,7 +355,7 @@ def add_to_archive(item_id: str, timestamp: str, author_name: str, item_name: st
         file.write(f'{item_id}\t{timestamp}\t{author_name}\t{item_name}\t{item_path}\n')
 
 
-def add_obj_to_song_archive(obj, dir_path: PurePath | None = None) -> None:
+def add_obj_to_song_archive(obj, path: PurePath, dir_path: PurePath | None = None) -> None:
     if dir_path:
         disabled = Zotify.CONFIG.get_disable_directory_archives()
         archive_path = dir_path / '.song_ids'
@@ -355,13 +371,13 @@ def add_obj_to_song_archive(obj, dir_path: PurePath | None = None) -> None:
     from zotify.api import Track, Episode
     obj: Track | Episode = obj
     author_name = obj.artists[0].name if isinstance(obj, Track) else obj.show.publisher
-    item_name = obj.name if isinstance(obj, Track) else obj.printing_label
-    add_to_archive(obj.id, "", author_name, item_name, obj.filepath,
+    item_name = obj.name if isinstance(obj, Track) else str(obj)
+    add_to_archive(obj.id, "", author_name, item_name, path,
                    archive_path, mode)
 
 
 # Playlist File Utils
-def add_to_m3u8(m3u8_path: PurePath, contents: list, append_strs: list[str] | None = None):
+def add_to_m3u8(m3u8_path: PurePath, contents: list, filepaths: list[PurePath], append_strs: list[str] = []):
     from zotify.api import DLContent
     contents: list[DLContent] = contents
     
@@ -371,12 +387,11 @@ def add_to_m3u8(m3u8_path: PurePath, contents: list, append_strs: list[str] | No
             file.write("#EXTM3U\n\n")
     
     with open(m3u8_path, 'a', encoding='utf-8') as file:
-        for content in contents:
-            track_path_m3u = content.filepath
+        for content, track_path_m3u in zip(contents, filepaths):
             if track_path_m3u is None:
                 continue
             
-            track_label_m3u = f"#EXTINF:{content.duration_ms // 1000}, {content.printing_label}\n"
+            track_label_m3u = f"#EXTINF:{content.duration_ms // 1000}, {content}\n"
             if Zotify.CONFIG.get_m3u8_relative_paths():
                 track_path_m3u = os.path.relpath(track_path_m3u, m3u8_path.parent)
             

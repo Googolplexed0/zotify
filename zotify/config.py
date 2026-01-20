@@ -1,10 +1,11 @@
-import datetime
-import logging
-import json
 import base64
+import datetime
+import json
+import logging
 import sys
 import re
 import requests
+from contextlib import contextmanager
 from librespot.audio import FeederException, LoadedStream
 from librespot.audio.decoders import AudioQuality, SuperAudioFormat, FormatOnlyAudioQuality
 from librespot.core import Session, OAuth, MercuryRequests
@@ -143,6 +144,8 @@ class Config:
     
     @classmethod
     def load(cls, args) -> None:
+        from zotify.utils import safe_typecast
+        
         system_paths = {
             'win32': Path.home() / 'AppData/Roaming/Zotify',
             'linux': Path.home() / '.config/zotify',
@@ -158,14 +161,13 @@ class Config:
                 config_fp = config_fp / 'config.json'
         full_config_path = Path(config_fp).expanduser()
         
-        cls.Values = {}
-        
         # Debug Check (guarantee at top of config)
-        cls.Values[DEBUG] = args.debug
+        cmd_args: dict = vars(args)
+        cls.Values[DEBUG] = safe_typecast(cmd_args, DEBUG.lower(), bool)
         
         # Load default values
-        for key in CONFIG_VALUES:
-            cls.Values[key] = cls.parse_arg_value(key, CONFIG_VALUES[key]['default'])
+        for cfg, cfg_setup in CONFIG_VALUES.items():
+            cls.Values[cfg] = safe_typecast(cfg_setup, 'default', cfg_setup['type'])
         
         # Load config from config.json
         Path(PurePath(full_config_path).parent).mkdir(parents=True, exist_ok=True)
@@ -177,15 +179,15 @@ class Config:
         else:
             with open(full_config_path, encoding='utf-8') as config_file:
                 jsonvalues: dict[str, dict[str, Any]] = json.load(config_file)
-            for key in jsonvalues:
-                if key == DEBUG and not cls.Values[DEBUG]:
-                    cls.Values[DEBUG] = str(jsonvalues[key]).lower() in ['yes', 'true', '1']
-                elif key in CONFIG_VALUES:
-                    cls.Values[key] = cls.parse_arg_value(key, jsonvalues[key])
-                elif key in DEPRECIATED_CONFIGS: # keep, warn, and place at the bottom (don't delete)
-                    Printer.depreciated_warning(key, f'Delete the `"{key}": "{jsonvalues[key]}"` line from your config.json')
+            for cfg in jsonvalues:
+                if cfg == DEBUG and not cls.Values[DEBUG]:
+                    cls.Values[DEBUG] = safe_typecast(jsonvalues, cfg, bool)
+                elif cfg in CONFIG_VALUES:
+                    cls.Values[cfg] = safe_typecast(jsonvalues, cfg, CONFIG_VALUES[cfg]['type'])
+                elif cfg in DEPRECIATED_CONFIGS: # keep, warn, and place at the bottom (don't delete)
+                    Printer.depreciated_warning(cfg, f'Delete the `"{cfg}": "{jsonvalues[cfg]}"` line from your config.json')
                     cls.Values["vvv___DEPRECIATED_BELOW_HERE___vvv"] = "vvv___REMOVE_THESE___vvv"
-                    cls.Values[key] = cls.parse_arg_value(key, jsonvalues[key], DEPRECIATED_CONFIGS)
+                    cls.Values[cfg] = safe_typecast(jsonvalues, cfg, DEPRECIATED_CONFIGS[cfg]['type'])
         
         # Standardize config.json if debugging or refreshing 
         if cls.debug() or args.update_config:
@@ -198,9 +200,9 @@ class Config:
             cls.Values[DEBUG] = real_debug
         
         # Override config from commandline arguments
-        for key in CONFIG_VALUES:
-            if key.lower() in vars(args) and vars(args)[key.lower()] is not None:
-                cls.Values[key] = cls.parse_arg_value(key, vars(args)[key.lower()])
+        for cfg in CONFIG_VALUES:
+            if cmd_args.get(cfg.lower()) is not None:
+                cls.Values[cfg] = safe_typecast(cmd_args, cfg.lower(), CONFIG_VALUES[cfg]['type'])
         
         # Confirm regex patterns
         if cls.get_regex_enabled():
@@ -233,24 +235,19 @@ class Config:
         return d
     
     @classmethod
-    def parse_arg_value(cls, key: str, value: Any, dict_source = CONFIG_VALUES) -> Any:
-        if isinstance(value, dict_source[key]['type']):
-            return value
-        if dict_source[key]['type'] == str:
-            return str(value)
-        if dict_source[key]['type'] == int:
-            return int(value)
-        if dict_source[key]['type'] == bool:
-            if str(value).lower() in ['yes', 'true', '1']:
-                return True
-            if str(value).lower() in ['no', 'false', '0']:
-                return False
-            raise ValueError("Not a boolean: " + value)
-        raise ValueError("Unknown Type: " + value)
-    
-    @classmethod
     def get(cls, key: str) -> Any:
         return cls.Values.get(key)
+    
+    @contextmanager
+    @classmethod
+    def temporary_config(cls, cfg: str, temp_value):
+        from zotify.utils import safe_typecast
+        original_val = cls.get(cfg)
+        cls.Values[cfg] = safe_typecast({cfg: temp_value}, cfg, CONFIG_VALUES[cfg]['type'])
+        try:
+            yield
+        finally:
+            cls.Values[cfg] = original_val
     
     @classmethod
     def debug(cls) -> bool:
@@ -562,7 +559,7 @@ class Config:
         return cls.get(STRICT_LIBRARY_VERIFY)
     
     @classmethod
-    def get_optimized_dl_order(cls) -> bool:
+    def get_optimized_dl(cls) -> bool:
         return cls.get(OPTIMIZED_DOWNLOADING)
     
     @classmethod
@@ -860,8 +857,8 @@ class Zotify:
                 continue
             
             items[strip] = nextable[response_key]
-            while nextable.get('next') is not None and not (stop and len(items[strip]) >= stop):
-                _, nextable = Zotify.invoke_url(nextable['next'])
+            while nextable.get(NEXT) is not None and not (stop and len(items[strip]) >= stop):
+                _, nextable = Zotify.invoke_url(nextable[NEXT])
                 if len(strippers) > 1: nextable: dict = nextable.get(strip, nextable)
                 if response_key not in nextable:
                     Printer.hashtaged(PrintChannel.WARNING, f'Key "{response_key}" not found in paginated API response: {nextable}')
