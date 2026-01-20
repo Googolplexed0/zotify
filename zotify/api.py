@@ -538,7 +538,7 @@ class Track(DLContent):
         
         repl_dict: dict[str, str] = {}
         def update_repl(md_val, *replstrs: str):
-            repl_dict.update(zip(replstr, [md_val]*len(replstr)))
+            repl_dict.update(zip(replstrs, [md_val]*len(replstrs)))
         
         update_repl(self.id,            "{id}", "{track_id}", "{song_id}")
         update_repl(self.name,          "{name}", "{song_name}", "{track_name}", "{song_title}", "{track_title}")
