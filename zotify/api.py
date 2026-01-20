@@ -571,7 +571,7 @@ class Track(DLContent):
             update_repl(parent.id,          "{playlist_id}")
             update_repl(playlist_number,    "{playlist_number}", "{playlist_num}")
         
-        for replstr, md_val in repl_dict.values():
+        for replstr, md_val in repl_dict.items():
             output_template = output_template.replace(replstr, fix_filename(md_val))
         
         return Zotify.CONFIG.get_root_path() / f"{output_template}.{self._ext}"
