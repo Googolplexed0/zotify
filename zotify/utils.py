@@ -134,8 +134,8 @@ def bulk_regex_urls(urls: str | list[str]) -> list[list[str]]:
     if isinstance(urls, list):
         urls = strlist_compressor(urls)
     
-    base_uri = r'(?:sp'+r'otify:)?%s:([0-9a-zA-Z]{22})'
-    base_url = r'(?:https?://)?open\.' + base_uri.split(':')[1] + r'\.com(?:/intl-\w+)?/%s/([0-9a-zA-Z]{22})(?:\?si=.+?)?'
+    base_uri = r'%s:([0-9a-zA-Z]{22})'
+    base_url = r'(?:https?://open\.sp'+ r'otify\.com/intl-\w+)?/?%s/([0-9a-zA-Z]{22})(?:\?si=.+?)?'
     
     matched_uris = []
     from zotify.api import ITEM_FETCH

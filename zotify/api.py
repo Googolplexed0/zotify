@@ -137,8 +137,12 @@ class Content(HierarchicalNode):
                 # self.lyrics           : list[str]     = resp.get(LYRICS)
                 self.year               : str           = self.release_date.split('-')[0] if self.release_date else None
                 
-                def uri_local_backup(item: dict, key: str):
-                    item[URI] = item.get(URI, f":local:{item.get(NAME, f'{self.id}{key.lower()}')}:::")
+                def uri_local_backup(item: dict | None, key: str):
+                    if item is None: return
+                    uri = item.get(URI); name = item.get(NAME)
+                    if not name: name = f"noname-{uuid.uuid4()}"
+                    if not uri: uri = f":local:{key.lower()}:{name}:::"
+                    item[URI] = uri
                 
                 added_by                : dict          = resp.get(ADDED_BY)
                 if added_by:
@@ -208,8 +212,9 @@ class Content(HierarchicalNode):
                                 self.duration_ms = sum((int(t.duration_ms) for t in self.tracks))
                             self.hasMetadata = True
                         elif isinstance(obj, Playlist):
-                            tracks_eps_empty: list[dict] = [item.get(TRACK, {}) for item in items]
+                            tracks_eps_empty: list[dict] = [item.get(TRACK) for item in items]
                             for i, track_or_ep, item in zip(range(len(items)), tracks_eps_empty, items):
+                                if track_or_ep is None: continue
                                 uri_local_backup(track_or_ep, TRACK + str(i+1))
                                 track_or_ep[ADDED_AT] = item.get(ADDED_AT)
                                 track_or_ep[ADDED_BY] = item.get(ADDED_BY)
@@ -249,8 +254,8 @@ class Content(HierarchicalNode):
         self.be_supervised(relative_to_be) if make_parent else self.adopt(relative_to_be)
         return relative_to_be
     
-    def parse_relatives(self, resps: list[dict[str, str]], RelativeClasses: type[Content] | tuple[type[Content]],
-                        make_parent: bool = False) -> list[Content | Container]:
+    def parse_relatives(self, resps: list[dict[str, str] | None], RelativeClasses: type[Content] | tuple[type[Content]],
+                        make_parent: bool = False) -> list[Content | Container | None]:
         RelativeClasses = RelativeClasses if isinstance(RelativeClasses, tuple) else (RelativeClasses,)
         type_selector = tuple(cls.type_attr for cls in RelativeClasses)
         
@@ -261,6 +266,7 @@ class Content(HierarchicalNode):
                                                        f'Parsing {"Parent" if make_parent else "Child"} #{i} of {self.clsn} ({self.id})\n' +
                                                        f'Expected Relative Types: {[c.clsn for c in RelativeClasses]}')
                 if resp: Printer.json_dump(resp, PrintChannel.WARNING)
+                new_relatives.append(None)
                 continue
             RelativeClass: type[Content | Container] = RelativeClasses[type_selector.index(resp[TYPE])]
             new_relative = self.make_or_link_relative(resp[URI].split(":", 1)[-1], RelativeClass, make_parent)
@@ -310,9 +316,10 @@ class DLContent(Content):
             return self._path_root / f"{self.id}.{self._ext}"
         return None
     
-    def rel_path(self, path: PurePath) -> PurePath:
-        # if path is None: path = self._first_dl_path
-        return path.relative_to(self._path_root)
+    def rel_path(self, p: PurePath | ParentStack) -> PurePath:
+        if isinstance(p, ParentStack):
+            p = check_path_dupes(self.fill_output_template(p))
+        return p.relative_to(self._path_root)
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
         self.skippable = super().check_skippable(parent_stack)
@@ -469,15 +476,16 @@ class DLContent(Content):
     def download(self, parent_stack: ParentStack):
         pass
     
-    def clone_file(self, parent_stack: ParentStack, new_path: PurePath) -> bool:
+    def clone_file(self, parent_stack: ParentStack) -> bool:
         """ Attempt to clone and return if clone succeeded """
+        clone_path = check_path_dupes(self.fill_output_template(parent_stack))
         if not self.real_filepaths:
             Printer.hashtaged(PrintChannel.WARNING, f'ATTEMPT TO CLONE {self.clsn.upper()} "{self}" FAILED\n' + 
                                                      'FILE NOT YET DOWNLOADED, THIS SHOULD NOT HAPPEN')
-        for filepath in self.real_filepaths:
+        for filepath in self.real_filepaths.values():
             if not Path(filepath).exists(): continue
-            pathlike_move_safe(filepath, new_path, copy=True)
-            self.mark_downloaded(parent_stack, new_path)
+            pathlike_move_safe(filepath, clone_path, copy=True)
+            self.mark_downloaded(parent_stack, clone_path)
             return True
         Printer.hashtaged(PrintChannel.WARNING, f'ATTEMPT TO CLONE {self.clsn.upper()} "{self}" FAILED\n' + 
                                                 f'FALLING BACK TO REDOWNLOAD\n' +
@@ -489,8 +497,7 @@ class DLContent(Content):
         """ Attempt to clone all and return if all clones succeeded """
         for ps in self._clone_to:
             if ps in self.real_filepaths: continue
-            clone_path = check_path_dupes(self.fill_output_template(ps))
-            if not self.clone_file(ps, clone_path):
+            if not self.clone_file(ps):
                 return False
         return True
 
@@ -721,16 +728,14 @@ class Track(DLContent):
                 jpg_file.write(img)
     
     def download(self, parent_stack: ParentStack) -> None:
-        path = check_path_dupes(self.fill_output_template(parent_stack))
-        
         if not Zotify.CONFIG.get_optimized_dl():
             if Zotify.CONFIG.get_download_parent_album():
                 with Zotify.CONFIG.temporary_config(DOWNLOAD_PARENT_ALBUM, False):
                     self.album.download(ParentStack([parent_stack[0], self.album]))
                 return
-            elif self.downloaded and self.clone_file(path):
+            elif self.downloaded and self.clone_file(parent_stack):
                 Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} ALREADY DOWNLOADED THIS SESSION)\n' + 
-                                                         f'FILE COPIED TO NEW DESTINATION "{self.rel_path(path)}"')
+                                                         f'FILE COPIED TO NEW DESTINATION "{self.rel_path(parent_stack)}"')
                 return
         elif Zotify.CONFIG.get_optimized_dl() and self.downloaded:
             if self.clone_to_all(): return
@@ -743,6 +748,7 @@ class Track(DLContent):
         
         Interface.bind(parent_stack)
         with self.set_dl_status("Preparing Download"):
+            path = check_path_dupes(self.fill_output_template(parent_stack))
             if path != self.fill_output_template(parent_stack): # path exists but id isn't archived OR skipping disabled
                 Printer.debug('Path Duplicate Not Being Skipped:\n' +
                               'ID not Archived' if Zotify.CONFIG.get_skip_existing() else 'Skipping Disabled')
@@ -955,10 +961,9 @@ class Episode(DLContent):
         return fmt_duration(time_dl_end - time_start)
     
     def download(self, parent_stack: ParentStack):
-        path = check_path_dupes(self.fill_output_template(parent_stack))
-        
-        if not Zotify.CONFIG.get_optimized_dl() and self.downloaded and self.clone_file(path):
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} ALREADY DOWNLOADED THIS SESSION)')
+        if not Zotify.CONFIG.get_optimized_dl() and self.downloaded and self.clone_file(parent_stack):
+            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} ALREADY DOWNLOADED THIS SESSION)\n' +
+                                                     f'FILE COPIED TO NEW DESTINATION "{self.rel_path(parent_stack)}"')
             return
         elif Zotify.CONFIG.get_optimized_dl() and self.downloaded:
             if self.clone_to_all(): return
@@ -967,6 +972,7 @@ class Episode(DLContent):
         
         Interface.bind(parent_stack)
         with self.set_dl_status("Preparing Download"):
+            path = check_path_dupes(self.fill_output_template(parent_stack))
             if path != self.fill_output_template(parent_stack): # path exists but id isn't archived OR skipping disabled
                 Printer.debug('Path Duplicate Not Being Skipped:\n' +
                               'ID not Archived' if Zotify.CONFIG.get_skip_existing() else 'Skipping Disabled')
@@ -1114,6 +1120,7 @@ class Playlist(Container):
     def fetch_items(self, hide_loader: bool = False) -> list[dict | None]:
         playlist_items: list[dict[str, dict]] = super().fetch_items(hide_loader=hide_loader)
         for item in playlist_items:
+            if not item.get(TRACK): continue
             item[TRACK][ADDED_AT] = item.get(ADDED_AT)
             item[TRACK][ADDED_BY] = item.get(ADDED_BY)
             item[TRACK][IS_LOCAL] = item.get(IS_LOCAL)
@@ -1204,6 +1211,7 @@ class Artist(Container):
     
     def __init__(self, uri: str):
         super().__init__(uri)
+        self.needs_expansion = True
         self.needs_recursion = not self._toptrackmode
         
         self.total_followers    : int                   = None
@@ -1360,8 +1368,8 @@ class Query(Container):
                     recurs_children: list[Container] = []
                     for recurs_obj in recurs_objs:
                         recurs_children.extend(recurs_obj._main_items)
-                    recurse_type = recurs_children[0].__class__ # assumes all Containers inside objs are the same class
-                    recurs_item_resps = self.fetch_uris_metadata([c.uri for c in recurs_children], recurse_type)
+                    recurse_type = recurs_objs[0]._contains
+                    recurs_item_resps = self.fetch_uris_metadata([c.uri for c in recurs_children], recurse_type, hide_loader=True)
                     self.parse_query_metadata([recurs_item_resps], [recurse_type], hide_loader=True)
         return self.requested_objs
     
@@ -1373,7 +1381,7 @@ class Query(Container):
         if Zotify.CONFIG.get_save_genres() and artist_uris:
             with Loader(f"Fetching bulk genre information..."):
                 artist_resps = self.fetch_uris_metadata(artist_uris.keys(), Artist, hide_loader=True)
-                for artist, artist_resp in zip(artists, artist_resps):
+                for artist, artist_resp in zip(artist_uris.values(), artist_resps):
                     artist.parse_metadata(None, artist_resp)
                     artist.needs_expansion = False
                 for track in alltracks:
@@ -1382,12 +1390,12 @@ class Query(Container):
                     track.genres = genres
         
         albums = {track.album for track in alltracks if track.album and not track.album.local_file}
-        album_ids: dict[str, Album] = {a.uri: a for a in albums if not a.hasMetadata}
+        album_uris: dict[str, Album] = {a.uri: a for a in albums if not a.hasMetadata}
         if (Zotify.CONFIG.get_disc_track_totals() or Zotify.CONFIG.get_download_parent_album()) and albums:
             loader_text = "parent album" if Zotify.CONFIG.get_download_parent_album() else "track/disc total"
             with Loader(f"Fetching bulk {loader_text} information..."):
-                album_resps = self.fetch_uris_metadata(album_ids.keys(), Album, hide_loader=True)
-                for album, album_resp in zip(albums, album_resps):
+                album_resps = self.fetch_uris_metadata(album_uris.keys(), Album, hide_loader=True)
+                for album, album_resp in zip(album_uris.values(), album_resps):
                     album.parse_metadata(None, album_resp)
                     if album.needs_expansion: album.grab_more_children(hide_loader=True)
     

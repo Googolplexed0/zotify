@@ -736,7 +736,14 @@ class Zotify:
                             filemode="x", filename=Zotify.LOGFILE)
         
         with Loader("Logging in...", PrintChannel.MANDATORY):
-            Zotify.login(args)
+            login_try = 0
+            while login_try <= cls.CONFIG.get_retry_attempts():
+                login_try += 1
+                try: Zotify.login(args)
+                except ConnectionError as e:
+                    Printer.hashtaged(PrintChannel.WARNING, f"LOGIN FAILED ({e.args[0]})\n" + 
+                                                             "TRYING AGAIN AFTER SMALL WAIT")
+                    sleep(3)
         Zotify.LOGGER = logging.getLogger("zotify.debug")
         
         Printer.debug("Session Initialized Successfully")
