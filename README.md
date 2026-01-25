@@ -283,7 +283,7 @@ Multiple filters can be stacked, with latter filters overwriting prior filters. 
 
 | Filter Tag                  | Type       | Valid Values                                              | Default Value                    |
 |-----------------------------|------------|-----------------------------------------------------------|----------------------------------|
-| `/t`, `/type`               | `ITEMTYPE` | `track`, `album`, `artist`, `playlist`, `show`, `episode` | `track album artist playlist`    |
+| `/t`, `/type`               | `ITEMTYPE` | `track`, `album`, `artist`, `playlist`, `show`, `episode` | `track,album,artist,playlist`    |
 | `/s`, `/size`               | int        | 0 < i <= 1050                                             | `SEARCH_QUERY_SIZE` Config == 10 |
 | `/o`, `/offset`             | int        | 0 < i <= 1000                                             | 0                                |
 | `/ie`, `/include-external`  | bool       | True, False                                               | False                            |
@@ -296,7 +296,7 @@ Search for Lots of Artists                   :   `Taylor /t artist /s 50`
 
 Skip the First 100 Search Results            :   `LMFAO Party Rock /o 100`
 
-Smaller Default Search, Including Podcasts   :   `Country /t track album artist playlist episode /s 5`
+Smaller Default Search, Including Podcasts   :   `Country /t track,album,artist,playlist,episode /s 5`
 
 Search for Externally-Hosted Podcasts        :   `Life is Crazy Sometimes /t show /ie True /s 30`
 

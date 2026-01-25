@@ -45,7 +45,7 @@ def filter_search_query(search_query: str, item_types: tuple[str]) -> dict[str, 
     max_offset = 1000
     max_limit = 50
     for k, v in list(search_filters.items()):
-        if   k == TYPE:                fv = ",".join([t for t in v[-1].split() if t in item_types])
+        if   k == TYPE:                fv = ",".join([t for t in v[-1].split(",") if t in item_types])
         elif k == SEARCH_QUERY_SIZE:   fv = str(clamp(0, int(v[-1]), max_offset + max_limit))
         elif k == OFFSET:              fv = str(clamp(0, int(v[-1]), max_offset            ))
         elif k == INCLUDE_EXTERNAL:    fv = "audio" if v[-1].lower() == "true" else ""
@@ -109,6 +109,7 @@ def fetch_search_display(search_query: str) -> list[str]:
 
 def search_and_select(search: str = ""):
     """ Perform search Queries and allow user to select results """
+    from zotify.api import Query
     
     while not search or search == ' ':
         search = Printer.get_input('Enter search: ')
@@ -124,7 +125,6 @@ def search_and_select(search: str = ""):
         Printer.hashtaged(PrintChannel.MANDATORY, 'NO RESULTS FOUND - EXITING...')
         return
     
-    from zotify.api import Query
     uris: list[str] = select(search_result_uris)
     Query(Zotify.DATETIME_LAUNCH).request(' '.join(uris)).execute()
 

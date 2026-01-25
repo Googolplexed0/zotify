@@ -345,9 +345,9 @@ class DLContent(Content):
         in_dir_archive = self.id in get_archived_item_ids(path.parent)
         if not Zotify.CONFIG.get_optimized_dl():
             Printer.debug("Duplicate Check\n" +
-                        f"File Already Exists: {path_exists}\n" +
-                        f"id in Local Archive: {in_dir_archive}\n" +
-                        f"id in Global Archive: {self.in_global_archive}")
+                         f"File Already Exists: {path_exists}\n" +
+                         f"id in Local Archive: {in_dir_archive}\n" +
+                         f"id in Global Archive: {self.in_global_archive}")
         
         if path_exists and Zotify.CONFIG.get_skip_existing() and Zotify.CONFIG.get_disable_directory_archives():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.rel_path(path)}" (FILE ALREADY EXISTS)')
@@ -1039,7 +1039,7 @@ class Container(Content):
     
     def __init__(self, uri: str):
         super().__init__(uri)
-        self._main_items: list[DLContent | Container]   = []
+        self._main_items: list[DLContent | Container | None]   = []
         self.needs_expansion = False
         self.needs_recursion = False
     
@@ -1071,15 +1071,16 @@ class Container(Content):
         self._main_items.extend(item_objs)
         self.needs_expansion = False
     
-    def pbar(self, dl: list[DLContent | Container], parent_stack: ParentStack) -> list[DLContent | Container]:
-        if not dl: return []
-        item: DLContent | Container = parent_stack[-1]
-        unit = "Content" if isinstance(item._contains, tuple) else item._contains.__name__
-        if isinstance(item, Query) and not isinstance(item, UserItem): # avoid overwriting UserItem._contains
+    def pbar(self, items: list[DLContent | Container | None], ps: ParentStack) -> list[DLContent | Container]:
+        real_items: list[DLContent | Container] = [c for c in items if c is not None]
+        if not real_items: return []
+        parent: DLContent | Container = ps[-1]
+        unit = "Content" if isinstance(parent._contains, tuple) else parent._contains.__name__
+        if isinstance(parent, Query) and not isinstance(parent, UserItem): # avoid overwriting UserItem._contains
             unit = "Content" if Zotify.CONFIG.get_optimized_dl() else "URL"
-        pbar: list[DLContent | Container] = Printer.pbar(dl, item.name, unit=unit, disable=not item._show_pbar,
-                                                         default_pos=7, pbar_stack=parent_stack.PBARS)
-        parent_stack.PBARS.append(pbar)
+        pbar: list[DLContent | Container] = Printer.pbar(real_items, parent.name, unit=unit, default_pos=7,
+                                                         disable=not parent._show_pbar, pbar_stack=ps.PBARS)
+        ps.PBARS.append(pbar)
         return pbar
     
     def download(self, parent_stack: ParentStack):
@@ -1449,8 +1450,9 @@ class Query(Container):
             
             dlc_mapping: dict[DLContent, list[ParentStack]] = {}
             for ps in build_parent_stacks(self):
-                dlc: DLContent = ps[-1]
-                if dlc not in dlc_mapping: dlc_mapping[dlc] = [ps]
+                dlc: DLContent | None = ps[-1]
+                if dlc is None: continue
+                elif dlc not in dlc_mapping: dlc_mapping[dlc] = [ps]
                 else: dlc_mapping[dlc].append(ps)
             
             if Zotify.CONFIG.get_download_parent_album():
