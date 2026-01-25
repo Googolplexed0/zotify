@@ -48,6 +48,7 @@ class Content(HierarchicalNode):
     # CONFIG must be loaded with args before any Content classes are instantiated/imported
     _path_root: PurePath = Zotify.CONFIG.get_root_path()
     _regex_flag: re.Pattern | None = None
+    _to_str_attrs = [URI, NAME]
     _fetch_args = ""
     url = ""
     
@@ -75,7 +76,15 @@ class Content(HierarchicalNode):
         return hash(self.uri)
     
     def __str__(self):
-        return fix_filename(f'{self.uri} - {self.name}')
+        default = fix_filename(f"({self.type_attr}){self.id}")
+        if Zotify.CONFIG.get_bypass_metadata(): return default
+        vals = []
+        for attr in self._to_str_attrs:
+            val = getattr(self, attr, None)
+            if isinstance(val, list):       val = val[0] if isinstance(val[0], Content) else ", ".join(str(v) for v in val)
+            if isinstance(val, Content):    val = getattr(val, NAME, None)
+            if val:                         vals.append(str(val))
+        return fix_filename(" - ".join(vals)) if vals else default
     
     def dashboard(self, extra_attrs: list[str] = [], suppress_id: bool = False, force_clsn: bool = False) -> str:
         db = ""
@@ -183,6 +192,7 @@ class Content(HierarchicalNode):
                 owner                   : dict          = resp.get(SHOW)
                 if owner:
                     self.owner          : User          = obj.parse_relatives([owner], User, make_parent=True)[0]
+                    self.owner.name = self.owner.display_name
                 
                 show                    : dict          = resp.get(SHOW)
                 if show:
@@ -194,7 +204,7 @@ class Content(HierarchicalNode):
                 
                 followers               : dict          = resp.get(FOLLOWERS)
                 if followers:
-                    self.total_followers: int           = safe_typecast(followers, TOTAL, int)
+                    self.followers: int           = safe_typecast(followers, TOTAL, int)
                 
                 tracks                  : dict          = resp.get(TRACKS)
                 if tracks:
@@ -504,6 +514,7 @@ class DLContent(Content):
 
 class Track(DLContent):
     _regex_flag = Zotify.CONFIG.get_regex_track()
+    _to_str_attrs = [ARTISTS, NAME]
     _codecs = CODEC_MAP_TRACK
     _ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower(), "ogg")
     url = TRACK_URL
@@ -524,9 +535,6 @@ class Track(DLContent):
         # only set by Playlist API
         self.added_by       : dict[Playlist, User]  = {}
         self.is_local       : dict[Playlist, str]   = {}
-    
-    def __str__(self):
-        return fix_filename(f'{self.artists[0].name} - {self.name}')
     
     def dashboard(self, suppress_id: bool = False) -> str:
         return super().dashboard(["track_number", "artists", "album"], suppress_id=suppress_id)
@@ -902,6 +910,7 @@ class Track(DLContent):
 class Episode(DLContent):
     _path_root: PurePath = Zotify.CONFIG.get_root_podcast_path()
     _regex_flag = Zotify.CONFIG.get_regex_episode()
+    _to_str_attrs = [SHOW, NAME]
     _codecs = CODEC_MAP_EPISODE
     _ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower(), "copy")
     url = EPISODE_URL
@@ -919,9 +928,6 @@ class Episode(DLContent):
         self.added_at       : dict[Playlist, str]   = {}
         self.added_by       : dict[Playlist, User]  = {}
         self.is_local       : dict[Playlist, str]   = {}
-    
-    def __str__(self):
-        return fix_filename(f'{self.show.name} - {self.name}')
     
     def dashboard(self, suppress_id: bool = False) -> str:
         return super().dashboard(["show",], suppress_id=suppress_id)
@@ -1099,24 +1105,23 @@ class Container(Content):
 
 class Playlist(Container):
     _show_pbar = Zotify.CONFIG.get_show_playlist_pbar()
+    _to_str_attrs = [OWNER, NAME]
     _contains = (Track, Episode)
     _preloaded = 100
     _fetch_q = 100
     _fetch_args = "additional_types=track%2Cepisode"
+    
     url = PLAYLIST_URL
     
     def __init__(self, uri: str):
         super().__init__(uri)
         self.collaborative  : bool                      = None
-        self.description           : str                       = None
+        self.description    : str                       = None
         self.image_url      : str                       = None
         self.public         : bool                      = None
         self.snapshot_id    : str                       = None
         self.owner          : User                      = None
         self.tracks_or_eps  : list[Track | Episode]     = self._main_items
-    
-    def __str__(self):
-        return fix_filename(f'{self.owner.name} - {self.name}')
     
     def fetch_items(self, hide_loader: bool = False) -> list[dict | None]:
         playlist_items: list[dict[str, dict]] = super().fetch_items(hide_loader=hide_loader)
@@ -1140,6 +1145,7 @@ class User(Container):
 class Album(Container):
     _regex_flag = Zotify.CONFIG.get_regex_album()
     _show_pbar = Zotify.CONFIG.get_show_album_pbar()
+    _to_str_attrs = [ARTISTS, NAME]
     _contains = Track
     _preloaded = 50
     url = ALBUM_URL
@@ -1162,9 +1168,6 @@ class Album(Container):
         self.album_group    : dict[Container, str]  = {}
         # only set by UserItem API
         self.added_at       : dict[Container, str]  = {}
-    
-    def __str__(self):
-        return fix_filename(f'{self.artists[0].name} - {self.name}')
     
     def dashboard(self, suppress_id: bool = False) -> str:
         return super().dashboard(["total_tracks", "artists"], suppress_id=suppress_id, force_clsn=True)
@@ -1204,6 +1207,7 @@ class Album(Container):
 
 class Artist(Container):
     _show_pbar = Zotify.CONFIG.get_show_artist_pbar()
+    _to_str_attrs = [NAME, FOLLOWERS, GENRES]
     _toptrackmode: bool = False # Zotify.get_artist_fetch_top_tracks(), not implemented
     _contains = Album if not _toptrackmode else TopTrack
     _fetch_q = 20 if not _toptrackmode else 100
@@ -1215,13 +1219,10 @@ class Artist(Container):
         self.needs_expansion = True
         self.needs_recursion = not self._toptrackmode
         
-        self.total_followers    : int                   = None
-        self.albums             : list[Album]           = self._main_items if not self._toptrackmode else None
-        self.genres             : list[str]             = None
-        self.top_tracks         : list[TopTrack]        = self._main_items if self._toptrackmode else None
-    
-    def __str__(self):
-        return fix_filename(f'{self.genres} {self.total_followers} - {self.name}')
+        self.followers      : int               = None
+        self.albums         : list[Album]       = self._main_items if not self._toptrackmode else None
+        self.genres         : list[str]         = None
+        self.top_tracks     : list[TopTrack]    = self._main_items if self._toptrackmode else None
     
     def dashboard(self, suppress_id: bool = False) -> str:
         return super().dashboard(["genres"], suppress_id=suppress_id)
@@ -1230,6 +1231,7 @@ class Artist(Container):
 class Show(Container):
     _path_root: PurePath = Zotify.CONFIG.get_root_podcast_path()
     _show_pbar = Zotify.CONFIG.get_show_album_pbar()
+    _to_str_attrs = [PUBLISHER, NAME]
     _contains = Episode
     _preloaded = 50
     url = SHOW_URL
@@ -1243,9 +1245,6 @@ class Show(Container):
         self.publisher              : str               = None
         self.total_episodes         : str               = None
         self.episodes               : list[Episode]     = self._main_items
-    
-    def __str__(self):
-        return fix_filename(f'{self.publisher} - {self.name}')
     
     def dashboard(self, suppress_id: bool = False) -> str:
         return super().dashboard(["total_episodes",], suppress_id=suppress_id)
@@ -1329,7 +1328,7 @@ class Query(Container):
         if not uris:
             return []
         elif Zotify.CONFIG.get_bypass_metadata():
-            return [{URI: uri} for uri in uris]
+            return [{URI: uri, TYPE: cont_type.type_attr} for uri in uris]
         elif cont_type is Playlist:
             return [self.make_or_link_relative(uri, Playlist).fetch_metadata() for uri in uris]
         else:
@@ -1494,7 +1493,7 @@ class Query(Container):
                                                   "ATTEMPTING TO CLEAN UP")
             Printer.traceback(interrupt)
         
-        if Zotify.CONFIG.get_export_m3u8() and self.requested_objs:
+        if Zotify.CONFIG.get_export_m3u8() and self.requested_objs and not Zotify.CONFIG.get_bypass_metadata():
             with Loader("Creating m3u8 files..."):
                 self.create_m3u8_playlists()
         
