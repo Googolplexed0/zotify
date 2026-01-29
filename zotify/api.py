@@ -63,7 +63,6 @@ class Content(HierarchicalNode):
         
         self.downloaded = False
         self.hasMetadata = False
-        self.skippable = None
         
         self.name = ""
     
@@ -286,18 +285,22 @@ class Content(HierarchicalNode):
         return new_relatives
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
-        if self.skippable is not None: return self.skippable
-        self.skippable = False
-        return self.skippable
+        return False
     
-    def mark_downloaded(self, parent_stack: ParentStack | None = None, path: PurePath | None = None):
+    def mark_downloaded(self, ps: ParentStack | None = None, path: PurePath | None = None):
         if isinstance(self, Container) and not isinstance(self, Query):
             self.downloaded = all(c.downloaded for c in self._main_items)
         elif not isinstance(self, DLContent):
             self.downloaded = True
         elif path:
             self.downloaded = True
+            parent_stack = ps if Zotify.CONFIG.get_optimized_dl() else ParentStack(ps.copy())
             self.real_filepaths[parent_stack] = path
+            if Zotify.CONFIG.get_bypass_metadata(): return
+            if not self.in_global_archive:
+                add_obj_to_song_archive(self, path)
+            if isinstance(self, Track) and not self.id in get_archived_item_ids(path.parent):
+                add_obj_to_song_archive(self, path, path.parent)
 
 
 class DLContent(Content):
@@ -307,7 +310,6 @@ class DLContent(Content):
     def __init__(self, uri: str):
         super().__init__(uri)
         self.dl_status = ""
-        self.in_dir_archive = False
         self.in_global_archive = self.id in get_archived_item_ids()
         self.real_filepaths: dict[ParentStack, PurePath] = {}
         self._clone_to: set[ParentStack] = set()
@@ -331,17 +333,12 @@ class DLContent(Content):
             p = check_path_dupes(self.fill_output_template(p))
         return p.relative_to(self._path_root)
     
-    def check_skippable(self, parent_stack: ParentStack) -> bool:
-        self.skippable = super().check_skippable(parent_stack)
-        if self.skippable: return self.skippable
-        
+    def check_skippable(self, parent_stack: ParentStack) -> bool:        
         if self.regex_check(skip_debug_print=Zotify.CONFIG.get_optimized_dl()):
-            self.skippable = True
+            return True
         elif not self.is_playable and not Zotify.CONFIG.get_bypass_metadata():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} IS UNAVAILABLE)')
-            self.skippable = True
-        
-        if self.skippable: return self.skippable
+            return True
         
         path = self.fill_output_template(parent_stack)
         path_exists = Path(path).is_file() and Path(path).stat().st_size
@@ -354,28 +351,29 @@ class DLContent(Content):
         
         in_dir_archive = self.id in get_archived_item_ids(path.parent)
         if not Zotify.CONFIG.get_optimized_dl():
-            Printer.debug("Duplicate Check\n" +
-                         f"File Already Exists: {path_exists}\n" +
-                         f"id in Local Archive: {in_dir_archive}\n" +
-                         f"id in Global Archive: {self.in_global_archive}")
+            Printer.debug(f'Duplicate Check @ "{path}"\n' +
+                          f'File Already Exists: {path_exists}\n' +
+                          f'id in Local Archive: {in_dir_archive}\n' +
+                          f'id in Global Archive: {self.in_global_archive}')
         
-        if path_exists and Zotify.CONFIG.get_skip_existing() and Zotify.CONFIG.get_disable_directory_archives():
+        def handle_archive(dir_path: PurePath | None):
+            archived_path = get_archived_path_from_id(self.id, dir_path)
+            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} DOWNLOADED PREVIOUSLY)\n'
+                                                     f'FILE: "{self.rel_path(archived_path)}"')
+            self.mark_downloaded(parent_stack, archived_path)
+        
+        if path_exists and Zotify.CONFIG.get_skip_existing() and Zotify.CONFIG.get_disable_dir_archives():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.rel_path(path)}" (FILE ALREADY EXISTS)')
             self.mark_downloaded(parent_stack, path)
-            self.skippable = True
-        elif in_dir_archive and Zotify.CONFIG.get_skip_existing() and not Zotify.CONFIG.get_disable_directory_archives():
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} ALREADY EXISTS)\n'
-                                                     f'FILE: "{self.rel_path(path)}"')
-            archived_path = get_archived_item_paths(path.parent)[get_archived_item_ids(path.parent).index(self.id)]
-            self.mark_downloaded(parent_stack, archived_path)
-            self.skippable = True
+            return True
+        elif in_dir_archive and Zotify.CONFIG.get_skip_existing() and not Zotify.CONFIG.get_disable_dir_archives():
+            handle_archive(path.parent)
+            return True
         elif self.in_global_archive and Zotify.CONFIG.get_skip_previously_downloaded():
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} DOWNLOADED PREVIOUSLY)')
-            archived_path = get_archived_item_paths()[get_archived_item_ids().index(self.id)]
-            self.mark_downloaded(parent_stack, archived_path)
-            self.skippable = True
+            handle_archive(None)
+            return True
         
-        return self.skippable
+        return False
     
     def fetch_content_stream(self, stream, temppath: PurePath, parent_stack: ParentStack) -> str:
         time_start = time.time()
@@ -488,6 +486,8 @@ class DLContent(Content):
     
     def clone_file(self, parent_stack: ParentStack) -> bool:
         """ Attempt to clone and return if clone succeeded """
+        if parent_stack.check_skippable():
+            return False
         clone_path = check_path_dupes(self.fill_output_template(parent_stack))
         if not self.real_filepaths:
             Printer.hashtaged(PrintChannel.WARNING, f'ATTEMPT TO CLONE {self.clsn.upper()} "{self}" FAILED\n' + 
@@ -500,7 +500,7 @@ class DLContent(Content):
         Printer.hashtaged(PrintChannel.WARNING, f'ATTEMPT TO CLONE {self.clsn.upper()} "{self}" FAILED\n' + 
                                                 f'FALLING BACK TO REDOWNLOAD\n' +
                                                 f'EXPECTED SOURCE FILES THAT DO NOT EXIST:')
-        Printer.json_dump(self.real_filepaths)
+        Printer.json_dump({str(k): str(v) for k, v in self.real_filepaths.items()})
         return False
     
     def clone_to_all(self) -> bool:
@@ -592,13 +592,12 @@ class Track(DLContent):
         return Zotify.CONFIG.get_root_path() / f"{output_template}.{self._ext}"
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:      
-        self.skippable = super().check_skippable(parent_stack)
-        if self.skippable: return self.skippable
+        if super().check_skippable(parent_stack): return True
         
-        if self.album:
-            self.skippable = self.album.check_skippable(parent_stack)
+        if self.album and self.album.check_skippable(parent_stack):
+            return True
         
-        return self.skippable
+        return False
     
     def fetch_lyrics(self, parent_stack: ParentStack) -> None:
         if self.lyrics:
@@ -791,11 +790,6 @@ class Track(DLContent):
             Printer.traceback(e)
         
         Printer.dl_complete(self, path, time_elapsed_dl, time_elapsed_ffmpeg)
-        if not Zotify.CONFIG.get_bypass_metadata():
-            if not self.in_dir_archive:
-                add_obj_to_song_archive(self, path, path.parent)
-            if not self.in_global_archive:
-                add_obj_to_song_archive(self, path)
         
         if Zotify.CONFIG.get_optimized_dl(): self.clone_to_all()
         wait_between_downloads()
@@ -1029,8 +1023,6 @@ class Episode(DLContent):
             self.mark_downloaded(parent_stack, path)
         
         Printer.dl_complete(self, path, time_elapsed_dl, time_elapsed_ffmpeg)
-        if not Zotify.CONFIG.get_bypass_metadata() and not self.in_dir_archive:
-            add_obj_to_song_archive(self, path, path.parent)
         
         if Zotify.CONFIG.get_optimized_dl(): self.clone_to_all()
         wait_between_downloads()
@@ -1178,31 +1170,27 @@ class Album(Container):
         self.duration_ms = sum((int(t.duration_ms) for t in self.tracks))
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
-        self.skippable = super().check_skippable(parent_stack)
-        if self.skippable: return self.skippable
-        
         discog_artist = next((p for p in parent_stack if isinstance(p, Artist)), None)
         album_group = self.album_group.get(discog_artist)
         if album_group:
             if Zotify.CONFIG.get_skip_comp_albums() and album_group == COMPILATION:
                 Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" (ARTIST ONLY COMPILED INTO ALBUM)')
-                self.skippable = True
+                return True
             elif Zotify.CONFIG.get_skip_appears_on_album() and album_group == APPEARS_ON:
                 Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" (ARTIST ONLY APPEARS ON ALBUM)')
-                self.skippable = True
+                return True
             elif Zotify.CONFIG.get_discog_by_album_artist() and self.artists[0].name == discog_artist.name:
                 Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" (ARTIST NOT ALBUM ARTIST)')
-                self.skippable = True
-            if self.skippable: return self.skippable
+                return True
         
         if Zotify.CONFIG.get_skip_comp_albums() and self.compilation:
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" (COMPILATION ALBUM)')
-            self.skippable = True
+            return True
         elif Zotify.CONFIG.get_skip_various_artists() and "".join(self.artists[0].name.lower().split()) == "variousartists":
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" (ALBUM OF VARIOUS ARTISTS)')
-            self.skippable = True
+            return True
         
-        return self.skippable
+        return False
 
 
 class Artist(Container):
@@ -1285,7 +1273,8 @@ ITEM_FETCH: dict[type[DLContent] | type[Container], int] = {
 
 class ParentStack(list):
     """ Will contain DLContent as last item in self if possible """
-    PBARS = []
+    PBARS                               = []
+    skippable: dict[str, bool | None]   = {}
     
     def __hash__(self: ParentStack | list[Content]):
         return hash("&".join(c.uri for c in self))
@@ -1297,7 +1286,10 @@ class ParentStack(list):
         return f"[{' -> '.join([c.clsn for c in self])}]"
     
     def check_skippable(self: ParentStack | list[Content]) -> bool:
-        return any(c.check_skippable(self) for c in self[::-1])
+        if self.skippable.get(hash(self)) is not None: return self.skippable
+        skip = any(c.check_skippable(self) for c in self[::-1])
+        self.skippable[hash(self)] = skip
+        return skip
     
     def download(self: ParentStack | list[DLContent | Container], _: ParentStack):
         self[-1].download(self)
@@ -1491,7 +1483,8 @@ class Query(Container):
         elif interrupt is not None:
             Printer.hashtaged(PrintChannel.ERROR, "UNEXPECTED ERROR DURING DOWNLOADS\n"+
                                                   "ATTEMPTING TO CLEAN UP")
-            Printer.traceback(interrupt)
+            Printer.hashtaged(PrintChannel.ERROR, str(interrupt))
+            # Printer.traceback(interrupt)
         
         if Zotify.CONFIG.get_export_m3u8() and self.requested_objs and not Zotify.CONFIG.get_bypass_metadata():
             with Loader("Creating m3u8 files..."):

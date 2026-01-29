@@ -130,7 +130,7 @@ class Printer:
                 if shrink(k):
                     obj[k] = shrink(k)
                 else:
-                    obj[k] = Printer._api_shrink(v) 
+                    obj[k] = Printer._api_shrink(v)
         
         return obj
     

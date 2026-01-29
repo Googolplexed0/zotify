@@ -16,7 +16,7 @@ def create_download_directory(dir_path: str | PurePath) -> None:
     
     # add hidden file with song ids
     hidden_file_path = PurePath(dir_path).joinpath('.song_ids')
-    if Zotify.CONFIG.get_disable_directory_archives():
+    if Zotify.CONFIG.get_disable_dir_archives():
         return
     if not Path(hidden_file_path).is_file():
         with open(hidden_file_path, 'w', encoding='utf-8') as f:
@@ -309,7 +309,7 @@ def upgrade_legacy_archive(entries: list[str], archive_path: PurePath) -> None:
 def get_archived_entries(dir_path: PurePath | None = None) -> list[str]:
     """ Returns list of downloaded song entries """
     if dir_path:
-        disabled = Zotify.CONFIG.get_disable_directory_archives()
+        disabled = Zotify.CONFIG.get_disable_dir_archives()
         archive_path = dir_path / '.song_ids'
     else:
         disabled = Zotify.CONFIG.get_disable_song_archive()
@@ -345,6 +345,10 @@ def get_archived_item_paths(dir_path: PurePath | None = None) -> list[PurePath]:
     return item_paths
 
 
+def get_archived_path_from_id(item_id: str, dir_path: PurePath | None = None) -> PurePath:
+    return get_archived_item_paths(dir_path)[get_archived_item_ids(dir_path).index(item_id)]
+
+
 def add_to_archive(item_id: str, timestamp: str, author_name: str, item_name: str, item_path: PurePath, 
                    archive_path: PurePath, mode: str) -> None:
     """ Adds item record to the song archive at archive_path """
@@ -357,7 +361,7 @@ def add_to_archive(item_id: str, timestamp: str, author_name: str, item_name: st
 
 def add_obj_to_song_archive(obj, path: PurePath, dir_path: PurePath | None = None) -> None:
     if dir_path:
-        disabled = Zotify.CONFIG.get_disable_directory_archives()
+        disabled = Zotify.CONFIG.get_disable_dir_archives()
         archive_path = dir_path / '.song_ids'
         mode = 'a' # should already exist from create_download_directory(), so only append mode
     else:

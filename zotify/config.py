@@ -418,7 +418,7 @@ class Config:
         return cls.get(RETRY_ATTEMPTS)
     
     @classmethod
-    def get_disable_directory_archives(cls) -> bool:
+    def get_disable_dir_archives(cls) -> bool:
         return cls.get(DISABLE_DIRECTORY_ARCHIVES)
     
     @classmethod
