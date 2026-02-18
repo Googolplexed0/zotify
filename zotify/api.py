@@ -1278,14 +1278,18 @@ class Album(Container):
         self.update_id(album_resp[ID])
         self.name: str = album_resp[NAME]
         
-        # Local File == None
-        if album_resp[ALBUM_TYPE]: self.type: str = album_resp[ALBUM_TYPE]
-        if album_resp[RELEASE_DATE]: self.release_date: str = album_resp[RELEASE_DATE]
+        # Local File == None or Key May Not Exist
+        if album_resp.get(ALBUM_TYPE): self.type: str = album_resp[ALBUM_TYPE]
+        if album_resp.get(RELEASE_DATE): self.release_date: str = album_resp[RELEASE_DATE]
         # Local File == Key May Not Exist
         if album_resp.get(TOTAL_TRACKS): self.total_tracks = str(album_resp[TOTAL_TRACKS]).zfill(2)
         
-        largest_image = max(album_resp[IMAGES], key=lambda img: img[WIDTH], default={URL: ""})
-        self.image_url: str = largest_image[URL]
+        # Local File == Key May Not Exist
+        if album_resp.get(IMAGES):
+            largest_image = max(album_resp[IMAGES], key=lambda img: img.get(WIDTH, 0), default={URL: ""})
+            self.image_url: str = largest_image.get(URL, "")
+        else:
+            self.image_url: str = ""
         self.compilation: int = 1 if COMPILATION == self.type else 0
         self.year: str = self.release_date.split('-')[0]
         
