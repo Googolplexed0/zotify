@@ -1,5 +1,6 @@
 from __future__ import annotations
 import platform
+from contextlib import contextmanager
 from enum import Enum
 from itertools import cycle
 from mutagen import FileType
@@ -159,17 +160,18 @@ class Printer:
         
         return msg, category
     
-    @staticmethod
-    def _toggle_active_loader(skip_toggle: bool = False) -> None:
-        if not skip_toggle and Printer.ACTIVE_LOADER:
-            if Printer.ACTIVE_LOADER.paused:
-                Printer.ACTIVE_LOADER.resume()
-            else:
-                Printer.ACTIVE_LOADER.pause()
+    @classmethod
+    @contextmanager
+    def pause_loader(cls, ignore_pause: bool = False):
+        if ignore_pause or not Printer.ACTIVE_LOADER or Printer.ACTIVE_LOADER.paused:
+            yield; return
+        Printer.ACTIVE_LOADER.pause()
+        try:     yield
+        finally: Printer.ACTIVE_LOADER.resume()
     
     @staticmethod
     def new_print(channel: PrintChannel, msg: str, category: PrintCategory = PrintCategory.NONE, 
-                  skip_toggle: bool = False, end: str = "\n") -> None:
+                  end: str = "\n") -> None:
         Printer.logger(msg, channel)
         if channel != PrintChannel.MANDATORY:
             from zotify.config import Zotify
@@ -177,23 +179,21 @@ class Printer:
                 return
         if channel == PrintChannel.MANDATORY or Zotify.CONFIG.get(channel.value):
             msg, category = Printer._print_prefixes(msg, category, channel)
-            Printer._toggle_active_loader(skip_toggle)
-            for line in str(msg).splitlines():
-                if end == "\n":
-                    tqdm.write(line.ljust(Printer._term_cols()))
-                else:
-                    tqdm.write(line, end=end)
-                Printer.LAST_PRINT = category
-            Printer._toggle_active_loader(skip_toggle)
+            with Printer.pause_loader(category in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE}):
+                for line in str(msg).splitlines():
+                    if end == "\n":
+                        tqdm.write(line.ljust(Printer._term_cols()))
+                    else:
+                        tqdm.write(line, end=end)
+                    Printer.LAST_PRINT = category
     
     @staticmethod
     def get_input(prompt: str) -> str:
         user_input = ""
-        Printer._toggle_active_loader()
-        while len(user_input) == 0:
-            Printer.new_print(PrintChannel.MANDATORY, prompt, end="", skip_toggle=True)
-            user_input = str(input())
-        Printer._toggle_active_loader()
+        with Printer.pause_loader():
+            while len(user_input) == 0:
+                Printer.new_print(PrintChannel.MANDATORY, prompt, end="")
+                user_input = str(input())
         return user_input
     
     # Print Wrappers
@@ -371,7 +371,7 @@ class Loader:
         Printer.ACTIVE_LOADER = self._inherited_active_loader
     
     def loader_print(self, msg: str):
-        Printer.new_print(self.channel, msg, self.category, skip_toggle=True)
+        Printer.new_print(self.channel, msg, self.category)
         if self.category is PrintCategory.LOADER:
             self.category = PrintCategory.LOADER_CYCLE
     

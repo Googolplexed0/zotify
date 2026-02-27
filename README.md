@@ -85,7 +85,6 @@ If an artist's URL is given, all albums by the specified artist will be download
 | `-c`, `--config-location`           | Specify a directory containing a Zotify `config.json` file (or a filepath to a `.json` file) to load settings  |
 | `-u`, `--username`                  | Account username                                                                                               |
 | `--token`                           | Authentication token                                                                                           |
-| `--client-id`                       | Client ID for a Developer App to reroute metadata API requests through                                         |
 
 | Command Line Mode Flag (exclusive)  | Mode                                                                                                           |
 |-------------------------------------|----------------------------------------------------------------------------------------------------------------|
@@ -177,7 +176,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 
 | Metadata Options             | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
-| `BYPASS_MD_API`              | `--bypass-metadata-api`             | Whether API calls should be disabled (can only download Tracks or Episodes in URL mode)  | False         |
+| `API_CLIENT_ID`              | `--client-id`                       | Client ID for a Developer App to route metadata API requests through                     | `""`          |
 | `LANGUAGE`                   | `--language`                        | Language in which metadata/tags are requested                                            | en            |
 | `MD_DISC_TRACK_TOTALS`       | `--md-disc-track-totals`            | Whether track totals and disc totals should be saved in metadata                         | True          |
 | `MD_SAVE_GENRES`             | `--md-save-genres`                  | Whether genres should be saved in metadata                                               | True          |

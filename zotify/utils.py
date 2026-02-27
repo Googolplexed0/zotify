@@ -1,9 +1,10 @@
-import datetime
 import os
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path, PurePath
 from shutil import move, copyfile, copyfileobj
+
 from zotify.config import Zotify
 from zotify.const import EXT_MAP
 from zotify.termoutput import PrintChannel, Printer
@@ -134,14 +135,12 @@ def bulk_regex_urls(urls: str | list[str]) -> list[list[str]]:
     if isinstance(urls, list):
         urls = strlist_compressor(urls)
     
-    base_uri = r'%s:([0-9a-zA-Z]{22})'
-    base_url = r'(?:https?://open\.sp'+ r'otify\.com/intl-\w+)?/?%s/([0-9a-zA-Z]{22})(?:\?si=.+?)?'
+    base_uri = r'%s[:/]([0-9a-zA-Z]{22})'
     
     matched_uris = []
     from zotify.api import ITEM_FETCH
     for req_type in ITEM_FETCH:
-        ids_by_type = re.findall(base_uri % req_type.type_attr, urls) +\
-                      re.findall(base_url % req_type.type_attr, urls)
+        ids_by_type = re.findall(base_uri % req_type.type_attr, urls)
         matched_uris.append([f"{req_type.type_attr}:{s}" for s in ids_by_type])
     return matched_uris
 
@@ -255,8 +254,18 @@ def fmt_duration(duration: float | int, unit_conv: tuple[int] = (60, 60), connec
         return f'{h}'.zfill(2) + connectors[0] + f'{m}'.zfill(2) + connectors[1] + f'{s}'.zfill(2)
 
 
-def strptime_utc(dtstr) -> datetime.datetime:
-    return datetime.datetime.strptime(dtstr[:-1], '%Y-%m-%dT%H:%M:%S').replace(tzinfo=datetime.timezone.utc)
+def dt_to_str(dt: datetime) -> str:
+    return dt.strftime(r'%Y-%m-%d_%H:%M:%S')
+
+
+def timestamp_utc(timestamp_ms: str | None) -> str | None:
+    if not timestamp_ms: return None
+    dt = datetime.fromtimestamp(int(timestamp_ms) / 1000, tz=timezone.utc)
+    return dt_to_str(dt)
+
+
+def strptime_utc(dtstr: str) -> datetime:
+    return datetime.strptime(dtstr[:-1], r'%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
 
 
 def wait_between_downloads(skip_wait: bool = False) -> None:
@@ -354,7 +363,7 @@ def add_to_archive(item_id: str, timestamp: str, author_name: str, item_name: st
     """ Adds item record to the song archive at archive_path """
     
     if not timestamp:
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(archive_path, mode, encoding='utf-8') as file:
         file.write(f'{item_id}\t{timestamp}\t{author_name}\t{item_name}\t{item_path}\n')
 

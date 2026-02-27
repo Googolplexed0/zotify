@@ -148,8 +148,11 @@ def perform_query(args: Namespace) -> None:
             if len(urls) > 0:
                 Query(Zotify.DATETIME_LAUNCH).request(urls).execute()
         
-        elif Zotify.CONFIG.get_bypass_metadata():
-            Printer.hashtaged(PrintChannel.MANDATORY, 'METADATA BYPASS ENABLED - NON-URL MODES NON-FUNCTIONAL')
+        elif args.verify_library:
+            VerifyLibrary(Zotify.DATETIME_LAUNCH).execute()
+        
+        elif not Zotify.CONFIG.get_api_client_id():
+            Printer.hashtaged(PrintChannel.MANDATORY, 'NO DEVELOPER CLIENT - SEARCH AND USERITEM QUERIES NON-FUNCTIONAL')
             return
         
         elif args.liked_songs:
@@ -164,9 +167,6 @@ def perform_query(args: Namespace) -> None:
         elif args.followed_albums:
             SavedAlbum(Zotify.DATETIME_LAUNCH).execute()
         
-        elif args.verify_library:
-            VerifyLibrary(Zotify.DATETIME_LAUNCH).execute()
-        
         elif args.search:
             search_and_select(args.search)
         
@@ -174,7 +174,7 @@ def perform_query(args: Namespace) -> None:
             search_and_select()
     
     except BaseException as e:
-        Zotify.cleanup()
+        Zotify.end()
         raise e
 
 
@@ -224,4 +224,4 @@ def client(args: Namespace, modes: list[Action]) -> None:
         Zotify.start()
         perform_query(args)
     
-    Zotify.cleanup()
+    Zotify.end()
