@@ -398,9 +398,9 @@ class Loader:
             while not self.dead: #guarantee _animate has finished
                 try:
                     sleep(self.timeout)
-                except KeyboardInterrupt as e:
+                except KeyboardInterrupt:
                     self.stop() # guarantee stop is called so outer funcs can clean up all loaders
-                    raise e
+                    raise
             self.category = PrintCategory.LOADER
             if self.end != "":
                 self.loader_print(self.end)

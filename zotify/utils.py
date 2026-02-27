@@ -117,9 +117,9 @@ def safe_typecast(d: dict, k: str, to_cast: type, except_channel: PrintChannel =
         return True
     try:
         return to_cast(raw_val)
-    except Exception as e:
+    except Exception:
         Printer.hashtaged(except_channel, f'COULD NOT CAST VALUE OF KEY "{k}" TO TYPE {str(to_cast).upper()}')
-        raise e
+        raise
 
 
 def strlist_compressor(strs: list[str]) -> str:

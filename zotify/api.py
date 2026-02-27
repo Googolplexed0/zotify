@@ -477,8 +477,8 @@ class Content(HierarchicalNode):
 
 
 class DLContent(Content):
-    _codecs: dict[str, str] = {}
-    _ext = ""
+    _codec = ""
+    _ext   = ""
     
     def __init__(self, uri: str):
         super().__init__(uri)
@@ -613,57 +613,47 @@ class DLContent(Content):
         return stdout.decode().strip().split("=")[1].split("\r")[0].split("\n")[0]
     
     def convert_audio_format(self, temppath: PurePath, path: PurePath) -> str | None:
-        file_codec = self._codecs.get(Zotify.CONFIG.get_download_format().lower(), 'copy')
-        output_params = ['-c:a', file_codec]
-        
-        if file_codec != 'copy':
+        output_params = ['-c:a', self._codec]
+        if self._codec != 'copy':
             bitrate = Zotify.CONFIG.get_transcode_bitrate()
             if bitrate in {"auto", ""}:
                 bitrate = Zotify.DOWNLOAD_BITRATE
             if bitrate:
                 output_params += ['-b:a', bitrate]
         
-        def run_ffmpeg(output_params: list[str], error_str: str) -> float | Exception:
-            try:
-                ff_m = ffmpy.FFmpeg(
-                global_options=['-y', '-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'],
-                inputs={temppath: None},
-                outputs={path: output_params}
-                )
-                
-                stdout, stderr = ff_m.run(stdout=subprocess.PIPE)
-                loggable_output = [stdout.decode() if stdout else "",
-                                   stderr.decode() if stderr else ""]
-                Printer.logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
-                
-                if Path(temppath).exists():
-                    Path(temppath).unlink()
-                
-                return time.time()
-                
-            except Exception as e:
-                if isinstance(e, ffmpy.FFExecutableNotFoundError):
-                    Printer.hashtaged(PrintChannel.WARNING, 'FFMPEG NOT FOUND\n' +
-                                                           f'SKIPPING CONVERSION TO {file_codec.upper()}')
-                else:
-                    Printer.hashtaged(PrintChannel.WARNING, str(e) + '\n' + error_str)
-                return e
+        def run_ffmpeg(custom_ffmpeg_args: list[str] = []) -> float:
+            ff_m = ffmpy.FFmpeg(
+            global_options=['-y', '-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'],
+            inputs={temppath: None},
+            outputs={path: output_params + custom_ffmpeg_args}
+            )
+            
+            stdout, stderr = ff_m.run(stdout=subprocess.PIPE)
+            loggable_output = [stdout.decode() if stdout else "",
+                                stderr.decode() if stderr else ""]
+            Printer.logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
+            
+            if Path(temppath).exists():
+                Path(temppath).unlink()
+            
+            return time.time()
         
-        time_ffmpeg_start = time.time(); time_ffmpeg_end = None
+        time_ffmpeg_start = time.time()
+        try:
+            return fmt_duration(run_ffmpeg(Zotify.CONFIG.get_custom_ffmpeg_args()) - time_ffmpeg_start)
+        except ffmpy.FFExecutableNotFoundError:
+            Printer.hashtaged(PrintChannel.WARNING, 'FFMPEG NOT FOUND\n' +
+                                                   f'SKIPPING CONVERSION TO {self._codec.upper()}')
+            return
+        except Exception as e:
+            if Zotify.CONFIG.get_custom_ffmpeg_args():
+                Printer.hashtaged(PrintChannel.WARNING, str(e) + '\n' + 'CUSTOM FFMPEG ARGUMENTS FAILED')
         
-        custom_ffmpeg_args = Zotify.CONFIG.get_custom_ffmpeg_args()
-        if custom_ffmpeg_args:
-            customized_output_params = custom_ffmpeg_args if file_codec == 'copy' else output_params + custom_ffmpeg_args
-            time_ffmpeg_end = run_ffmpeg(customized_output_params, 'CUSTOM FFMPEG ARGUMENTS FAILED')
-            if isinstance(time_ffmpeg_end, ffmpy.FFExecutableNotFoundError):
-                return
-        
-        if time_ffmpeg_end is None or isinstance(time_ffmpeg_end, Exception):
-            time_ffmpeg_end = run_ffmpeg(output_params, f'SKIPPING CONVERSION TO {file_codec.upper()}')
-            if isinstance(time_ffmpeg_end, Exception):
-                return
-        
-        return fmt_duration(time_ffmpeg_end - time_ffmpeg_start)
+        try:
+            return fmt_duration(run_ffmpeg() - time_ffmpeg_start)
+        except Exception as e:
+            Printer.hashtaged(PrintChannel.WARNING, str(e) + '\n' + f'SKIPPING CONVERSION TO {self._codec.upper()}')
+            return
     
     # placeholder func, overwrite in each child class
     def download(self, parent_stack: ParentStack):
@@ -700,7 +690,7 @@ class DLContent(Content):
 class Track(DLContent):
     _regex_flag = Zotify.CONFIG.get_regex_track()
     _to_str_attrs = [ARTISTS, NAME]
-    _codecs = CODEC_MAP_TRACK
+    _codec = CODEC_MAP_TRACK.get(Zotify.CONFIG.get_download_format().lower(), "copy")
     _ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower(), "ogg")
     url = TRACK_URL
     
@@ -796,7 +786,7 @@ class Track(DLContent):
                 try:
                     formatted_lyrics = lyrics_dict[LYRICS][LINES]
                 except KeyError:
-                    raise ValueError('LYRICS NOT AVAILABLE')
+                    raise ValueError('LYRICS NOT AVAILABLE') from None
                 
                 if lyrics_dict[LYRICS][SYNCTYPE] == UNSYNCED:
                     lyrics = [line[WORDS] + '\n' for line in formatted_lyrics]
@@ -962,11 +952,15 @@ class Track(DLContent):
                 path = pathlike_move_safe(temppath, path.with_suffix(".ogg"))
             self.mark_downloaded(parent_stack, path)
         
-        try:
-            self.write_audio_tags(path)
+        try: self.write_audio_tags(path)
+        except NotImplementedError as e:
+            if not "Mutagen type" in e.args[0]: raise
+            err_codec = e.args[0].removeprefix("Mutagen type ").removesuffix(" not implemented")
+            Printer.hashtaged(PrintChannel.ERROR,  'FAILED TO WRITE METADATA\n' +
+                                                  f'FILE {self.rel_path(path)} OF MEDIA TYPE {err_codec}\n' +
+                                                  f'INSTEAD OF EXPECTED MEDIA TYPE {self._codec}')
         except Exception as e:
-            Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO WRITE METADATA\n' +
-                                                  'Ensure FFMPEG is installed and added to your PATH')
+            Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO WRITE METADATA\n')
             Printer.traceback(e)
         
         Printer.dl_complete(self, path, time_elapsed_dl, time_elapsed_ffmpeg)
@@ -1085,7 +1079,7 @@ class Episode(DLContent):
     _path_root: PurePath = Zotify.CONFIG.get_root_podcast_path()
     _regex_flag = Zotify.CONFIG.get_regex_episode()
     _to_str_attrs = [SHOW, NAME]
-    _codecs = CODEC_MAP_EPISODE
+    _codec = CODEC_MAP_EPISODE.get(Zotify.CONFIG.get_download_format().lower(), "copy")
     _ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower(), "copy")
     url = EPISODE_URL
     
@@ -1653,7 +1647,7 @@ class Query(Container):
             Printer.logger(interrupt, PrintChannel.ERROR)
             if not isinstance(interrupt, KeyboardInterrupt):
                 Printer.logger(self.__dict__, PrintChannel.ERROR)
-                raise interrupt
+                raise
     
     def reset(self):
         HierarchicalNode.ALL_NODES = {}

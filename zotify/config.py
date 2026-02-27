@@ -324,7 +324,7 @@ class Config:
         elif dl_obj_clsn == 'Liked Song':
             v = cls.get(OUTPUT_LIKED_SONGS)
         else:
-            raise ValueError()
+            raise ValueError(f'INVALID DOWNLOAD OBJECT CLASS "{dl_obj_clsn}"')
         
         if cls.get_split_album_discs() and dl_obj_clsn == "Album":
             return str(PurePath(v).parent / 'Disc {disc_number}' / PurePath(v).name)
@@ -810,12 +810,12 @@ class Zotify:
                 if not responsejson:
                     raise json.decoder.JSONDecodeError
             except json.decoder.JSONDecodeError:
-                responsejson = {"error": {"status": "Unknown", "message": "Received an empty response"}}
-            if responsejson and not 'error' in responsejson:
+                responsejson = {ERROR: {"status": "Unknown", "message": "Received an empty response"}}
+            if responsejson and not ERROR in responsejson:
                 return responsejson
             elif not expectFail:
                 Printer.hashtaged(PrintChannel.WARNING, f'API ERROR (TRY {tryCount}) - RETRYING\n' +
-                                                        f'{responsejson["error"]["status"]}:  {responsejson["error"]["message"]}')
+                                                        f'{responsejson[ERROR].get("status", "Unknown")}:  {responsejson[ERROR]["message"]}')
             
             tryCount += 1
             if tryCount > cls.CONFIG.get_retry_attempts():
@@ -827,7 +827,7 @@ class Zotify:
                                                       f'RESPONSE TEXT: {Printer.pretty(responsejson)}\n' +
                                                       f'URL: {Printer.pretty(url)}')
         
-        return responsejson
+        return {}
     
     @classmethod
     def invoke_url_nextable(cls, url: str, response_key: str = ITEMS, stop: int = 0, limit: int = 50, offset: int = 0,
@@ -903,14 +903,14 @@ class Zotify:
                                                    f'PREFERED AUDIO QUALITY {preference} NOT AVAILABLE - FALLING BACK TO AUTO')
             return cls.get_content_stream(content, use_qual_pref=False)
         except RuntimeError as e:
-            if 'Failed fetching audio key!' not in e.args[0]: raise e
+            if 'Failed fetching audio key!' not in e.args[0]: raise
             gid, fileid = e.args[0].split('! ')[1].split(', ')
             Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +
                                                   'MAY BE CAUSED BY RATE LIMITS - CONSIDER INCREASING `BULK_WAIT_TIME`\n' +
                                                  f'GID: {gid[5:]} - File_ID: {fileid[8:]}')
             Printer.logger("\n".join(e.args), PrintChannel.ERROR)
         except ConnectionError as e:
-            if "Status code " not in e.args[0]: raise e
+            if "Status code " not in e.args[0]: raise
             status_code = e.args[0].split("Status code ")[1]
             Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO FILE\n' +
                                                  f'CONNECTION ERROR WHEN FETCHING CONTENT STREAM - STATUS CODE {status_code}')

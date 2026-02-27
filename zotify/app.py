@@ -173,9 +173,9 @@ def perform_query(args: Namespace) -> None:
         else:
             search_and_select()
     
-    except BaseException as e:
+    except BaseException:
         Zotify.end()
-        raise e
+        raise
 
 
 def client(args: Namespace, modes: list[Action]) -> None:
