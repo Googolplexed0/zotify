@@ -874,6 +874,7 @@ class Zotify:
     
     @classmethod
     def get_content_stream(cls, content, use_qual_pref: bool = True) -> GeneralAudioStream | None:
+        global FORCE_STREAM_API_CALL
         from zotify.api import DLContent
         if not isinstance(content, DLContent): return
         content_id = cls.to_libre_content(content.__class__, content.uri)
