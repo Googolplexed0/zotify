@@ -784,7 +784,7 @@ class Track(DLContent):
         try:
             with Loader("Fetching lyrics..."):
                 # expect failure here, lyrics are not guaranteed to be available
-                lyrics_dict = Zotify.invoke_url(LYRICS_URL + self.id, expectFail=True)
+                lyrics_dict = Zotify.invoke_url(LYRICS_URL + self.id, expectFail=True, force_login5=True)
                 if not lyrics_dict:
                     raise ValueError('FAILED TO FETCH')
                 try:
