@@ -285,26 +285,19 @@ class Config:
     
     @classmethod
     def get_credentials_location(cls) -> PurePath:
-        if cls.get(CREDENTIALS_LOCATION) == '':
+        cred_str: str = cls.get(CREDENTIALS_LOCATION)
+        if not cred_str:
             system_paths = {
                 'win32': Path.home() / 'AppData/Roaming/Zotify',
                 'linux': Path.home() / '.local/share/zotify',
                 'darwin': Path.home() / 'Library/Application Support/Zotify'
             }
-            if sys.platform not in system_paths:
-                credentials_path = PurePath(Path.cwd() / '.zotify')
-            else:
-                credentials_path = PurePath(system_paths[sys.platform])
+            cred_dir_or_file = system_paths.get(sys.platform, Path.cwd() / '.zotify')
+        elif cred_str[0] == ".":
+            cred_dir_or_file = Path(cls.get_root_path()) / Path(cred_str).expanduser().relative_to(".")
         else:
-            cred_path_str: str = cls.get(CREDENTIALS_LOCATION)
-            if cred_path_str[0] == ".":
-                credentials_path = cls.get_root_path() / PurePath(cred_path_str).relative_to(".")
-            else:
-                credentials_path = PurePath(cred_path_str)
-        
-        credentials = Path(credentials_path).expanduser()
-        if credentials.is_dir():
-            credentials = credentials / 'credentials.json'
+            cred_dir_or_file = Path(cred_str).expanduser()
+        credentials = cred_dir_or_file if cred_dir_or_file.suffix else cred_dir_or_file / 'credentials.json'
         credentials.parent.mkdir(parents=True, exist_ok=True)
         return PurePath(credentials)
     
@@ -372,23 +365,20 @@ class Config:
     
     @classmethod
     def get_song_archive_location(cls) -> PurePath:
-        if cls.get(SONG_ARCHIVE_LOCATION) == '':
+        song_archive_str: str = cls.get(SONG_ARCHIVE_LOCATION)
+        if not song_archive_str:
             system_paths = {
                 'win32': Path.home() / 'AppData/Roaming/Zotify',
                 'linux': Path.home() / '.local/share/zotify',
                 'darwin': Path.home() / 'Library/Application Support/Zotify'
             }
-            if sys.platform not in system_paths:
-                song_archive =  PurePath(Path.cwd() / '.zotify/.song_archive')
-            else:
-                song_archive = PurePath(system_paths[sys.platform] / '.song_archive')
+            song_archive_dir = system_paths.get(sys.platform, Path.cwd() / '.zotify')
+        elif song_archive_str[0] == ".":
+            song_archive_dir = Path(cls.get_root_path()) / Path(song_archive_str).expanduser().relative_to(".")
         else:
-            song_archive_path: str = cls.get(SONG_ARCHIVE_LOCATION)
-            if song_archive_path[0] == ".":
-                song_archive_path = cls.get_root_path() / PurePath(song_archive_path).relative_to(".")
-            song_archive = PurePath(Path(song_archive_path).expanduser() / ".song_archive")
-        Path(song_archive.parent).mkdir(parents=True, exist_ok=True)
-        return song_archive
+            song_archive_dir = Path(song_archive_str).expanduser()
+        song_archive_dir.mkdir(parents=True, exist_ok=True)
+        return PurePath(song_archive_dir / '.song_archive')
     
     @classmethod
     def get_temp_download_dir(cls) -> str | PurePath:
@@ -753,7 +743,7 @@ class Zotify:
                     sleep(3)
         cls.LOGGER = logging.getLogger("zotify.debug")
         
-        Printer.debug("Session Initialized Successfully")
+        Printer.debug(f'{"CLIENT_ID" if cls.OAUTH else ""} Session Initialized Successfully')
         quality, bitrate = cls.parse_dl_quality(cls.CONFIG.get_download_qual_pref())
         cls.DOWNLOAD_QUALITY = quality
         cls.DOWNLOAD_BITRATE = bitrate

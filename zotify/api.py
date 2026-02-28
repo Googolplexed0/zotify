@@ -830,15 +830,13 @@ class Track(DLContent):
                     file.writelines(lrc_header)
                 file.writelines(self.lyrics)
     
-    def write_audio_tags(self, filepath: PurePath) -> None:
+    def write_audio_tags(self, filepath: PurePath, parent_stack: ParentStack | None = None) -> None:
         file_tags: music_tag.AudioFile = music_tag.load_file(filepath)
         img = None # expect jpeg
         
         def set_tag_safe(FILETAG, tag_value):
-            if not tag_value:
-                return
-            try:
-                file_tags[FILETAG] = tag_value
+            if not tag_value: return
+            try: file_tags[FILETAG] = tag_value
             except Exception as e:
                 Printer.hashtaged(PrintChannel.WARNING, f'FAILED TO SET TAG {FILETAG} TO "{tag_value}" FOR "{self.rel_path()}"\n' +
                                                         f'ERROR: {str(e)}')
@@ -847,23 +845,17 @@ class Track(DLContent):
             def custom_mp3_tag(tag: str, val: str):
                 from mutagen.id3 import TXXX
                 file_tags.mfile.tags.add(TXXX(encoding=3, desc=tag.upper(), text=[val]))
-            
             def custom_m4a_tag(tag: str, val: str):
                 from music_tag.mp4 import freeform_set
                 atomic_tag = M4A_CUSTOM_TAG_PREFIX + tag
                 freeform_set(file_tags, atomic_tag, type('tag', (object,), {'values': [val]})())
-            
             def custom_ogg_tag(tag: str, val: str):
                 from music_tag.file import TAG_MAP_ENTRY
                 file_tags.tag_map[tag] = TAG_MAP_ENTRY(getter=tag, setter=tag, type=type(val))
                 set_tag_safe(tag, val)
-            
-            if self._ext == "mp3":
-                custom_mp3_tag(tag, val)
-            elif self._ext == "m4a":
-                custom_m4a_tag(tag, val)
-            else:
-                custom_ogg_tag(tag, val)
+            if self._ext == "mp3":   custom_mp3_tag(tag, val)
+            elif self._ext == "m4a": custom_m4a_tag(tag, val)
+            else:                    custom_ogg_tag(tag, val)
         
         # Reliable Tags
         set_tag_safe(       ARTIST,         conv_artist_format(self.artists))
@@ -900,13 +892,14 @@ class Track(DLContent):
         
         file_tags.save()
         
-        # save trach image art to file
-        if not Zotify.CONFIG.get_album_art_jpg_file() or img is None:
+        # save track image art to file
+        if not Zotify.CONFIG.get_album_art_jpg_file() or img is None or not parent_stack:
             return
-        jpg_path = filepath.parent / ('cover.jpg' if isinstance(self.parent, Album) else filepath.stem + '.jpg')
-        if not Path(jpg_path).exists():
-            with open(jpg_path, 'wb') as jpg_file:
-                jpg_file.write(img)
+        jpg_album_cover_path = filepath.parent / 'cover.jpg'
+        jpg_single_path = filepath.parent / filepath.stem + '.jpg'
+        if not Path(jpg_album_cover_path).exists() and not Path(jpg_single_path).exists():
+            jpg_path = jpg_album_cover_path if len(parent_stack) > 1 and isinstance(parent_stack[-2], Album) else jpg_single_path
+            with open(jpg_path, 'wb') as f: f.write(img)
     
     def download(self, parent_stack: ParentStack) -> None:
         if not Zotify.CONFIG.get_optimized_dl():
@@ -956,7 +949,7 @@ class Track(DLContent):
                 path = pathlike_move_safe(temppath, path.with_suffix(".ogg"))
             self.mark_downloaded(parent_stack, path)
         
-        try: self.write_audio_tags(path)
+        try: self.write_audio_tags(path, parent_stack)
         except NotImplementedError as e:
             if not "Mutagen type" in e.args[0]: raise
             err_codec = e.args[0].removeprefix("Mutagen type ").removesuffix(" not implemented")
