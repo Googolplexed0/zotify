@@ -623,7 +623,8 @@ class DLContent(Content):
                 output_params += ['-b:a', bitrate]
         Printer.logger(f'Temp Path: "{temppath}"\n' + 
                        f'Output Path: "{path}"\n' +
-                       f'Desired Codec: {self._codec.upper()}\n', PrintChannel.DEBUG)
+                       f'Desired Codec: {self._codec.upper()}\n' +
+                       f'Expected Log Level: {Zotify.CONFIG.get_ffmpeg_log_level().upper()}', PrintChannel.DEBUG)
         
         def run_ffmpeg(custom_ffmpeg_args: list[str] = []) -> float:
             ff_m = ffmpy.FFmpeg(
@@ -632,9 +633,9 @@ class DLContent(Content):
             outputs={path: output_params + custom_ffmpeg_args}
             )
             
-            stdout, stderr = ff_m.run(stdout=subprocess.PIPE)
-            loggable_output = [stdout.decode() if stdout else "",
-                                stderr.decode() if stderr else ""]
+            stdout, stderr = ff_m.run(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            loggable_output = ["STDOUT:", stdout.decode().replace('\r\n', '\n') if stdout else "",
+                               "STDERR:", stderr.decode().replace('\r\n', '\n') if stderr else ""]
             Printer.logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
             
             if Path(temppath).exists():
