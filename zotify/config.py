@@ -805,7 +805,7 @@ class Zotify:
         while tryCount <= cls.CONFIG.get_retry_attempts():
             resp = requests.get(url, headers=headers, params=params)
             cls.TOTAL_API_CALLS += 1
-            if resp.status_code == 403:
+            if resp.status_code == 403 and not expectFail:
                 Printer.hashtaged(PrintChannel.WARNING, f'API ERROR\n' +
                                                         f'ATTEMPTING TO ACCESS FORBIDDEN ENDPOINT')
                 return {}
