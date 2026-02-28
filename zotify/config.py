@@ -302,9 +302,7 @@ class Config:
             else:
                 credentials_path = PurePath(cred_path_str)
         
-        credentials = Path(credentials_path).expanduser()
-        if credentials.is_dir():
-            credentials = credentials / 'credentials.json'
+        credentials = Path(credentials_path).expanduser() / 'credentials.json'
         credentials.parent.mkdir(parents=True, exist_ok=True)
         return PurePath(credentials)
     
