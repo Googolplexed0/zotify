@@ -584,9 +584,8 @@ class DLContent(Content):
                             time.sleep(delta_want - delta_real)
         finally:
             pbar.close(); pbar.clear()
-        time_dl_end = time.time()
         
-        return fmt_duration(time_dl_end - time_start)
+        return fmt_duration(time.time() - time_start)
     
     def get_audio_duration(self, path: PurePath) -> float:
         """ Returns the downloaded file's duration in seconds """
@@ -620,6 +619,9 @@ class DLContent(Content):
                 bitrate = Zotify.DOWNLOAD_BITRATE
             if bitrate:
                 output_params += ['-b:a', bitrate]
+        Printer.logger(f'Temp Path: "{temppath}"\n' + 
+                       f'Output Path: "{path}"\n' +
+                       f'Desired Codec: {self._codec.upper()}\n', PrintChannel.DEBUG)
         
         def run_ffmpeg(custom_ffmpeg_args: list[str] = []) -> float:
             ff_m = ffmpy.FFmpeg(
@@ -957,7 +959,7 @@ class Track(DLContent):
             if not "Mutagen type" in e.args[0]: raise
             err_codec = e.args[0].removeprefix("Mutagen type ").removesuffix(" not implemented")
             Printer.hashtaged(PrintChannel.ERROR,  'FAILED TO WRITE METADATA\n' +
-                                                  f'FILE {self.rel_path(path)} OF MEDIA TYPE {err_codec}\n' +
+                                                  f'FILE "{self.rel_path(path)}" OF MEDIA TYPE {err_codec}\n' +
                                                   f'INSTEAD OF EXPECTED MEDIA TYPE {self._codec}')
         except Exception as e:
             Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO WRITE METADATA\n')

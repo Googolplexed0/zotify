@@ -433,7 +433,7 @@ class Config:
     
     @classmethod
     def get_ffmpeg_log_level(cls) -> str:
-        level = cls.get(FFMPEG_LOG_LEVEL)
+        level = str(cls.get(FFMPEG_LOG_LEVEL)).lower()
         # see https://ffmpeg.org/ffmpeg.html#Generic-options, -loglevel
         valid_levels = {"trace", "debug", "verbose", "info", "warning", "error", "fatal", "panic", "quiet"}
         
@@ -623,15 +623,15 @@ class Config:
 
 
 class Zotify:
-    CONFIG: Config         = Config()
-    OAUTH: OAuth           = None
-    SESSION: Session       = None
-    TOTAL_API_CALLS: int   = None
-    DATETIME_LAUNCH: str   = None
-    LOGGER: logging.Logger = None
-    LOGFILE: Path          = None
-    DOWNLOAD_QUALITY       = None
-    DOWNLOAD_BITRATE       = None
+    CONFIG              : Config                    = Config()
+    OAUTH               : OAuth                     = None
+    SESSION             : Session                   = None
+    TOTAL_API_CALLS     : int                       = None
+    DATETIME_LAUNCH     : str                       = None
+    LOGGER              : logging.Logger            = None
+    LOGFILE             : Path                      = None
+    DOWNLOAD_QUALITY    : FormatOnlyAudioQuality    = None
+    DOWNLOAD_BITRATE    : str                       = None
     
     @classmethod
     def start(cls) -> None:
@@ -880,6 +880,7 @@ class Zotify:
         content_id = cls.to_libre_content(content.__class__, content.uri)
         if not content_id: return
         qual = cls.DOWNLOAD_QUALITY if use_qual_pref else cls.parse_dl_quality()[0]
+        Printer.logger(f'Fetching stream for {content.uri} at quality {qual.preferred.name}')
         try:
             if not content.file_ids or FORCE_STREAM_API_CALL:
                 risky_method = False
