@@ -803,19 +803,24 @@ class Zotify:
         
         tryCount = 0
         while tryCount <= cls.CONFIG.get_retry_attempts():
-            response = requests.get(url, headers=headers, params=params)
+            resp = requests.get(url, headers=headers, params=params)
             cls.TOTAL_API_CALLS += 1
+            if resp.status_code == 403:
+                Printer.hashtaged(PrintChannel.WARNING, f'API ERROR\n' +
+                                                        f'ATTEMPTING TO ACCESS FORBIDDEN ENDPOINT')
+                return {}
             try:
-                responsejson = response.json()
+                responsejson = resp.json()
                 if not responsejson:
-                    raise json.decoder.JSONDecodeError
+                    raise json.decoder.JSONDecodeError()
             except json.decoder.JSONDecodeError:
-                responsejson = {ERROR: {"status": "Unknown", "message": "Received an empty response"}}
-            if responsejson and not ERROR in responsejson:
+                responsejson = {ERROR: {STATUS: "Unknown", MESSAGE: "Received an empty response"}}
+            if resp.ok and resp.status_code == 200 and not responsejson.get(ERROR):
                 return responsejson
             elif not expectFail:
                 Printer.hashtaged(PrintChannel.WARNING, f'API ERROR (TRY {tryCount}) - RETRYING\n' +
-                                                        f'{responsejson[ERROR].get("status", "Unknown")}:  {responsejson[ERROR]["message"]}')
+                                                        f'{STATUS} {responsejson.get(ERROR, {}).get(STATUS, "Unknown")}:  '+
+                                                        f'{responsejson.get(ERROR, {}).get(MESSAGE, "No message provided")}')
             
             tryCount += 1
             if tryCount > cls.CONFIG.get_retry_attempts():
@@ -866,7 +871,9 @@ class Zotify:
             bulk_items = bulk_items[limit:]
             
             resp = cls.invoke_url(url + items_batch)
-            if not resp.get(stripper):
+            if not resp: # assume 403 forbidden, warning handled in invoke_url
+                return items
+            elif not resp.get(stripper):
                 Printer.hashtaged(PrintChannel.WARNING, f'STRIPPER "{stripper}" NOT FOUND IN API RESPONSE FOR BULK URL: {url}')
                 continue
             items.extend(resp[stripper])

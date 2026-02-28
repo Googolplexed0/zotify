@@ -134,6 +134,7 @@ class Content(HierarchicalNode):
     @staticmethod
     def fetch_uris_metadata(uris: list[str], ContClass: type[Content],
                             loader_text: str = None, hide_loader: bool = False) -> list[dict]:
+        global ENABLE_BULK_FETCH
         resps = []
         if not uris: return resps
         elif not loader_text: loader_text = ContClass.type_attr
@@ -143,6 +144,7 @@ class Content(HierarchicalNode):
                 ids = [uri.split(":")[-1] for uri in uris]
                 resps = Zotify.invoke_url_bulk(url, ids, ContClass.lowers, ITEM_FETCH[ContClass])
         if resps: return resps
+        ENABLE_BULK_FETCH = False
         suffix = "..." if Zotify.CONFIG.get_api_client_id() else "(unsafe)..."
         with Loader(f"Fetching {loader_text} information{suffix}", disabled=hide_loader):
             return [ContClass.fetch_metadata(uri) for uri in uris]
