@@ -17,6 +17,7 @@ from pathlib import Path, PurePath
 from time import sleep
 from typing import Any, Callable
 
+from zotify import __version__
 from zotify.const import *
 from zotify.termoutput import Printer, PrintChannel, Loader
 
@@ -693,16 +694,8 @@ class Zotify:
         return
     
     @classmethod
-    def parse_dl_quality(cls, preference: str | None = None) -> tuple[FormatOnlyAudioQuality, str | None]:
-        
-        def format_filter(quality: AudioQuality) -> FormatOnlyAudioQuality:
-           codec = SuperAudioFormat.FLAC if quality is AudioQuality.LOSSLESS else SuperAudioFormat.VORBIS
-           return FormatOnlyAudioQuality(quality, codec)
-        
+    def parse_dl_quality(cls, preference: str | None = None) -> tuple[bool, FormatOnlyAudioQuality, str | None]:
         prem: bool = cls.SESSION.get_user_attribute(TYPE) == PREMIUM
-        if preference is not None:
-            Printer.debug(f"User Subscription Type: {'PREMIUM' if prem else 'FREE'}")
-        
         quality_options: dict[str, tuple[AudioQuality, str | None]] = {
         'lossless':  (AudioQuality.LOSSLESS,     None ), # upstream API does not yet support lossless, will fallback to auto 
         'very_high': (AudioQuality.VERY_HIGH,   '320k'),
@@ -711,13 +704,16 @@ class Zotify:
         'normal':    (AudioQuality.NORMAL,      '96k' ),
         }
         
+        def format_filter(quality: AudioQuality) -> FormatOnlyAudioQuality:
+           codec = SuperAudioFormat.FLAC if quality is AudioQuality.LOSSLESS else SuperAudioFormat.VORBIS
+           return FormatOnlyAudioQuality(quality, codec)
         if preference is None:
             quality, bitrate = quality_options["auto"]
-            return format_filter(quality), bitrate
+            return prem, format_filter(quality), bitrate
         
         pref = quality_options.get(preference, quality_options["auto"])
         quality, bitrate = quality_options["high"] if (pref[-1] is None or int(pref[-1][:-1]) > 160) and not prem else pref
-        return format_filter(quality), bitrate
+        return prem, format_filter(quality), bitrate
     
     @classmethod
     def boot(cls, args):
@@ -743,10 +739,12 @@ class Zotify:
                     sleep(3)
         cls.LOGGER = logging.getLogger("zotify.debug")
         
-        Printer.debug(f'{"CLIENT_ID" if cls.OAUTH else ""} Session Initialized Successfully')
-        quality, bitrate = cls.parse_dl_quality(cls.CONFIG.get_download_qual_pref())
+        prem, quality, bitrate = cls.parse_dl_quality(cls.CONFIG.get_download_qual_pref())
         cls.DOWNLOAD_QUALITY = quality
         cls.DOWNLOAD_BITRATE = bitrate
+        Printer.debug(f'{"CLIENT_ID" if cls.OAUTH else ""} Session Initialized Successfully\n' +
+                      f'User Subscription Type: {"PREMIUM" if prem else "FREE"}\n' +
+                      f'Zotify Version v{__version__}')
     
     @staticmethod
     def id_from_gid(gid: str) -> str:
@@ -876,7 +874,7 @@ class Zotify:
         if not isinstance(content, DLContent): return
         content_id = cls.to_libre_content(content.__class__, content.uri)
         if not content_id: return
-        qual = cls.DOWNLOAD_QUALITY if use_qual_pref else cls.parse_dl_quality()[0]
+        qual = cls.DOWNLOAD_QUALITY if use_qual_pref else cls.parse_dl_quality()[1]
         Printer.logger(f'Fetching stream for {content.uri} at quality {qual.preferred.name}')
         try:
             if not content.file_ids or FORCE_STREAM_API_CALL:
