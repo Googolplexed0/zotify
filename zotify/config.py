@@ -888,7 +888,9 @@ class Zotify:
             file = qual.get_file([ParseDict(f, AudioFile()) for f in content.file_ids])
             key = cls.SESSION.audio_key().get_audio_key(content.gid, file.file_id)
             url = cls.SESSION.content_feeder().resolve_storage_interactive(file.file_id, False)
-            return cls.SESSION.cdn().stream_file(file, key, CdnFeedHelper.get_url(url), None)
+            streamer = cls.SESSION.cdn().stream_file(file, key, CdnFeedHelper.get_url(url), None)
+            if streamer.stream().skip(0xA7) != 0xA7: raise IOError("Couldn't skip 0xa7 bytes!")
+            return streamer
         except FeederException as e:
             if not use_qual_pref:
                 Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO FILE\n' +
