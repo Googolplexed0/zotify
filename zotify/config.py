@@ -3,6 +3,7 @@ import logging
 import sys
 import re
 import requests
+from binascii import hexlify
 from base64 import b64encode, b64decode
 from contextlib import contextmanager
 from datetime import datetime
@@ -749,6 +750,10 @@ class Zotify:
     @staticmethod
     def id_from_gid(gid: str) -> str:
         return metadata.Id.b62.encode(b64decode(gid.encode())).decode()
+    
+    @staticmethod
+    def hex_id_from_file_id(file_id: str) -> str:
+        return hexlify(b64decode(file_id.encode())).decode()
     
     @staticmethod
     def to_libre_content(ContClass: type, uri: str) -> metadata.Id | None:

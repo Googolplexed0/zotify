@@ -284,6 +284,16 @@ class Content(HierarchicalNode):
                             Printer.hashtaged(PrintChannel.WARNING, f'PLAYLIST {self.name} MISSING FINAL {self.length - len(items)} ITEMS\n' +
                                                                     f'NOT RECOVERABLE WITHOUT A DEVELOPER CLIENT')
                 
+                cover_group                 : dict              = resp.get(COVER_GROUP)
+                images                      : list[dict]        = resp.get(IMAGES)
+                if cover_group or images:
+                    covers = images if images else cover_group.get(IMAGE, [])
+                    largest_cover           : dict              = max(covers, key=lambda img: safe_typecast(img, WIDTH, int),
+                                                                  default={URL: None, FILE_ID: None})
+                    if largest_cover.get(FILE_ID):
+                        largest_cover[URL] = IMAGE_URL_PREFIX + Zotify.hex_id_from_file_id(largest_cover.get(FILE_ID))
+                    self.image_url          : str               = largest_cover.get(URL)
+                
                 date                        : dict              = resp.get(DATE)
                 if date and not self.release_date:
                     self.release_date       : str               = "-".join(str(v) for v in date.values())
@@ -308,12 +318,6 @@ class Content(HierarchicalNode):
                         self.needs_expansion = episodes[NEXT] is not None
                     else:
                         self.needs_expansion = True
-                
-                images                      : list[dict]        = resp.get(IMAGES)
-                if images:
-                    largest_image           : dict              = max(images, key=lambda img: safe_typecast(img, WIDTH, int),
-                                                                  default={URL: None})
-                    self.image_url          : str               = largest_image.get(URL)
                 
                 owner_username              : str               = resp.get(OWNER_USERNAME)
                 if owner_username:
@@ -898,9 +902,12 @@ class Track(DLContent):
             return
         jpg_album_cover_path = filepath.parent / 'cover.jpg'
         jpg_single_path = filepath.parent / filepath.stem + '.jpg'
-        if not Path(jpg_album_cover_path).exists() and not Path(jpg_single_path).exists():
-            jpg_path = jpg_album_cover_path if len(parent_stack) > 1 and isinstance(parent_stack[-2], Album) else jpg_single_path
-            with open(jpg_path, 'wb') as f: f.write(img)
+        Printer.logger(f"Album Art Detected: {Path(jpg_album_cover_path).exists()}\n" +
+                       f"Single Art Detected: {Path(jpg_single_path).exists()}", PrintChannel.DEBUG)
+        if Path(jpg_album_cover_path).exists() or Path(jpg_single_path).exists():
+            return
+        jpg_path = jpg_album_cover_path if len(parent_stack) > 1 and isinstance(parent_stack[-2], Album) else jpg_single_path
+        with open(jpg_path, 'wb') as f: f.write(img)
     
     def download(self, parent_stack: ParentStack) -> None:
         if not Zotify.CONFIG.get_optimized_dl():

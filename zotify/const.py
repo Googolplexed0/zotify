@@ -39,6 +39,7 @@ BIOGRAPHY = 'biography'
 CHAPTERS = 'chapters'
 COLLABORATIVE = 'collaborative'
 CONTENTS = 'contents'
+COVER_GROUP = 'cover_group'
 DATA = 'data'
 DATE = 'date'
 DAY = 'day'
@@ -65,6 +66,7 @@ GID = 'gid'
 HOUR = 'hour'
 HREF = 'href'
 ID = 'id'
+IMAGE = 'image'
 IMAGES = 'images'
 IMAGE_URL = 'image_url'
 INCLUDE_EXTERNAL = 'include_external'
@@ -141,14 +143,15 @@ SHOW_URL = BASE_URL + SHOWS
 TRACK_URL = BASE_URL + TRACKS
 TRACK_STATS_URL = BASE_URL + 'audio-features/'
 USER_URL = BASE_URL + 'me/'
-USER_FOLLOWED_ARTISTS_URL = USER_URL + 'following?type=' + ARTIST
+USER_FOLLOWED_ARTISTS_URL = USER_URL + f'following?{TYPE}=' + ARTIST
 USER_PLAYLISTS_URL = USER_URL + PLAYLISTS
 USER_SAVED_TRACKS_URL = USER_URL + TRACKS
 USER_SAVED_ALBUMS_URL = USER_URL + ALBUMS
-LYRICS_URL = 'https://spclient.wg.sp' + 'otify.com/color-lyrics/v2/track/'
-PARTNER_URL = 'https://api-partner.sp' + 'otify.com/pathfinder/v1/query?operationName=getEpisode&variables={"uri":"sp' + 'otify:episode:'
+IMAGE_URL_PREFIX = 'https://i.sc' + f'dn.co/{IMAGE}/'
+LYRICS_URL = 'https://spc' + 'lient.wg.sp' + f'otify.com/color-lyrics/v2/{TRACK}/'
+PARTNER_URL = 'https://api-partner.sp' + 'otify.com/pathfinder/v1/query?operationName=getEpisode&variables={"uri":"sp' + f'otify:{EPISODE}:'
 PERSISTED_QUERY = '{"persistedQuery":{"version":1,"sha256Hash":"224ba0fd89fcfdfb'+'3a15fa2d82a6112d'+'3f4e2ac88fba5c67'+'13de04d1b72cf482"}}'
-STREAMABLE_PODCAST = 'anon-podcast.scdn.co'
+STREAMABLE_PODCAST = 'anon-podcast.sc' + 'dn.co'
 
 # API Scopes
 SCOPES = [
