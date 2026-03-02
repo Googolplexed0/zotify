@@ -162,7 +162,7 @@ class Content(HierarchicalNode):
             PARSE_AS_STR        = {ADDED_AT, ALBUM_TYPE, DESCRIPTION, DISC_NUMBER, DISPLAY_NAME, EXTERNAL_URL,
                                    ID, ITEM_ID, LABEL, NAME, PUBLISHER, RELEASE_DATE, REVISION, SNAPSHOT_ID,}
             INT_PARSE_AS_STR    = {TOTAL_EPISODES, TOTAL_TRACKS, TRACK_NUMBER,}
-            PARSE_AS_INT        = {DURATION_MS, LENGTH, POPULARITY, TIMESTAMP}
+            PARSE_AS_INT        = {DURATION_MS, LENGTH, POPULARITY, TIMESTAMP,}
             PARSE_AS_BOOL       = {COLLABORATIVE, DELETED_BY_OWNER, EXPLICIT,
                                    IS_EXTERNALLY_HOSTED, IS_LOCAL, IS_PLAYABLE, PUBLIC,}
             
@@ -389,17 +389,19 @@ class Content(HierarchicalNode):
                             # set in Album.grab_more_children() later if album incomplete
                             self.total_discs = safe_typecast(items[-1], DISC_NUMBER, int)
                             self.duration_ms = sum(int(t.duration_ms) if t.duration_ms else 0 for t in self.tracks)
-                        self.hasMetadata = True
                     else:
                         self.needs_expansion = True
                 
                 self.year                   : str               = self.release_date.split('-')[0] if self.release_date else None
                 
+                # hasMetadata must be last attribute set 
                 if isinstance(obj, (DLContent, Playlist, User, Show)):
                     self.hasMetadata = bool(getattr(self, NAME))
                 elif isinstance(obj, Artist):
                     self.all_albums = getattr(self, ALBUMS, []) + getattr(self, SINGLES, []) + getattr(self, APPEARS_ON, [])
                     self.hasMetadata = bool(getattr(self, GENRES))
+                elif isinstance(obj, Album):
+                    self.hasMetadata = bool(getattr(self, TRACKS))
         
         for k, v in Metadata(self, resp).__dict__.items():
             if v is None: continue
@@ -900,8 +902,8 @@ class Track(DLContent):
         # save track image art to file
         if not Zotify.CONFIG.get_album_art_jpg_file() or img is None or not parent_stack:
             return
-        jpg_album_cover_path = filepath.parent / 'cover.jpg'
-        jpg_single_path = filepath.parent / filepath.stem + '.jpg'
+        jpg_album_cover_path = filepath.with_name('cover.jpg')
+        jpg_single_path = filepath.with_suffix('.jpg')
         Printer.logger(f"Album Art Detected: {Path(jpg_album_cover_path).exists()}\n" +
                        f"Single Art Detected: {Path(jpg_single_path).exists()}", PrintChannel.DEBUG)
         if Path(jpg_album_cover_path).exists() or Path(jpg_single_path).exists():
