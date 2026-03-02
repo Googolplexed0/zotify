@@ -396,12 +396,12 @@ class Content(HierarchicalNode):
                 
                 # hasMetadata must be last attribute set 
                 if isinstance(obj, (DLContent, Playlist, User, Show)):
-                    self.hasMetadata = bool(getattr(self, NAME))
+                    self.hasMetadata = bool(getattr(self, NAME, None))
                 elif isinstance(obj, Artist):
                     self.all_albums = getattr(self, ALBUMS, []) + getattr(self, SINGLES, []) + getattr(self, APPEARS_ON, [])
-                    self.hasMetadata = bool(getattr(self, GENRES))
+                    self.hasMetadata = bool(getattr(self, GENRES, None))
                 elif isinstance(obj, Album):
-                    self.hasMetadata = bool(getattr(self, TRACKS))
+                    self.hasMetadata = bool(getattr(self, TRACKS, None))
         
         for k, v in Metadata(self, resp).__dict__.items():
             if v is None: continue
