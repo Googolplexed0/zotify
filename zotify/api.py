@@ -249,8 +249,8 @@ class Content(HierarchicalNode):
                 
                 audio                       : list[dict]        = resp.get(AUDIO)
                 files                       : list[dict]        = resp.get(FILE)
-                if audio is not None or files is not None:
-                    files = files if files is not None else audio
+                if audio is not None or files is not None or resp.get(ALTERNATIVE):
+                    files = files if files is not None else (audio if audio is not None else [])
                     if not files:
                         alternatives: list[dict] = resp.get(ALTERNATIVE, [])
                         for alt in alternatives:
