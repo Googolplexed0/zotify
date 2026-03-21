@@ -7,7 +7,7 @@ import subprocess
 import uuid
 
 from zotify import __version__
-from zotify.config import Zotify, GeneralAudioStream
+from zotify.config import Zotify, Streamer
 from zotify.const import *
 from zotify.termoutput import PrintChannel, Printer, Loader, Interface
 from zotify.utils import *
@@ -570,26 +570,29 @@ class DLContent(Content):
         
         return False
     
-    def fetch_content_stream(self, stream: GeneralAudioStream, temppath: PurePath, parent_stack: ParentStack) -> str:
-        time_start = time.time()
-        downloaded = 0
+    def fetch_content_stream(self, stream: Streamer, temppath: PurePath, parent_stack: ParentStack) -> str:
         disable = Zotify.CONFIG.get_standard_interface() or not Zotify.CONFIG.get_show_download_pbar()
         pbar = Printer.pbar(desc=str(self), total=stream.size, unit='B', unit_scale=True,
                             unit_divisor=1024, disable=disable, pbar_stack=parent_stack.PBARS)
         Path(temppath.parent).mkdir(parents=True, exist_ok=True)
         try:
             with open(temppath, 'wb') as file:
-                b = 0
-                while b < 5:
-                    data = stream.stream().read(Zotify.CONFIG.get_chunk_size())
-                    pbar.update(file.write(data))
-                    downloaded += len(data)
-                    b += 1 if data == b'' else 0
-                    if Zotify.CONFIG.get_download_real_time():
-                        delta_real = time.time() - time_start
-                        delta_want = (downloaded / stream.size) * (self.duration_ms/1000)
-                        if delta_want > delta_real:
-                            time.sleep(delta_want - delta_real)
+                no_responses = 0
+                time_start = time.time()
+                t_per_byte = self.duration_ms / 1000. / stream.size * Zotify.CONFIG.get_dl_rate_limter()
+                while no_responses < 5:
+                    bytes_r = file.write(stream.stream().read(Zotify.CONFIG.get_chunk_size()))
+                    if bytes_r:
+                        pbar.update(bytes_r)
+                        time.sleep(bytes_r * t_per_byte)
+                    else:
+                        no_responses += 1
+                        time.sleep(0.05)
+                # if Zotify.CONFIG.get_download_real_time():
+                    #     elapsed_real = time.time() - time_start
+                    #     elapsed_want = (pbar.n / stream.size) * (self.duration_ms/1000)
+                    # if elapsed_want > elapsed_real:
+                    #     time.sleep(elapsed_want - elapsed_real)
         finally:
             pbar.close(); pbar.clear()
         
@@ -1624,7 +1627,9 @@ class Query(Container):
         
         interrupt = None
         try: super().download(ParentStack([self]))
-        except BaseException as e: interrupt = e
+        except BaseException as e:
+            interrupt = e
+            traceback = e.__traceback__
         
         while Printer.ACTIVE_LOADER:
             Printer.ACTIVE_LOADER.stop()
@@ -1641,7 +1646,6 @@ class Query(Container):
             Printer.hashtaged(PrintChannel.ERROR, "UNEXPECTED ERROR DURING DOWNLOADS\n"+
                                                   "ATTEMPTING TO CLEAN UP")
             Printer.hashtaged(PrintChannel.ERROR, str(interrupt))
-            # Printer.traceback(interrupt)
         
         if Zotify.CONFIG.get_export_m3u8() and self.requested_objs:
             with Loader("Creating m3u8 files..."):
@@ -1650,11 +1654,10 @@ class Query(Container):
         if interrupt is not None:
             Printer.hashtaged(PrintChannel.ERROR, "CLEAN UP COMPLETE\n"+
                                                   "LOGGING ERROR AND TRACEBACK")
-            # Printer.traceback(interrupt)
             Printer.logger(interrupt, PrintChannel.ERROR)
             if not isinstance(interrupt, KeyboardInterrupt):
                 Printer.logger(self.__dict__, PrintChannel.ERROR)
-                raise
+                raise interrupt.with_traceback(traceback)
     
     def reset(self):
         HierarchicalNode.ALL_NODES = {}

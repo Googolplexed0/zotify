@@ -2,6 +2,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
+from fractions import Fraction
 from pathlib import Path, PurePath
 from shutil import move, copyfile, copyfileobj
 
@@ -115,6 +116,8 @@ def safe_typecast(d: dict, k: str, to_cast: type, except_channel: PrintChannel =
         if str(raw_val).lower() in {"0", "no", "false"}:
             return False
         return True
+    elif to_cast is float and isinstance(raw_val, str) and "/" in raw_val:
+        return Fraction(''.join(raw_val.split()))
     try:
         return to_cast(raw_val)
     except Exception:
@@ -318,11 +321,11 @@ def upgrade_legacy_archive(entries: list[str], archive_path: PurePath) -> None:
 def get_archived_entries(dir_path: PurePath | None = None) -> list[str]:
     """ Returns list of downloaded song entries """
     if dir_path:
-        disabled = Zotify.CONFIG.get_disable_dir_archives()
         archive_path = dir_path / '.song_ids'
+        disabled = Zotify.CONFIG.get_disable_dir_archives()
     else:
-        disabled = Zotify.CONFIG.get_disable_song_archive()
         archive_path = Zotify.CONFIG.get_song_archive_location()
+        disabled = Zotify.CONFIG.get_disable_song_archive()
     
     if disabled or not Path(archive_path).exists():
         return []
@@ -370,16 +373,15 @@ def add_to_archive(item_id: str, timestamp: str, author_name: str, item_name: st
 
 def add_obj_to_song_archive(obj, path: PurePath, dir_path: PurePath | None = None) -> None:
     if dir_path:
-        disabled = Zotify.CONFIG.get_disable_dir_archives()
         archive_path = dir_path / '.song_ids'
+        disabled = Zotify.CONFIG.get_disable_dir_archives() or not Path(archive_path).exists()
         mode = 'a' # should already exist from create_download_directory(), so only append mode
     else:
-        disabled = Zotify.CONFIG.get_disable_song_archive()
         archive_path = Zotify.CONFIG.get_song_archive_location()
+        disabled = Zotify.CONFIG.get_disable_song_archive()
         mode = 'a' if Path(archive_path).exists() else 'w'
     
-    if disabled:
-        return
+    if disabled: return
     
     from zotify.api import Track, Episode
     obj: Track | Episode = obj

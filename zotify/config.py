@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from google.protobuf.json_format import MessageToDict, ParseDict
 from librespot import metadata
-from librespot.audio import FeederException, GeneralAudioStream, CdnFeedHelper
+from librespot.audio import FeederException, CdnManager, CdnFeedHelper
 from librespot.audio.decoders import AudioQuality, SuperAudioFormat, FormatOnlyAudioQuality
 from librespot.core import Session, OAuth, MercuryRequests
 from librespot.proto.Authentication_pb2 import AuthenticationType
@@ -22,6 +22,7 @@ from zotify import __version__
 from zotify.const import *
 from zotify.termoutput import Printer, PrintChannel, Loader
 
+Streamer = CdnManager.Streamer
 FORCE_STREAM_API_CALL = False
 
 
@@ -51,8 +52,8 @@ CONFIG_VALUES = {
     
     # Download Options
     OPTIMIZED_DOWNLOADING:      { 'default': 'True',                    'type': bool,   'arg': ('--optimized-downloading'                ,) },
-    BULK_WAIT_TIME:             { 'default': '1',                       'type': int,    'arg': ('--bulk-wait-time'                       ,) },
-    DOWNLOAD_REAL_TIME:         { 'default': 'False',                   'type': bool,   'arg': ('-rt', '--download-real-time'            ,) },
+    DOWNLOAD_RATE_LIMITER:      { 'default': '0.0',                     'type': float,  'arg': ('-dlr', '--download-rate-limiter'       ,) },
+    BULK_WAIT_TIME:             { 'default': '1.0',                     'type': float,  'arg': ('--bulk-wait-time'                       ,) },
     TEMP_DOWNLOAD_DIR:          { 'default': '',                        'type': str,    'arg': ('-td', '--temp-download-dir'             ,) },
     
     # Album/Artist Options
@@ -104,7 +105,7 @@ CONFIG_VALUES = {
     MD_ALLGENRES:               { 'default': 'False',                   'type': bool,   'arg': ('--md-allgenres'                         ,) },
     MD_GENREDELIMITER:          { 'default': ', ',                      'type': str,    'arg': ('--md-genredelimiter'                    ,) },
     MD_ARTISTDELIMITER:         { 'default': ', ',                      'type': str,    'arg': ('--md-artistdelimiter'                   ,) },
-    SEARCH_QUERY_SIZE:          { 'default': '10',                      'type': str,    'arg': ('--search-query-size'                    ,) },
+    SEARCH_QUERY_SIZE:          { 'default': '10',                      'type': int,    'arg': ('--search-query-size'                    ,) },
     STRICT_LIBRARY_VERIFY:      { 'default': 'True',                    'type': bool,   'arg': ('--strict-library-verify'                ,) },
     ALBUM_ART_JPG_FILE:         { 'default': 'False',                   'type': bool,   'arg': ('--album-art-jpg-file'                   ,) },
     
@@ -143,7 +144,7 @@ DEPRECIATED_CONFIGS = {
     "LYRICS_FILENAME":          { 'default': '{artist}_{song_name}',    'type': str,    'arg': ('--lyrics-filename'                      ,) },
     "MD_SAVE_LYRICS":           { 'default': 'True',                    'type': bool,   'arg': ('--md-save-lyrics'                       ,) },
     "BYPASS_MD_API":            { 'default': 'False',                   'type': bool,   'arg': ('--bypass-metadata-api'                  ,) },
-    
+    "DOWNLOAD_REAL_TIME":       { 'default': 'False',                   'type': bool,   'arg': ('-rt', '--download-real-time'            ,) },
 }
 
 
@@ -154,20 +155,18 @@ class Config:
     def load(cls, args) -> None:
         from zotify.utils import safe_typecast
         
-        system_paths = {
-            'win32': Path.home() / 'AppData/Roaming/Zotify',
-            'linux': Path.home() / '.config/zotify',
-            'darwin': Path.home() / 'Library/Application Support/Zotify'
-        }
-        if sys.platform not in system_paths:
-            config_fp = Path.cwd() / '.zotify/config.json'
+        config_str = args.config_location
+        if not config_str:
+            system_paths = {
+                'win32': Path.home() / 'AppData/Roaming/Zotify',
+                'linux': Path.home() / '.config/zotify',
+                'darwin': Path.home() / 'Library/Application Support/Zotify'
+            }
+            config_dir_or_file = system_paths.get(sys.platform, Path.cwd() / '.zotify')
         else:
-            config_fp = system_paths[sys.platform] / 'config.json'
-        if args.config_location:
-            config_fp = Path(args.config_location)
-            if config_fp.is_dir():
-                config_fp = config_fp / 'config.json'
-        full_config_path = Path(config_fp).expanduser()
+            config_dir_or_file = Path(config_str).expanduser()
+        config_path = config_dir_or_file if config_dir_or_file.suffix else config_dir_or_file / 'config.json'
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Debug Check (guarantee at top of config)
         cmd_args: dict = vars(args)
@@ -178,14 +177,13 @@ class Config:
             cls.Values[cfg] = safe_typecast(cfg_setup, 'default', cfg_setup['type'])
         
         # Load config from config.json
-        Path(PurePath(full_config_path).parent).mkdir(parents=True, exist_ok=True)
-        if not Path(full_config_path).exists():
+        if not config_path.exists():
             if cls.Values[DEBUG] == False: del cls.Values[DEBUG]
-            with open(full_config_path, 'w', encoding='utf-8') as config_file:
+            with open(config_path, 'w', encoding='utf-8') as config_file:
                 json.dump(cls.get_default_json(), config_file, indent=4)
-            Printer.hashtaged(PrintChannel.MANDATORY, f"config.json saved to {full_config_path.resolve().parent}")
+            Printer.hashtaged(PrintChannel.MANDATORY, f"config.json saved to {config_path.resolve().parent}")
         else:
-            with open(full_config_path, encoding='utf-8') as config_file:
+            with open(config_path, encoding='utf-8') as config_file:
                 jsonvalues: dict[str, dict[str, Any]] = json.load(config_file)
             for cfg in jsonvalues:
                 if cfg == DEBUG and not cls.Values[DEBUG]:
@@ -199,12 +197,12 @@ class Config:
         
         # Standardize config.json if debugging or refreshing 
         if cls.debug() or args.update_config:
-            if cls.debug() and not full_config_path.name.endswith("_DEBUG.json"):
-                full_config_path = full_config_path.parent / (full_config_path.stem + "_DEBUG.json")
-            with open(full_config_path, 'w' if full_config_path.exists() else 'x', encoding='utf-8') as debug_file:
+            if cls.debug() and not config_path.name.endswith("_DEBUG.json"):
+                config_path = config_path.with_stem(config_path.stem + "_DEBUG")
+            with open(config_path, 'w' if config_path.exists() else 'x', encoding='utf-8') as debug_file:
                 json.dump(cls.parse_config_jsonstr(), debug_file, indent=4)
             real_debug = cls.Values[DEBUG]; cls.Values[DEBUG] = True
-            Printer.hashtaged(PrintChannel.DEBUG, f"{full_config_path.name} saved to {full_config_path.resolve().parent}")
+            Printer.hashtaged(PrintChannel.DEBUG, f"{config_path.name} saved to {config_path.resolve().parent}")
             cls.Values[DEBUG] = real_debug
         
         # Override config from commandline arguments
@@ -214,9 +212,10 @@ class Config:
         
         # Confirm regex patterns
         if cls.get_regex_enabled():
-            for mode in ["Track", "Episode", "Album"]:
+            for mode in [TRACK, EPISODE, ALBUM]:
                 regex_method: Callable[[None], None | re.Pattern] = getattr(cls, f"get_regex_{mode.lower()}")
-                if regex_method(): Printer.hashtaged(PrintChannel.DEBUG, f'{mode} Regex Filter:  r"{regex_method().pattern}"')
+                if regex_method(): 
+                    Printer.hashtaged(PrintChannel.DEBUG, f'{mode.capitalize()} Regex Filter:  r"{regex_method().pattern}"')
         
         # Check no-splash
         if args.no_splash:
@@ -261,6 +260,7 @@ class Config:
     def debug(cls) -> bool:
         return cls.Values.get(DEBUG)
     
+    # Main Options
     @classmethod
     def get_root_path(cls) -> PurePath:
         if cls.get(ROOT_PATH) == '':
@@ -269,17 +269,6 @@ class Config:
             root_path = PurePath(Path(cls.get(ROOT_PATH)).expanduser())
         Path(root_path).mkdir(parents=True, exist_ok=True)
         return root_path
-    
-    @classmethod
-    def get_root_podcast_path(cls) -> PurePath:
-        if cls.get(ROOT_PODCAST_PATH) == '':
-            root_podcast_path = PurePath(Path.home() / 'Music/Zotify Podcasts/')
-        else:
-            root_podcast_path:str = cls.get(ROOT_PODCAST_PATH)
-            if root_podcast_path[0] == ".":
-                root_podcast_path = cls.get_root_path() / PurePath(root_podcast_path).relative_to(".")
-            root_podcast_path = PurePath(Path(root_podcast_path).expanduser())
-        return root_podcast_path
     
     @classmethod
     def get_save_credentials(cls) -> bool:
@@ -303,6 +292,7 @@ class Config:
         credentials.parent.mkdir(parents=True, exist_ok=True)
         return PurePath(credentials)
     
+    # File Options
     @classmethod
     def get_output(cls, dl_obj_clsn: str) -> str:
         v = cls.get(OUTPUT)
@@ -326,61 +316,40 @@ class Config:
         return v
     
     @classmethod
-    def get_skip_existing(cls) -> bool:
-        return cls.get(SKIP_EXISTING)
-    
-    @classmethod
-    def get_skip_previously_downloaded(cls) -> bool:
-        return cls.get(SKIP_PREVIOUSLY_DOWNLOADED)
+    def get_root_podcast_path(cls) -> PurePath:
+        if cls.get(ROOT_PODCAST_PATH) == '':
+            root_podcast_path = PurePath(Path.home() / 'Music/Zotify Podcasts/')
+        else:
+            root_podcast_path:str = cls.get(ROOT_PODCAST_PATH)
+            if root_podcast_path[0] == ".":
+                root_podcast_path = cls.get_root_path() / PurePath(root_podcast_path).relative_to(".")
+            root_podcast_path = PurePath(Path(root_podcast_path).expanduser())
+        return root_podcast_path
     
     @classmethod
     def get_split_album_discs(cls) -> bool:
         return cls.get(SPLIT_ALBUM_DISCS)
     
     @classmethod
-    def get_chunk_size(cls) -> int:
-        return cls.get(CHUNK_SIZE)
+    def get_max_filename_length(cls) -> int:
+        return cls.get(MAX_FILENAME_LENGTH)
+    
+    # Download Options
+    @classmethod
+    def get_optimized_dl(cls) -> bool:
+        return cls.get(OPTIMIZED_DOWNLOADING)
     
     @classmethod
-    def get_download_format(cls) -> str:
-        return cls.get(DOWNLOAD_FORMAT)
+    def get_dl_rate_limter(cls) -> float:
+        return cls.get(DOWNLOAD_RATE_LIMITER)
     
     @classmethod
-    def get_bulk_wait_time(cls) -> int:
+    def get_bulk_wait_time(cls) -> float:
         return cls.get(BULK_WAIT_TIME)
-    
-    @classmethod
-    def get_language(cls) -> str:
-        return cls.get(LANGUAGE)
-    
-    @classmethod
-    def get_download_real_time(cls) -> bool:
-        return cls.get(DOWNLOAD_REAL_TIME)
     
     @classmethod
     def get_download_qual_pref(cls) -> str:
         return cls.get(DOWNLOAD_QUALITY)
-    
-    @classmethod
-    def get_transcode_bitrate(cls) -> str:
-        return cls.get(TRANSCODE_BITRATE)
-    
-    @classmethod
-    def get_song_archive_location(cls) -> PurePath:
-        song_archive_str: str = cls.get(SONG_ARCHIVE_LOCATION)
-        if not song_archive_str:
-            system_paths = {
-                'win32': Path.home() / 'AppData/Roaming/Zotify',
-                'linux': Path.home() / '.local/share/zotify',
-                'darwin': Path.home() / 'Library/Application Support/Zotify'
-            }
-            song_archive_dir = system_paths.get(sys.platform, Path.cwd() / '.zotify')
-        elif song_archive_str[0] == ".":
-            song_archive_dir = Path(cls.get_root_path()) / Path(song_archive_str).expanduser().relative_to(".")
-        else:
-            song_archive_dir = Path(song_archive_str).expanduser()
-        song_archive_dir.mkdir(parents=True, exist_ok=True)
-        return PurePath(song_archive_dir / '.song_archive')
     
     @classmethod
     def get_temp_download_dir(cls) -> str | PurePath:
@@ -391,122 +360,7 @@ class Config:
             temp_download_path = cls.get_root_path() / PurePath(temp_download_path).relative_to(".")
         return PurePath(Path(temp_download_path).expanduser())
     
-    @classmethod
-    def get_disc_track_totals(cls) -> bool:
-        return cls.get(MD_DISC_TRACK_TOTALS)
-    
-    @classmethod
-    def get_save_genres(cls) -> bool:
-        return cls.get(MD_SAVE_GENRES)
-    
-    @classmethod
-    def get_all_genres(cls) -> bool:
-        return cls.get(MD_ALLGENRES)
-    
-    @classmethod
-    def get_genre_delimiter(cls) -> str:
-        return cls.get(MD_GENREDELIMITER)
-    
-    @classmethod
-    def get_artist_delimiter(cls) -> str:
-        return cls.get(MD_ARTISTDELIMITER)
-    
-    @classmethod
-    def get_retry_attempts(cls) -> int:
-        return cls.get(RETRY_ATTEMPTS)
-    
-    @classmethod
-    def get_disable_dir_archives(cls) -> bool:
-        return cls.get(DISABLE_DIRECTORY_ARCHIVES)
-    
-    @classmethod
-    def get_disable_song_archive(cls) -> bool:
-        return cls.get(DISABLE_SONG_ARCHIVE)
-    
-    @classmethod
-    def get_ffmpeg_log_level(cls) -> str:
-        level = str(cls.get(FFMPEG_LOG_LEVEL)).lower()
-        # see https://ffmpeg.org/ffmpeg.html#Generic-options, -loglevel
-        valid_levels = {"trace", "debug", "verbose", "info", "warning", "error", "fatal", "panic", "quiet"}
-        
-        if level == "warn": level += "ing"
-        if level not in valid_levels:
-            raise ValueError(f'FFMPEG LOGGING LEVEL "{level}" NOT VALID\n' +
-                             f'SELECT FROM: {valid_levels}')
-        return level
-    
-    @classmethod
-    def get_standard_interface(cls) -> bool:
-        return cls.get(STANDARD_INTERFACE)
-    
-    @classmethod
-    def get_show_any_progress(cls) -> bool:
-        if cls.get_standard_interface():
-            return False
-        return cls.get(PRINT_DOWNLOAD_PROGRESS) or cls.get(PRINT_URL_PROGRESS) \
-           or cls.get(PRINT_ALBUM_PROGRESS) or cls.get(PRINT_ARTIST_PROGRESS) \
-        or cls.get(PRINT_PLAYLIST_PROGRESS)
-    
-    @classmethod
-    def get_show_download_pbar(cls) -> bool:
-        return cls.get_show_any_progress() and cls.get(PRINT_DOWNLOAD_PROGRESS)
-    
-    @classmethod
-    def get_show_url_pbar(cls) -> bool:
-        return cls.get_show_any_progress() and cls.get(PRINT_URL_PROGRESS)
-    
-    @classmethod
-    def get_show_album_pbar(cls) -> bool:
-        return cls.get_show_any_progress() and cls.get(PRINT_ALBUM_PROGRESS)
-    
-    @classmethod
-    def get_show_artist_pbar(cls) -> bool:
-        return cls.get_show_any_progress() and cls.get(PRINT_ARTIST_PROGRESS)
-    
-    @classmethod
-    def get_show_playlist_pbar(cls) -> bool:
-        return cls.get_show_any_progress() and cls.get(PRINT_PLAYLIST_PROGRESS)
-    
-    @classmethod
-    def get_export_m3u8(cls) -> bool:
-        return cls.get(EXPORT_M3U8)
-    
-    @classmethod
-    def get_liked_songs_archive_m3u8(cls) -> bool:
-        return cls.get(LIKED_SONGS_ARCHIVE_M3U8)
-    
-    @classmethod
-    def get_album_art_jpg_file(cls) -> bool:
-        return cls.get(ALBUM_ART_JPG_FILE)
-    
-    @classmethod
-    def get_max_filename_length(cls) -> int:
-        return cls.get(MAX_FILENAME_LENGTH)
-    
-    @classmethod
-    def get_m3u8_location(cls) -> PurePath | None:
-        if cls.get(M3U8_LOCATION) == '':
-            # Use OUTPUT path as default location
-            return None
-        else:
-            m3u8_path = cls.get(M3U8_LOCATION)
-            if m3u8_path[0] == ".":
-                m3u8_path = cls.get_root_path() / PurePath(m3u8_path).relative_to(".")
-            m3u8_path = PurePath(Path(m3u8_path).expanduser())
-        
-        return m3u8_path
-    
-    @classmethod
-    def get_m3u8_relative_paths(cls) -> bool:
-        return cls.get(M3U8_REL_PATHS)
-    
-    @classmethod
-    def get_oauth_address(cls) -> tuple[str, str]:
-        redirect_address = cls.get(REDIRECT_ADDRESS)
-        if redirect_address:
-            return redirect_address
-        return '127.0.0.1'
-    
+    # Album/Artist Options
     @classmethod
     def get_download_parent_album(cls) -> bool:
         return cls.get(DOWNLOAD_PARENT_ALBUM)
@@ -527,22 +381,17 @@ class Config:
     def get_discog_by_album_artist(cls) -> bool:
         return cls.get(DISCOG_BY_ALBUM_ARTIST)
     
+    # Regex Options
     @classmethod
     def get_regex_enabled(cls) -> bool:
         return cls.get(REGEX_ENABLED)
-    
-    @classmethod
-    def get_regex_album(cls) -> None | re.Pattern:
-        if not (cls.get_regex_enabled() and cls.get(REGEX_ALBUM_SKIP)):
-            return None
-        return re.compile(cls.get(REGEX_ALBUM_SKIP), re.I)
     
     @classmethod
     def get_regex_track(cls) -> None | re.Pattern:
         if not (cls.get_regex_enabled() and cls.get(REGEX_TRACK_SKIP)):
             return None
         return re.compile(cls.get(REGEX_TRACK_SKIP), re.I)
- 
+    
     @classmethod
     def get_regex_episode(cls) -> None | re.Pattern:
         if not (cls.get_regex_enabled() and cls.get(REGEX_EPISODE_SKIP)):
@@ -550,12 +399,59 @@ class Config:
         return re.compile(cls.get(REGEX_EPISODE_SKIP), re.I)
     
     @classmethod
-    def get_strict_library_verify(cls) -> bool:
-        return cls.get(STRICT_LIBRARY_VERIFY)
+    def get_regex_album(cls) -> None | re.Pattern:
+        if not (cls.get_regex_enabled() and cls.get(REGEX_ALBUM_SKIP)):
+            return None
+        return re.compile(cls.get(REGEX_ALBUM_SKIP), re.I)
+    
+    # Encoding Options
+    @classmethod
+    def get_download_format(cls) -> str:
+        return cls.get(DOWNLOAD_FORMAT)
     
     @classmethod
-    def get_optimized_dl(cls) -> bool:
-        return cls.get(OPTIMIZED_DOWNLOADING)
+    def get_transcode_bitrate(cls) -> str:
+        return cls.get(TRANSCODE_BITRATE)
+    
+    @classmethod
+    def get_custom_ffmpeg_args(cls) -> list[str]:
+        argstr: str = cls.get(CUSTOM_FFMEPG_ARGS)
+        ffmpeg_args = argstr.split()
+        return ffmpeg_args
+    
+    # Archive Options
+    @classmethod
+    def get_song_archive_location(cls) -> PurePath:
+        song_archive_str: str = cls.get(SONG_ARCHIVE_LOCATION)
+        if not song_archive_str:
+            system_paths = {
+                'win32': Path.home() / 'AppData/Roaming/Zotify',
+                'linux': Path.home() / '.local/share/zotify',
+                'darwin': Path.home() / 'Library/Application Support/Zotify'
+            }
+            song_archive_dir = system_paths.get(sys.platform, Path.cwd() / '.zotify')
+        elif song_archive_str[0] == ".":
+            song_archive_dir = Path(cls.get_root_path()) / Path(song_archive_str).expanduser().relative_to(".")
+        else:
+            song_archive_dir = Path(song_archive_str).expanduser()
+        song_archive_dir.mkdir(parents=True, exist_ok=True)
+        return PurePath(song_archive_dir / '.song_archive')
+    
+    @classmethod
+    def get_disable_song_archive(cls) -> bool:
+        return cls.get(DISABLE_SONG_ARCHIVE)
+    
+    @classmethod
+    def get_disable_dir_archives(cls) -> bool:
+        return cls.get(DISABLE_DIRECTORY_ARCHIVES)
+    
+    @classmethod
+    def get_skip_existing(cls) -> bool:
+        return cls.get(SKIP_EXISTING)
+    
+    @classmethod
+    def get_skip_previously_downloaded(cls) -> bool:
+        return cls.get(SKIP_PREVIOUSLY_DOWNLOADED)
     
     @classmethod
     def get_upgrade_legacy_archive(cls) -> bool:
@@ -565,24 +461,40 @@ class Config:
     def set_stop_upgrade_legacy_archive(cls) -> None:
         cls.Values[UPDATE_ARCHIVE] = False
     
+    # Playlist File Options
     @classmethod
-    def get_search_query_size(cls) -> str:
-        size = cls.get(SEARCH_QUERY_SIZE)
-        return size if size else "10"
+    def get_export_m3u8(cls) -> bool:
+        return cls.get(EXPORT_M3U8)
     
     @classmethod
-    def get_custom_ffmpeg_args(cls) -> list[str]:
-        argstr: str = cls.get(CUSTOM_FFMEPG_ARGS)
-        ffmpeg_args = argstr.split()
-        return ffmpeg_args
+    def get_m3u8_location(cls) -> PurePath | None:
+        if cls.get(M3U8_LOCATION) == '':
+            # Use OUTPUT path as default location
+            return None
+        else:
+            m3u8_path = cls.get(M3U8_LOCATION)
+            if m3u8_path[0] == ".":
+                m3u8_path = cls.get_root_path() / PurePath(m3u8_path).relative_to(".")
+            m3u8_path = PurePath(Path(m3u8_path).expanduser())
+        
+        return m3u8_path
+    
+    @classmethod
+    def get_m3u8_relative_paths(cls) -> bool:
+        return cls.get(M3U8_REL_PATHS)
+    
+    @classmethod
+    def get_liked_songs_archive_m3u8(cls) -> bool:
+        return cls.get(LIKED_SONGS_ARCHIVE_M3U8)
+    
+    # Lyrics Options
+    @classmethod
+    def get_lyrics_to_metadata(cls) -> bool:
+        return cls.get(LYRICS_TO_METADATA)
     
     @classmethod
     def get_lyrics_to_file(cls) -> bool:
         return cls.get(LYRICS_TO_FILE)
-    
-    @classmethod
-    def get_lyrics_to_metadata(cls) -> bool:
-        return cls.get(LYRICS_TO_METADATA)
     
     @classmethod
     def get_lyrics_location(cls) -> PurePath | None:
@@ -609,9 +521,108 @@ class Config:
     def get_lyrics_header(cls) -> bool:
         return cls.get(LYRICS_MD_HEADER)
     
+    # Metadata Options
     @classmethod
     def get_api_client_id(cls) -> str:
         return cls.get(API_CLIENT_ID)
+    
+    @classmethod
+    def get_language(cls) -> str:
+        return cls.get(LANGUAGE)
+    
+    @classmethod
+    def get_disc_track_totals(cls) -> bool:
+        return cls.get(MD_DISC_TRACK_TOTALS)
+    
+    @classmethod
+    def get_save_genres(cls) -> bool:
+        return cls.get(MD_SAVE_GENRES)
+    
+    @classmethod
+    def get_all_genres(cls) -> bool:
+        return cls.get(MD_ALLGENRES)
+    
+    @classmethod
+    def get_genre_delimiter(cls) -> str:
+        return cls.get(MD_GENREDELIMITER)
+    
+    @classmethod
+    def get_artist_delimiter(cls) -> str:
+        return cls.get(MD_ARTISTDELIMITER)
+    
+    @classmethod
+    def get_search_query_size(cls) -> str:
+        size = cls.get(SEARCH_QUERY_SIZE)
+        return str(size) if size else "10"
+    
+    @classmethod
+    def get_strict_library_verify(cls) -> bool:
+        return cls.get(STRICT_LIBRARY_VERIFY)
+    
+    @classmethod
+    def get_album_art_jpg_file(cls) -> bool:
+        return cls.get(ALBUM_ART_JPG_FILE)
+    
+    # API Options
+    @classmethod
+    def get_retry_attempts(cls) -> int:
+        return cls.get(RETRY_ATTEMPTS)
+    
+    @classmethod
+    def get_chunk_size(cls) -> int:
+        return cls.get(CHUNK_SIZE)
+    
+    @classmethod
+    def get_oauth_address(cls) -> tuple[str, str]:
+        redirect_address = cls.get(REDIRECT_ADDRESS)
+        if redirect_address:
+            return redirect_address
+        return '127.0.0.1'
+    
+    # Terminal & Logging Options
+    @classmethod
+    def get_show_any_progress(cls) -> bool:
+        if cls.get_standard_interface():
+            return False
+        return cls.get(PRINT_DOWNLOAD_PROGRESS) or cls.get(PRINT_URL_PROGRESS) \
+            or cls.get(PRINT_ALBUM_PROGRESS)    or cls.get(PRINT_ARTIST_PROGRESS) \
+            or cls.get(PRINT_PLAYLIST_PROGRESS)
+    
+    @classmethod
+    def get_show_download_pbar(cls) -> bool:
+        return cls.get_show_any_progress() and cls.get(PRINT_DOWNLOAD_PROGRESS)
+    
+    @classmethod
+    def get_show_url_pbar(cls) -> bool:
+        return cls.get_show_any_progress() and cls.get(PRINT_URL_PROGRESS)
+    
+    @classmethod
+    def get_show_album_pbar(cls) -> bool:
+        return cls.get_show_any_progress() and cls.get(PRINT_ALBUM_PROGRESS)
+    
+    @classmethod
+    def get_show_artist_pbar(cls) -> bool:
+        return cls.get_show_any_progress() and cls.get(PRINT_ARTIST_PROGRESS)
+    
+    @classmethod
+    def get_show_playlist_pbar(cls) -> bool:
+        return cls.get_show_any_progress() and cls.get(PRINT_PLAYLIST_PROGRESS)
+    
+    @classmethod
+    def get_standard_interface(cls) -> bool:
+        return cls.get(STANDARD_INTERFACE)
+    
+    @classmethod
+    def get_ffmpeg_log_level(cls) -> str:
+        level = str(cls.get(FFMPEG_LOG_LEVEL)).lower()
+        # see https://ffmpeg.org/ffmpeg.html#Generic-options, -loglevel
+        valid_levels = {"trace", "debug", "verbose", "info", "warning", "error", "fatal", "panic", "quiet"}
+        
+        if level == "warn": level += "ing"
+        if level not in valid_levels:
+            raise ValueError(f'FFMPEG LOGGING LEVEL "{level}" NOT VALID\n' +
+                             f'SELECT FROM: {valid_levels}')
+        return level
 
 
 class Zotify:
@@ -873,7 +884,7 @@ class Zotify:
         return items
     
     @classmethod
-    def get_content_stream(cls, content, use_qual_pref: bool = True) -> GeneralAudioStream | None:
+    def get_content_stream(cls, content, use_qual_pref: bool = True) -> Streamer | None:
         global FORCE_STREAM_API_CALL
         from zotify.api import DLContent
         if not isinstance(content, DLContent): return
