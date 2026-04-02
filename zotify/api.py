@@ -339,7 +339,7 @@ class Content(HierarchicalNode):
                             track_or_ep[ADDED_BY] = item.get(ADDED_BY)
                             track_or_ep[IS_LOCAL] = item.get(IS_LOCAL)
                         self.tracks_or_eps = obj.parse_relatives(tracks_eps_empty, (Track, Episode))
-                        self.needs_expansion = playlist_items.get(NEXT) is not None
+                    self.needs_expansion = not items or playlist_items.get(NEXT) is not None
                 
                 publish_time                : dict[str, int]    = resp.get(PUBLISH_TIME)
                 if publish_time:
@@ -1757,6 +1757,8 @@ class UserItem(Query):
             for resp in user_item_resps:
                 resp[self.inner_stripper][ADDED_AT] = resp.get(ADDED_AT)
             user_item_resps = [resp[self.inner_stripper] for resp in user_item_resps]
+        # elif self._contains is Playlist:
+        #     
         self.parse_query_metadata([user_item_resps], [self._contains])
         self.fetch_extra_metadata()
         self.download()
