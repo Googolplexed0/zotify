@@ -6,7 +6,6 @@ import requests
 import subprocess
 import uuid
 
-from zotify import __version__
 from zotify.config import Zotify, Streamer
 from zotify.const import *
 from zotify.termoutput import PrintChannel, Printer, Loader, Interface
@@ -835,7 +834,7 @@ class Track(DLContent):
                                   f"[ar: {conv_artist_format(self.artists, FORCE_NO_LIST=True)}]\n",
                                   f"[al: {self.album.name}]\n",
                                   f"[length: {self.duration_ms // 60000}:{(self.duration_ms % 60000) // 1000}]\n",
-                                  f"[by: Zotify v{__version__}]\n",
+                                  f"[by: Zotify v{Zotify.VERSION}]\n",
                                   "\n"]
                     file.writelines(lrc_header)
                 file.writelines(self.lyrics)

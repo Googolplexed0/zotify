@@ -7,6 +7,7 @@ from binascii import hexlify
 from base64 import b64encode, b64decode
 from contextlib import contextmanager
 from datetime import datetime
+from importlib.metadata import version
 from google.protobuf.json_format import MessageToDict, ParseDict
 from librespot import metadata
 from librespot.audio import FeederException, CdnManager, CdnFeedHelper
@@ -18,7 +19,6 @@ from pathlib import Path, PurePath
 from time import sleep
 from typing import Any, Callable
 
-from zotify import __version__
 from zotify.const import *
 from zotify.termoutput import Printer, PrintChannel, Loader
 
@@ -626,6 +626,7 @@ class Config:
 
 
 class Zotify:
+    VERSION                                         = version("zotify")
     CONFIG              : Config                    = Config()
     OAUTH               : OAuth                     = None
     SESSION             : Session                   = None
@@ -756,7 +757,7 @@ class Zotify:
         cls.DOWNLOAD_BITRATE = bitrate
         Printer.debug(f'{"CLIENT_ID" if cls.OAUTH else ""} Session Initialized Successfully\n' +
                       f'User Subscription Type: {"PREMIUM" if prem else "FREE"}\n' +
-                      f'Zotify Version v{__version__}')
+                      f'Zotify Version v{cls.VERSION}')
     
     @staticmethod
     def id_from_gid(gid: str) -> str:

@@ -7,7 +7,6 @@ It's like youtube-dl, but for that other music platform.
 
 import argparse
 
-from zotify import __version__
 from zotify.app import client
 from zotify.config import Zotify, CONFIG_VALUES, DEPRECIATED_CONFIGS
 from zotify.termoutput import Printer
@@ -38,7 +37,7 @@ def main():
     # no args
     parser.add_argument('--version',
                         action='version',
-                        version=f'Zotify {__version__}',
+                        version=f'Zotify {Zotify.VERSION}',
                         help='Show the version of Zotify')
     parser.add_argument('--persist',
                         action='store_true',

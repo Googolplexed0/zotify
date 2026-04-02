@@ -1,9 +1,0 @@
-ffmpy
-git+https://github.com/Googolplexed0/librespot-python.git
-music_tag
-Pillow
-pkce
-protobuf
-pwinput
-tabulate[widechars]
-tqdm
