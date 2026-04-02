@@ -32,7 +32,7 @@
 
 *Useable across system from the command line*
 
-`pipx install git+https://github.com/Googolplexed0/zotify.git@efficient-api`
+`pipx install git+https://github.com/Googolplexed0/zotify.git@new-hierarchy`
 
 </details>
 
@@ -40,7 +40,7 @@
 
 *Useable when launched as a Python module*
 
-`python -m pip install git+https://github.com/Googolplexed0/zotify.git@efficient-api`
+`python -m pip install git+https://github.com/Googolplexed0/zotify.git@new-hierarchy`
 
 </details>
 
@@ -49,10 +49,10 @@
 *Update in accordance with your install method*
 
 **If Executable (pipx):**
-`pipx install -f git+https://github.com/Googolplexed0/zotify.git@efficient-api`
+`pipx install -f git+https://github.com/Googolplexed0/zotify.git@new-hierarchy`
 
 **If Module:**
-`python -m pip install --force-reinstall git+https://github.com/Googolplexed0/zotify.git@efficient-api`
+`python -m pip install --force-reinstall git+https://github.com/Googolplexed0/zotify.git@new-hierarchy`
 
 </details>
 
