@@ -336,7 +336,7 @@ class Content(HierarchicalNode):
                         for i, track_or_ep, item in zip(range(len(items)), tracks_eps_empty, items):
                             if track_or_ep is None: continue
                             ensure_uri(track_or_ep, track_or_ep.get(TYPE, TRACK) + str(i+len(obj.tracks_or_eps)+1))
-                            track_or_ep[ADDED_AT] = item.get(ADDED_BY)
+                            track_or_ep[ADDED_AT] = item.get(ADDED_AT)
                             track_or_ep[ADDED_BY] = item.get(ADDED_BY)
                             track_or_ep[IS_LOCAL] = item.get(IS_LOCAL)
                         self.tracks_or_eps = obj.parse_relatives(tracks_eps_empty, (Track, Episode))
