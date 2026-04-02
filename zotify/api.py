@@ -412,7 +412,7 @@ class Content(HierarchicalNode):
             elif relative and k in {ADDED_AT, ADDED_BY, ALBUM_GROUP, IS_LOCAL}:
                 relational_attr: dict[Container, str | bool | User] = getattr(self, k)
                 relational_attr.update({relative: v})
-            elif not self.hasMetadata:
+            elif not self.hasMetadata or getattr(self, k, None) is None:
                 setattr(self, k, v)
     
     def parse_relatives(self, resps: list[dict[str, str] | None], RelativeClasses: type[Content] | tuple[type[Content]],
