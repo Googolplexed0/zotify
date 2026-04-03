@@ -232,16 +232,6 @@ class Printer:
         Printer.hashtaged(PrintChannel.MANDATORY, title)
         Printer.new_print(PrintChannel.MANDATORY, tabulate(tabular_data, headers=headers, tablefmt='pretty'))
     
-    @staticmethod
-    def dl_complete(dlcontent, path, time_elapsed_dl: str, time_elapsed_ffmpeg: str | None) -> None:
-        from zotify.api import DLContent
-        dlcontent: DLContent = dlcontent
-        Interface.update(time_elapsed_dl, time_elapsed_ffmpeg, dlcontent.name)
-        dlcontent.set_dl_status("Waiting Between Downloads")
-        Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{dlcontent.rel_path(path)}"\n' +
-                                                  f'DOWNLOAD TOOK {time_elapsed_dl}' +
-                                                  f' (PLUS {time_elapsed_ffmpeg} CONVERTING)' if time_elapsed_ffmpeg else '')
-    
     # Prefabs
     @staticmethod
     def clear() -> None:
@@ -416,12 +406,12 @@ class Loader:
 
 
 class Interface:
-    ALL_CONTENT         : set           = None
-    CURRENT_BRANCH      : list          = None
-    LAST_DL_TIME        : int | None    = None
-    LAST_CONV_TIME      : int | None    = None
-    LAST_DL_ITEM_NAME   : str | None    = None
-    LAST_ERROR          : str | None    = None
+    ALL_DLCONTENT       : set  | None   = None
+    CURRENT_BRANCH      : list | None   = None
+    LAST_DL_TIME        : int  | None   = None
+    LAST_CONV_TIME      : int  | None   = None
+    LAST_DL_ITEM_NAME   : str  | None   = None
+    LAST_ERROR          : str  | None   = None
     
     @staticmethod
     def _term_lines() -> int:
@@ -432,45 +422,56 @@ class Interface:
         return lines
     
     @staticmethod
-    def parse_dbs(obj, attr: str) -> str:
+    def print_interface(msg) -> None:
+        for line in str(msg).splitlines():
+            tqdm.write(line.ljust(Printer._term_cols()))
+    
+    @staticmethod
+    def bind(parent_stack) -> None:
+        Interface.CURRENT_BRANCH = parent_stack
+    
+    @staticmethod
+    def parse_obj_db(obj, suppress_id: bool = False) -> str:
+        from zotify.api import Content, Album
+        obj: Content = obj
+        
+        db = ""
+        attrs = ([NAME,] if suppress_id else [ID, NAME]) + obj._to_db_attrs
+        for attr in attrs:
+            adds = Interface.parse_attr_db(obj, attr)
+            if isinstance(obj, Album):
+               adds = "\n".join([f"{obj.clsn} {line}" if obj.clsn not in line else line for line in adds.split("\n")])
+            db += adds
+            if attr != attrs[-1]: db += "\n"
+        return db
+    
+    @staticmethod
+    def parse_attr_db(obj, attr: str) -> str:
         from zotify.api import Content
         obj: Content = obj
         prefix = f"{obj.clsn} " if obj.type_attr not in attr else ""
         val: str | Content | list[str | Content] = getattr(obj, attr)
         
         if isinstance(val, Content):
-            return val.dashboard(suppress_id=True)
-        elif isinstance(val, list):
+            return Interface.parse_obj_db(val, suppress_id=True)
+        
+        base = f"{prefix}{attr.replace('_', ' ').title()} == "
+        if isinstance(val, list):
             if not val:
-                return prefix + attr.replace("_", " ").title() + " == " + "None"
+                return base + "None"
             elif isinstance(val[0], str):
-                return prefix + attr.replace("_", " ").title() + " == " + ", ".join(val)
+                return base + ", ".join(val)
             elif isinstance(val[0], Content):
-                dbs = [c.dashboard(suppress_id=True).split("\n") for c in val]
+                dbs = [Interface.parse_obj_db(c, suppress_id=True).split("\n") for c in val]
                 headers = [attr.split(" == ")[0] for attr in dbs[0]]
                 vals = [ [db[i].split(" == ")[-1] for db in dbs if db[i].split(" == ")[-1] != "None"]  for i in range(len(headers))]
                 vals = [v if v else ["None"] for v in vals]
                 combs = [h + " == " + ", ".join(v) for h, v in zip(headers, vals)]
                 return "\n".join(combs)
             else:
-                return prefix + attr.replace("_", " ").title() + " == " + "!UNEXPECTED ATTR!"
+                return base + "!UNEXPECTED ATTR!"
         else:
-            return prefix + attr.replace("_", " ").title() + " == " + val
-    
-    @staticmethod
-    def print_interface(msg) -> None:
-        for line in str(msg).splitlines():
-            tqdm.write(line.ljust(Printer._term_cols()))
-    
-    @staticmethod
-    def reset(all_nodes: dict) -> None:
-        from zotify.api import DLContent
-        Interface.ALL_CONTENT = {n for n in all_nodes if isinstance(n, DLContent)}
-        Interface.refresh()
-    
-    @staticmethod
-    def bind(parent_stack) -> None:
-        Interface.CURRENT_BRANCH = parent_stack
+            return base + str(val)
     
     @staticmethod
     def refresh() -> None:
@@ -479,27 +480,38 @@ class Interface:
             Printer.new_print(PrintChannel.MANDATORY, "\n"*(Interface._term_lines()))
             Printer.clear()
             return
+        elif Interface.ALL_DLCONTENT is None:
+            Printer.debug("Interface called before Query ALL_DLCONTENT initialization")
+            return
         
         from zotify.api import DLContent
         obj: DLContent = Interface.CURRENT_BRANCH[-1]
-        dl_prog = len({c for c in Interface.ALL_CONTENT if c.downloaded})
+        dl_prog = len({c for c in Interface.ALL_DLCONTENT if c.downloaded})
         dashboard = f"Query Tree: {Interface.CURRENT_BRANCH}\n" +\
                     f"\n" +\
                     f"Current DLContent: {obj.clsn}\n" +\
-                    f"{obj.dashboard()}\n" +\
+                    f"{Interface.parse_obj_db(obj)}\n" +\
                     f"\n" +\
                     f"Status: {obj.dl_status}\n" +\
-                    f"Total Query Progress: {dl_prog}/{len(Interface.ALL_CONTENT)}\n" +\
+                    f"Total Query Progress: {dl_prog}/{len(Interface.ALL_DLCONTENT)}\n" +\
                     f"\n" +\
                     f"Last Download Time: {Interface.LAST_DL_TIME}\n" +\
-                    f"Last Conversion Time: {Interface.LAST_CONVERTING_TIME}\n" +\
+                    f"Last Conversion Time: {Interface.LAST_CONV_TIME}\n" +\
                     f"Last Downloaded Item: {Interface.LAST_DL_ITEM_NAME}\n" +\
                     f"Last Encountered Error: {Interface.LAST_ERROR}\n"
         Printer.clear()
         Interface.print_interface(dashboard)
     
     @staticmethod
-    def update(time_elapsed_dl: str, time_elapsed_ffmpeg: str, item_name: str) -> None:
+    def dl_complete(dlcontent, path, time_elapsed_dl: str, time_elapsed_ffmpeg: str | None) -> None:
+        from zotify.api import DLContent
+        dlcontent: DLContent = dlcontent
+        
         Interface.LAST_DL_TIME = time_elapsed_dl
-        Interface.LAST_CONVERTING_TIME = time_elapsed_ffmpeg
-        Interface.LAST_DL_ITEM_NAME = item_name
+        Interface.LAST_CONV_TIME = time_elapsed_ffmpeg
+        Interface.LAST_DL_ITEM_NAME = dlcontent.name
+        
+        dlcontent.set_dl_status("Waiting Between Downloads")
+        Printer.hashtaged(PrintChannel.DOWNLOADS, f'DOWNLOADED: "{dlcontent.rel_path(path)}"\n' +
+                                                  f'DOWNLOAD TOOK {time_elapsed_dl}' +
+                                                  f' (PLUS {time_elapsed_ffmpeg} CONVERTING)' if time_elapsed_ffmpeg else '')

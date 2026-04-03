@@ -51,7 +51,8 @@ class Content(HierarchicalNode):
     # CONFIG must be loaded with args before any Content classes are instantiated/imported
     _path_root: PurePath = Zotify.CONFIG.get_root_path()
     _regex_flag: re.Pattern | None = None
-    _to_str_attrs = [URI, NAME]
+    _to_str_attrs: list[str] = [URI, NAME]
+    _to_db_attrs: list[str] = []
     _fetch_args = ""
     url = ""
     
@@ -86,17 +87,6 @@ class Content(HierarchicalNode):
             if isinstance(val, Content):    val = getattr(val, NAME, None)
             if val:                         vals.append(str(val))
         return fix_filename(" - ".join(vals)) if vals else default
-    
-    def dashboard(self, extra_attrs: list[str] = [], suppress_id: bool = False, force_clsn: bool = False) -> str:
-        db = ""
-        attrs = (["id", "name"] if not suppress_id else ["name",]) + extra_attrs
-        for attr in attrs:
-            adds = Interface.parse_dbs(self, attr)
-            if force_clsn:
-               adds = "\n".join([f"{self.clsn} {line}" if self.clsn not in line else line for line in adds.split("\n")])
-            db += adds
-            if attr != attrs[-1]: db += "\n"
-        return db
     
     def regex_check(self, skip_debug_print: bool = False) -> bool:
         if self._regex_flag is None: return False
@@ -137,14 +127,14 @@ class Content(HierarchicalNode):
         resps = []
         if not uris: return resps
         elif not loader_text: loader_text = ContClass.type_attr
-        if ENABLE_BULK_FETCH and Zotify.CONFIG.get_api_client_id() and not ContClass is Playlist:
+        if ENABLE_BULK_FETCH and Zotify.CONFIG.get_api_client_id() and not FORCE_LIBRE_METADATA and not ContClass is Playlist:
             with Loader(f"Fetching bulk {loader_text} information...", disabled=hide_loader):
                 url = f"{ContClass.url}?{MARKET_APPEND}&{BULK_APPEND}"
                 ids = [uri.split(":")[-1] for uri in uris]
                 resps = Zotify.invoke_url_bulk(url, ids, ContClass.lowers, ITEM_FETCH[ContClass])
         if resps: return resps
         ENABLE_BULK_FETCH = False
-        suffix = "..." if Zotify.CONFIG.get_api_client_id() else "(unsafe)..."
+        suffix = "..." if Zotify.CONFIG.get_api_client_id() and not FORCE_LIBRE_METADATA else " (unsafe)..."
         with Loader(f"Fetching {loader_text} information{suffix}", disabled=hide_loader):
             return [ContClass.fetch_metadata(uri) for uri in uris]
     
@@ -333,12 +323,19 @@ class Content(HierarchicalNode):
                     if items:
                         tracks_eps_empty: list[dict] = [item.get(ITEM) for item in items]
                         for i, track_or_ep, item in zip(range(len(items)), tracks_eps_empty, items):
-                            if track_or_ep is None: continue
+                            if track_or_ep is None: 
+                                Printer.debug(f'Playlist Item {i} ({IS_LOCAL} == {item.get(IS_LOCAL)})\n' +
+                                               'Has Playlist Entry but no Metadata:\n' + 
+                                                Printer.pretty(item))
                             ensure_uri(track_or_ep, track_or_ep.get(TYPE, TRACK) + str(i+len(obj.tracks_or_eps)+1))
                             track_or_ep[ADDED_AT] = item.get(ADDED_AT)
                             track_or_ep[ADDED_BY] = item.get(ADDED_BY)
                             track_or_ep[IS_LOCAL] = item.get(IS_LOCAL)
                         self.tracks_or_eps = obj.parse_relatives(tracks_eps_empty, (Track, Episode))
+                    else:
+                        Printer.debug(f'Playlist {getattr(self, NAME, "NO-NAME")} {getattr(self, URI, "NO-URI")}\n' + 
+                                       'Has Playlist.Items but no Playlist.Items.Items\n' +
+                                       'Expected if User not Owner/Collaborator on Playlist')
                     self.needs_expansion = not items or playlist_items.get(NEXT) is not None
                 
                 publish_time                : dict[str, int]    = resp.get(PUBLISH_TIME)
@@ -423,10 +420,11 @@ class Content(HierarchicalNode):
         new_relatives: list[Content | Container] = []
         for i, resp in enumerate(resps):
             if not resp or not resp.get(TYPE) or not resp.get(URI):
+                reason = "EXPECTED RESPONSE FOR" if not resp else (f"{TYPE} OF" if not resp.get(TYPE) else f"{URI} OF")
                 with Printer.pause_loader():
-                    Printer.hashtaged(PrintChannel.WARNING, 'MISSING EXPECTED RESPONSE FOR RELATED METADATA OBJECT\n' +
-                                                           f'PARSING {"PARENT" if make_parent else "CHILD"} #{i} OF {self.clsn} ({self.id})\n' +
-                                                           f'EXPECTED RELATIVE TYPES: {[c.clsn for c in RelativeClasses]}')
+                    Printer.hashtaged(PrintChannel.WARNING, f'MISSING {reason} RELATED METADATA OBJECT\n' +
+                                                            f'PARSING {"PARENT" if make_parent else "CHILD"} #{i} OF {self.clsn} ({self.id})\n' +
+                                                            f'EXPECTED RELATIVE TYPES: {[c.clsn for c in RelativeClasses]}')
                     if resp: Printer.json_dump(resp, PrintChannel.WARNING)
                 new_relatives.append(None)
                 continue
@@ -448,7 +446,7 @@ class Content(HierarchicalNode):
                 return objs
             
             # missing children, only findale with Developer Client
-            if Zotify.CONFIG.get_api_client_id():
+            if Zotify.CONFIG.get_api_client_id() and not FORCE_LIBRE_METADATA:
                 for obj in objs:
                     if obj.needs_expansion: obj.grab_more_children(hide_loader=True)
             
@@ -703,6 +701,7 @@ class DLContent(Content):
 class Track(DLContent):
     _regex_flag = Zotify.CONFIG.get_regex_track()
     _to_str_attrs = [ARTISTS, NAME]
+    _to_db_attrs = [TRACK_NUMBER, ARTISTS, ALBUM]
     _codec = CODEC_MAP_TRACK.get(Zotify.CONFIG.get_download_format().lower(), "copy")
     _ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower(), "ogg")
     url = TRACK_URL
@@ -723,9 +722,6 @@ class Track(DLContent):
         # only set by Playlist API
         self.added_by       : dict[Playlist, User]  = {}
         self.is_local       : dict[Playlist, str]   = {}
-    
-    def dashboard(self, suppress_id: bool = False) -> str:
-        return super().dashboard(["track_number", "artists", "album"], suppress_id=suppress_id)
     
     def fill_output_template(self, parent_stack: ParentStack, output_template: str = "") -> PurePath:
         parent: Container = parent_stack[-2]
@@ -972,7 +968,7 @@ class Track(DLContent):
             Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO WRITE METADATA\n')
             Printer.traceback(e)
         
-        Printer.dl_complete(self, path, time_elapsed_dl, time_elapsed_ffmpeg)
+        Interface.dl_complete(self, path, time_elapsed_dl, time_elapsed_ffmpeg)
         
         if Zotify.CONFIG.get_optimized_dl(): self.clone_to_all()
         wait_between_downloads()
@@ -1088,6 +1084,7 @@ class Episode(DLContent):
     _path_root: PurePath = Zotify.CONFIG.get_root_podcast_path()
     _regex_flag = Zotify.CONFIG.get_regex_episode()
     _to_str_attrs = [SHOW, NAME]
+    _to_db_attrs = [SHOW]
     _codec = CODEC_MAP_EPISODE.get(Zotify.CONFIG.get_download_format().lower(), "copy")
     _ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower(), "copy")
     url = EPISODE_URL
@@ -1107,9 +1104,6 @@ class Episode(DLContent):
         self.added_at       : dict[Playlist, str]   = {}
         self.added_by       : dict[Playlist, User]  = {}
         self.is_local       : dict[Playlist, str]   = {}
-    
-    def dashboard(self, suppress_id: bool = False) -> str:
-        return super().dashboard(["show",], suppress_id=suppress_id)
     
     def fill_output_template(self, parent_stack: list[Container], output_template: str = "") -> PurePath:
         return self._path_root / fix_filename(self.show.name) / f"{self}.{self._ext}"
@@ -1208,7 +1202,7 @@ class Episode(DLContent):
                 path = pathlike_move_safe(temppath, path.with_suffix(ext))
             self.mark_downloaded(parent_stack, path)
         
-        Printer.dl_complete(self, path, time_elapsed_dl, time_elapsed_ffmpeg)
+        Interface.dl_complete(self, path, time_elapsed_dl, time_elapsed_ffmpeg)
         
         if Zotify.CONFIG.get_optimized_dl(): self.clone_to_all()
         wait_between_downloads()
@@ -1244,7 +1238,8 @@ class Container(Content):
     def recurse_DLC(self) -> list[DLContent]:
         dlc = []
         for c in self._main_items:
-            dlc.append(c) if isinstance(c, DLContent) else dlc.extend(c.recurse_DLC())
+            if isinstance(c, DLContent):   dlc.append(c)
+            elif isinstance(c, Container): dlc.extend(c.recurse_DLC())
         return dlc
     
     def grab_more_children(self, hide_loader: bool = False) -> list[dict]:
@@ -1256,7 +1251,7 @@ class Container(Content):
     
     def pbar(self, items: list[DLContent | Container | None], ps: ParentStack) -> list[DLContent | Container]:
         real_items: list[DLContent | Container] = [c for c in items if c is not None]
-        if not real_items: return []
+        if not any(real_items): return []
         parent: DLContent | Container = ps[-1]
         unit = "Content" if isinstance(parent._contains, tuple) else parent._contains.__name__
         if isinstance(parent, Query) and not isinstance(parent, UserItem): # avoid overwriting UserItem._contains
@@ -1324,6 +1319,7 @@ class Album(Container):
     _regex_flag = Zotify.CONFIG.get_regex_album()
     _show_pbar = Zotify.CONFIG.get_show_album_pbar()
     _to_str_attrs = [ARTISTS, NAME]
+    _to_db_attrs = [TOTAL_TRACKS, ARTISTS]
     _contains = Track
     _preloaded = 50
     url = ALBUM_URL
@@ -1346,9 +1342,6 @@ class Album(Container):
         self.album_group    : dict[Container, str]  = {}
         # only set by UserItem API
         self.added_at       : dict[Container, str]  = {}
-    
-    def dashboard(self, suppress_id: bool = False) -> str:
-        return super().dashboard(["total_tracks", "artists"], suppress_id=suppress_id, force_clsn=True)
     
     def grab_more_children(self, hide_loader: bool = False) -> list[dict]:
         super().grab_more_children(hide_loader=hide_loader)
@@ -1382,6 +1375,7 @@ class Album(Container):
 class Artist(Container):
     _show_pbar = Zotify.CONFIG.get_show_artist_pbar()
     _to_str_attrs = [NAME, FOLLOWERS, GENRES]
+    _to_db_attrs = [GENRES]
     _toptrackmode: bool = False # Zotify.get_artist_fetch_top_tracks(), not implemented
     _contains = Album if not _toptrackmode else TopTrack
     _fetch_q = 20 if not _toptrackmode else 100
@@ -1403,15 +1397,13 @@ class Artist(Container):
         self.genres         : list[str]         = None
         self.singles        : list[Album]       = None
         self.top_tracks     : list[TopTrack]    = self._main_items if self._toptrackmode else None
-    
-    def dashboard(self, suppress_id: bool = False) -> str:
-        return super().dashboard(["genres"], suppress_id=suppress_id)
 
 
 class Show(Container):
     _path_root: PurePath = Zotify.CONFIG.get_root_podcast_path()
     _show_pbar = Zotify.CONFIG.get_show_album_pbar()
     _to_str_attrs = [PUBLISHER, NAME]
+    _to_str_attrs = [TOTAL_EPISODES]
     _contains = Episode
     _preloaded = 50
     url = SHOW_URL
@@ -1425,9 +1417,6 @@ class Show(Container):
         self.publisher              : str               = None
         self.total_episodes         : str               = None
         self.episodes               : list[Episode]     = self._main_items
-    
-    def dashboard(self, suppress_id: bool = False) -> str:
-        return super().dashboard(["total_episodes",], suppress_id=suppress_id)
 
 
 # start not implemented
@@ -1622,7 +1611,8 @@ class Query(Container):
             self._main_items = downloadables
         
         if Zotify.CONFIG.get_standard_interface():
-            Interface.reset(self.ALL_NODES)
+            Interface.ALL_DLCONTENT = {n for n in self.ALL_NODES if isinstance(n, DLContent)}
+            Interface.refresh()
         
         interrupt = None
         try: super().download(ParentStack([self]))
