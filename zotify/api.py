@@ -115,8 +115,8 @@ class Content(HierarchicalNode):
     def fetch_metadata(cls, uri: str, args: list[str] = []) -> dict[str]:
         resp = {}
         if Zotify.CONFIG.permit_legacy_api() or (Zotify.CONFIG.permit_client_api() and not cls is Playlist):
-            if cls._fetch_args or args: args = "&" + "&".join([cls._fetch_args] + args)
-            resp = Zotify.invoke_url(f'{cls.url}/{uri.split(":")[-1]}?{MARKET_APPEND}{args}')
+            argstr = arg_comb(cls._fetch_args, *args)
+            resp = Zotify.invoke_url(f'{cls.url}/{uri.split(":")[-1]}?{MARKET_APPEND}{argstr}')
         else:
             resp = Zotify.invoke_libre_md(cls, uri)
             if cls is Track and resp.get(DURATION):
@@ -283,7 +283,7 @@ class Content(HierarchicalNode):
                         if contents.get(TRUNCATED):
                             self.needs_expansion = True
                             Printer.hashtaged(PrintChannel.WARNING, f'PLAYLIST {self.name} MISSING FINAL {self.length - len(items)} ITEMS\n' +
-                                                                    f'NOT RECOVERABLE WITHOUT A LEGACY DEVELOPER CLIENT')
+                                                                     'NOT RECOVERABLE WITHOUT A LEGACY DEVELOPER CLIENT')
                 
                 cover_group                 : dict              = resp.get(COVER_GROUP)
                 images                      : list[dict]        = resp.get(IMAGES)
@@ -344,8 +344,14 @@ class Content(HierarchicalNode):
                             track_or_ep[ADDED_BY] = item.get(ADDED_BY)
                             track_or_ep[IS_LOCAL] = item.get(IS_LOCAL)
                         self.tracks_or_eps = obj.parse_relatives(tracks_eps_empty, (Track, Episode))
-                    else:
-                        Printer.hashtaged(f'PLAYLIST "{getattr(resp, NAME, "NO-NAME")}" ({getattr(resp, URI, "NO-URI")})\n' + 
+                        if not any(self.tracks_or_eps):
+                            Printer.hashtaged(PrintChannel.WARNING,
+                                              f'PLAYLIST "{self.name}" ({obj.uri})\n' +
+                                               '[Playlist.Items.Items] METADATA ENTIRELY ABSENT\n' +
+                                               'RECOMMENDED TO SET CONFIG "API_CLIENT_LEGACY = False"')
+                    else: # should never be called
+                        Printer.hashtaged(PrintChannel.WARNING,
+                                          f'PLAYLIST "{self.name}" ({obj.uri})\n' +
                                            'HAS [Playlist.Items] BUT NO [Playlist.Items.Items]\n' +
                                            'RECOMMENDED TO SET CONFIG "API_CLIENT_LEGACY = False"')
                     self.needs_expansion = not items or playlist_items.get(NEXT) is not None
@@ -759,8 +765,6 @@ class Track(DLContent):
             update_repl(self.album.year,            "{year}", "{release_year}")
         
         if Zotify.CONFIG.get_disc_track_totals():
-            if self.album.needs_expansion:
-                self.album.grab_more_children(hide_loader=True) # moved from Query.fetch_extra_metadata()
             update_repl(self.album.total_tracks,    "{total_tracks}")
             update_repl(self.album.total_discs,     "{total_discs}")
         
@@ -1227,9 +1231,7 @@ class Container(Content):
     def fetch_items(self, args: list[str] = [], hide_loader: bool = False) -> list[dict]:
         item_key = ITEMS if isinstance(self, Playlist) else self._contains.lowers
         with Loader(f'Fetching {self.type_attr} {item_key}...', disabled=hide_loader):
-            argstr = ""
-            if self._fetch_args: argstr += "&" + self._fetch_args
-            if args: argstr += "&" + "&".join(args)
+            argstr = arg_comb(self._fetch_args, *args)
             if self._nextable:
                 resp = Zotify.invoke_url_nextable(f'{self.url}/{self.id}/{item_key.replace(" ", "-")}?{MARKET_APPEND}{argstr}',
                                                   limit=self._fetch_q, offset=len(self._main_items))
@@ -1247,7 +1249,6 @@ class Container(Content):
         return dlc
     
     def grab_more_children(self, hide_loader: bool = False) -> list[dict]:
-        # assumes all items inside objs are the same class
         item_resps = self.fetch_items(hide_loader=hide_loader)
         item_objs = self.parse_relatives(item_resps, self._contains)
         self._main_items.extend(item_objs)
@@ -1281,7 +1282,6 @@ class Playlist(Container):
     _preloaded = 100
     _fetch_q = 100
     _fetch_args = "additional_types=track%2Cepisode"
-    
     url = PLAYLIST_URL
     
     def __init__(self, uri: str):
@@ -1742,8 +1742,8 @@ class UserItem(Query):
             for resp in user_item_resps:
                 resp[self.inner_stripper][ADDED_AT] = resp.get(ADDED_AT)
             user_item_resps = [resp[self.inner_stripper] for resp in user_item_resps]
-        # elif self._contains is Playlist:
-        #     
+        if self._contains is Playlist:
+            user_item_resps = self.fetch_uris_metadata([resp[URI] for resp in user_item_resps], Playlist)
         self.parse_query_metadata([user_item_resps], [self._contains])
         self.fetch_extra_metadata()
         self.download()

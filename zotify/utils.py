@@ -153,6 +153,10 @@ def edge_zip(sorted_list: list) -> list:
     return sorted_list
 
 
+def arg_comb(*args: str):
+    return "&" + "&".join(args) if args else ""
+
+
 def clamp(low: int, i: int, high: int) -> int:
     return max(low, min(i, high))
 

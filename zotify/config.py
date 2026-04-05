@@ -832,12 +832,15 @@ class Zotify:
                 if not responsejson:
                     raise json.decoder.JSONDecodeError()
             except json.decoder.JSONDecodeError:
-                responsejson = {ERROR: {STATUS: "Unknown", MESSAGE: "Received an empty response"}}
+                fallback_code = resp.status_code if resp.status_code != 200 else "Unknown"
+                if fallback_code == 403:    fallback_message = "Too Many Requests, Rate Limit Exceeded"
+                else:                       fallback_message = "Received an empty response"
+                responsejson = {ERROR: {STATUS: fallback_code,  MESSAGE: fallback_message}}
             if resp.ok and resp.status_code == 200 and not responsejson.get(ERROR):
                 return responsejson
             elif not expectFail:
                 Printer.hashtaged(PrintChannel.WARNING, f'API ERROR (TRY {tryCount}) - RETRYING\n' +
-                                                        f'{STATUS} {responsejson.get(ERROR, {}).get(STATUS, "Unknown")}:  '+
+                                                        f'Status {responsejson.get(ERROR, {}).get(STATUS, "Unknown")}:  '+
                                                         f'{responsejson.get(ERROR, {}).get(MESSAGE, "No message provided")}')
             
             tryCount += 1
