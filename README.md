@@ -146,7 +146,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | Encoding Options             | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
 | `DOWNLOAD_FORMAT`            | `--codec`, `--download-format`      | Audio codec, copy avoids remuxing (aac, fdk_aac, mp3, ogg, opus, vorbis)                 | copy          |
-| `DOWNLOAD_QUALITY`           | `-q`, `--download-quality`          | Source audio quality, auto selects highest available (normal, high, very_high*)          | auto          |
+| `DOWNLOAD_QUALITY`           | `-q`, `--download-quality`          | Source audio quality, auto selects highest available (normal, high, very_high\*)         | auto          |
 | `TRANSCODE_BITRATE`          | `-b`, `--bitrate`                   | Overwrite the bitrate for FFMPEG encoding (NOT RECOMMENDED)                              |               |
 | `CUSTOM_FFMEPG_ARGS`         | `--custom-ffmpeg-args`              | Additional FFMPEG functions or filters to apply to downloaded audio (space delimited)    |  `""`         |
 
@@ -176,7 +176,6 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 
 | Metadata Options             | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
-| `API_CLIENT_ID`              | `--client-id`                       | Client ID for a Developer App to route metadata API requests through                     | `""`          |
 | `LANGUAGE`                   | `--language`                        | Language in which metadata/tags are requested                                            | en            |
 | `MD_DISC_TRACK_TOTALS`       | `--md-disc-track-totals`            | Whether track totals and disc totals should be saved in metadata                         | True          |
 | `MD_SAVE_GENRES`             | `--md-save-genres`                  | Whether genres should be saved in metadata                                               | True          |
@@ -189,6 +188,8 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 
 | API Options                  | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
+| `API_CLIENT_ID`              | `--client-id`                       | Client ID for a Developer App to route metadata API requests through         | `""`                      |
+| `API_CLIENT_LEGACY`          | `--client-legacy`                   | Whether the Developer App can access legacy endpoints\*\*                    | True                      |
 | `RETRY_ATTEMPTS`             | `--retry-attempts`                  | Number of times to retry failed API requests                                 | 1                         |
 | `CHUNK_SIZE`                 | `--chunk-size`                      | Chunk size for downloading                                                   | 20000                     |
 | `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests (port is handled internally)   | 127.0.0.1                 |
@@ -210,7 +211,9 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `STANDARD_INTERFACE`         | `--standard-interface`              | Silence all non-mandatory prints and loaders, instead show a standardized dashboard      | False         |
 | `FFMPEG_LOG_LEVEL`           | `--ffmpeg-log-level`                | FFMPEG's logged level of detail when completing a transcoded download                    | error         |
 
-\* very_high (320k) is limited to Premium accounts only  
+**\* very_high (320k) is limited to Premium accounts only**
+
+**\*\* Developer Apps created before 2026-02 *may* be legacy**
 
 </details>
 

@@ -133,8 +133,6 @@ def strlist_compressor(strs: list[str]) -> str:
 
 
 def bulk_regex_urls(urls: str | list[str]) -> list[list[str]]:
-    """ Since many kinds of search may be passed at the command line, process them all here. """
-    
     if isinstance(urls, list):
         urls = strlist_compressor(urls)
     
@@ -149,7 +147,7 @@ def bulk_regex_urls(urls: str | list[str]) -> list[list[str]]:
 
 
 def edge_zip(sorted_list: list) -> list:
-    # presorted small to big, in place, [1,2,3,4,5] -> [1,5,2,4,3],
+    """ Performs sort in place: [1,2,3,4,5] -> [1,5,2,4,3] (Assumes list is ascending) """
     n = len(sorted_list)
     sorted_list[::2], sorted_list[1::2] = sorted_list[:(n+1)//2], sorted_list[:(n+1)//2-1:-1]
     return sorted_list
@@ -334,11 +332,11 @@ def get_archived_entries(dir_path: PurePath | None = None) -> list[str]:
         # id, date, author, track, filepath (only filename if from legacy archive)
         entries = f.readlines()
     
-    if dir_path or not Zotify.CONFIG.get_upgrade_legacy_archive():
+    if dir_path or not Zotify.UPDATE_ARCHIVE:
         return entries
     
     upgrade_legacy_archive(entries, archive_path)
-    Zotify.CONFIG.set_stop_upgrade_legacy_archive()
+    Zotify.UPDATE_ARCHIVE = False
     
     return get_archived_entries(dir_path)
 
@@ -391,42 +389,85 @@ def add_obj_to_song_archive(obj, path: PurePath, dir_path: PurePath | None = Non
                    archive_path, mode)
 
 
-# Playlist File Utils
-def add_to_m3u8(m3u8_path: PurePath, contents: list, filepaths: list[PurePath], append_strs: list[str] = []):
-    from zotify.api import DLContent
-    contents: list[DLContent] = contents
+# M3U8 Playlist File Utils
+class M3U8():
+    def __init__(self, cont_paths: list[PurePath | None], cont_type: type, creator):
+        from zotify.api import Content, Container, Query
+        self.cont_type: type[Content] = cont_type
+        self.creator: Query | Container = creator
+        self.name = self.cont_type.uppers if isinstance(self.creator, Query) else f'"{self.creator.name}"'
+        
+        dir = Zotify.CONFIG.get_m3u8_location()
+        if not dir: dir = self.dynamic_dir(cont_paths)
+        filename = fix_filename(f"{self.creator.id}_{self.cont_type.lowers}" if isinstance(self.creator, Query) else self.creator.name) + ".m3u8"
+        self.path = dir / filename if dir else None
     
-    if not Path(m3u8_path).exists():
-        Path(m3u8_path.parent).mkdir(parents=True, exist_ok=True)
-        with open(m3u8_path, 'x', encoding='utf-8') as file:
+    def dynamic_dir(self, cont_paths: list[PurePath | None]) -> PurePath | None:
+        paths = {path for path in cont_paths if isinstance(path, PurePath) and path.is_relative_to(self.cont_type._path_root)}
+        dir = get_common_dir(paths)
+        return dir
+    
+    @staticmethod
+    def fetch_songs(m3u8_path: PurePath) -> list[str]:
+        if not Path(m3u8_path).exists(): return []
+        
+        with open(m3u8_path, 'r', encoding='utf-8') as file:
+            linesraw = file.readlines()[2:]
+            # songsgrouped = [] # group by song and filepath
+            # for i in range(len(linesraw)//3):
+            #     songsgrouped.append(linesraw[3*i:3*i+3])
+        return linesraw
+    
+    @staticmethod
+    def find_sync_point(filepaths: list[PurePath | None], m3u8_entry_path: str) -> int | None:
+        for i, filepath in enumerate(filepaths):
+            Printer.logger(f"{filepath} == {m3u8_entry_path}")
+            if str(filepath) == m3u8_entry_path:
+                return i
+            elif str(filepath) in m3u8_entry_path:
+                Printer.hashtaged(PrintChannel.WARNING, 'TRACK FILEPATH WITHIN LIKED SONG M3U8 ENTRY\n' +
+                                                        'M3U8 MAY NOT PLAY/LINK TO FILES CORRECTLY\n' +
+                                                        'POSSIBLY FROM NON-UPDATED SONG ARCHIVE FILE\n' +
+                                                        "(CONSIDER RUNNING --update-archive)")
+                return i
+            elif m3u8_entry_path in str(filepath):
+                Printer.hashtaged(PrintChannel.WARNING, 'LIKED SONG M3U8 ENTRY WITHIN TRACK FILEPATH\n' +
+                                                        'M3U8 MAY NOT PLAY/LINK TO FILES CORRECTLY\n' +
+                                                        'POSSIBLY FROM M3U8 USING RELATIVE PATHS\n' +
+                                                        '(CONSIDER USING FULL PATHS FOR LIKED SONGS M3U8)')
+                return i
+    
+    def create(self):
+        if self.path is None: return
+        Path(self.path.parent).mkdir(parents=True, exist_ok=True)
+        with open(self.path, 'x', encoding='utf-8') as file:
             file.write("#EXTM3U\n\n")
     
-    with open(m3u8_path, 'a', encoding='utf-8') as file:
-        for content, track_path_m3u in zip(contents, filepaths):
-            if track_path_m3u is None:
-                continue
-            
-            track_label_m3u = f"#EXTINF:{content.duration_ms // 1000}, {content}\n"
-            if Zotify.CONFIG.get_m3u8_relative_paths():
-                track_path_m3u = os.path.relpath(track_path_m3u, m3u8_path.parent)
-            
-            file.write(track_label_m3u)
-            file.write(f"{track_path_m3u}\n\n")
+    def add_content(self, dlcs: list, cont_paths: list[PurePath | None]):
+        from zotify.api import DLContent, Container
+        dlcs: list[DLContent | None] = dlcs
         
-        if append_strs:
+        if self.path is None:
+            Printer.hashtaged(PrintChannel.WARNING, f'SKIPPING M3U8 CREATION FOR {self.name}\n' +
+                                                     'NO CONTENT WITH VALID FILEPATHS FOUND')
+            return
+        elif not Path(self.path).exists(): 
+            self.create()
+        if Zotify.CONFIG.get_m3u8_relative_paths():
+            cont_paths = [os.path.relpath(p, self.path.parent) if p else None for p in cont_paths]
+        
+        misisng_name = f"{self.cont_type.clsn}"
+        if isinstance(self.cont_type, Container): misisng_name += f" {self.cont_type._contains}"
+        with open(self.path, 'a', encoding='utf-8') as file:
+            for i, dlc, path in zip(range(len(dlcs)), dlcs, cont_paths):
+                file.write(f"#EXTINF:{dlc.duration_ms // 1000}, {dlc}\n" if dlc else f"# Missing {misisng_name} {i+1}\n")
+                file.write(f"{path}\n\n" if path else "# None\n\n")
+        
+        Printer.hashtaged(PrintChannel.MANDATORY, f'M3U8 CREATED FOR {self.name}\n' +
+                                                  f'SAVED TO: {self.cont_type.rel_path(self.path)}')
+    
+    def append(self, append_strs: list[str]):
+        if self.path is None or not Path(self.path).exists() or not append_strs:
+            return
+        with open(self.path, 'a', encoding='utf-8') as file:
             file.writelines(append_strs)
-
-
-def fetch_m3u8_songs(m3u8_path: PurePath) -> list[str]:
-    """ Fetches the songs and associated file paths in an .m3u8 playlist"""
-    
-    if not Path(m3u8_path).exists():
-        return []
-    
-    with open(m3u8_path, 'r', encoding='utf-8') as file:
-        linesraw = file.readlines()[2:]
-        # group by song and filepath
-        # songsgrouped = []
-        # for i in range(len(linesraw)//3):
-        #     songsgrouped.append(linesraw[3*i:3*i+3])
-    return linesraw

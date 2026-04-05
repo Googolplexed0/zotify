@@ -23,7 +23,6 @@ from zotify.const import *
 from zotify.termoutput import Printer, PrintChannel, Loader
 
 Streamer = CdnManager.Streamer
-FORCE_STREAM_API_CALL = False
 
 
 CONFIG_VALUES = {
@@ -98,7 +97,6 @@ CONFIG_VALUES = {
     LYRICS_MD_HEADER:           { 'default': 'False',                   'type': bool,   'arg': ('--lyrics-md-header'                     ,) },
     
     # Metadata Options
-    API_CLIENT_ID:              { 'default': '',                        'type': str,    'arg': ('--client-id'                            ,) },
     LANGUAGE:                   { 'default': 'en',                      'type': str,    'arg': ('--language'                             ,) },
     MD_DISC_TRACK_TOTALS:       { 'default': 'True',                    'type': bool,   'arg': ('--md-disc-track-totals'                 ,) },
     MD_SAVE_GENRES:             { 'default': 'True',                    'type': bool,   'arg': ('--md-save-genres'                       ,) },
@@ -110,6 +108,8 @@ CONFIG_VALUES = {
     ALBUM_ART_JPG_FILE:         { 'default': 'False',                   'type': bool,   'arg': ('--album-art-jpg-file'                   ,) },
     
     # API Options
+    API_CLIENT_ID:              { 'default': '',                        'type': str,    'arg': ('--client-id'                            ,) },
+    API_CLIENT_LEGACY:          { 'default': 'True',                    'type': bool,   'arg': ('--client-legacy'                        ,) },
     RETRY_ATTEMPTS:             { 'default': '1',                       'type': int,    'arg': ('--retry-attempts'                       ,) },
     CHUNK_SIZE:                 { 'default': '20000',                   'type': int,    'arg': ('--chunk-size'                           ,) },
     REDIRECT_ADDRESS:           { 'default': '127.0.0.1',               'type': str,    'arg': ('--redirect-address'                     ,) },
@@ -222,7 +222,7 @@ class Config:
             cls.Values[PRINT_SPLASH] = False
         
         # Check update_archive
-        cls.Values[UPDATE_ARCHIVE] = cls.debug() or args.update_archive or args.verify_library
+        Zotify.UPDATE_ARCHIVE = cls.debug() or args.update_archive or args.verify_library
     
     @classmethod
     def get_default_json(cls) -> dict:
@@ -453,14 +453,6 @@ class Config:
     def get_skip_previously_downloaded(cls) -> bool:
         return cls.get(SKIP_PREVIOUSLY_DOWNLOADED)
     
-    @classmethod
-    def get_upgrade_legacy_archive(cls) -> bool:
-        return cls.get(UPDATE_ARCHIVE)
-    
-    @classmethod
-    def set_stop_upgrade_legacy_archive(cls) -> None:
-        cls.Values[UPDATE_ARCHIVE] = False
-    
     # Playlist File Options
     @classmethod
     def get_export_m3u8(cls) -> bool:
@@ -523,10 +515,6 @@ class Config:
     
     # Metadata Options
     @classmethod
-    def get_api_client_id(cls) -> str:
-        return cls.get(API_CLIENT_ID)
-    
-    @classmethod
     def get_language(cls) -> str:
         return cls.get(LANGUAGE)
     
@@ -564,6 +552,18 @@ class Config:
         return cls.get(ALBUM_ART_JPG_FILE)
     
     # API Options
+    @classmethod
+    def get_api_client_id(cls) -> str:
+        return cls.get(API_CLIENT_ID)
+    
+    @classmethod
+    def permit_client_api(cls) -> bool:
+        return cls.get_api_client_id() and not Zotify.FORCE_LIBRE_METADATA
+    
+    @classmethod
+    def permit_legacy_api(cls) -> bool:
+        return cls.permit_client_api() and cls.get(API_CLIENT_LEGACY) and Zotify.LEGACY_API_ENDOINTS
+    
     @classmethod
     def get_retry_attempts(cls) -> int:
         return cls.get(RETRY_ATTEMPTS)
@@ -626,16 +626,24 @@ class Config:
 
 
 class Zotify:
-    VERSION                                         = version("zotify")
-    CONFIG              : Config                    = Config()
-    OAUTH               : OAuth                     = None
-    SESSION             : Session                   = None
-    TOTAL_API_CALLS     : int                       = None
-    DATETIME_LAUNCH     : str                       = None
-    LOGGER              : logging.Logger            = None
-    LOGFILE             : Path                      = None
-    DOWNLOAD_QUALITY    : FormatOnlyAudioQuality    = None
-    DOWNLOAD_BITRATE    : str                       = None
+    # STATICS
+    VERSION                                             = version("zotify")
+    CONFIG                  : Config                    = Config()
+    CRED_FILE               : PurePath                  = None
+    OAUTH                   : OAuth                     = None
+    SESSION                 : Session                   = None
+    LOGGER                  : logging.Logger            = None
+    LOGFILE                 : Path                      = None
+    DOWNLOAD_QUALITY        : FormatOnlyAudioQuality    = None
+    DOWNLOAD_BITRATE        : str                       = None
+    
+    # DYNAMICS
+    TOTAL_API_CALLS         : int   = None
+    DATETIME_LAUNCH         : str   = None
+    UPDATE_ARCHIVE          : bool  = False
+    LEGACY_API_ENDOINTS     : bool  = True
+    FORCE_LIBRE_METADATA    : bool  = False
+    FORCE_STREAM_API_CALLS  : bool  = False
     
     @classmethod
     def start(cls) -> None:
@@ -655,23 +663,26 @@ class Zotify:
         cred_path = cls.CONFIG.get_credentials_location()
         if cls.CONFIG.get_save_credentials() and Path(cred_path).exists():
             with open(cred_path, 'r',) as f:
-                creds = json.load(f)
+                creds: dict = json.load(f)
             try:
+                if not creds or not isinstance(creds, dict) or not creds.get("type"):
+                    raise RuntimeError("Empty or Invalid Credentials File")
+                cls.CRED_FILE = cred_path
                 if creds["type"] == OAuth.OAUTH_PKCE_TOKEN:
                     cls.CONFIG.Values[API_CLIENT_ID] = creds["client_id"]
                     cls.OAUTH = OAuth(cls.CONFIG.get_api_client_id(), "", None).ingest_token_response(creds)
                     cls.OAUTH.refresh_token()
-                    cls.OAUTH.save_creds(cred_path)
+                    cls.OAUTH.save_creds(cls.CRED_FILE)
                     session_builder.login_credentials = cls.OAUTH.get_credentials()
                     cls.SESSION = session_builder.create()
                     return
                 else:
                     cls.CONFIG.Values[API_CLIENT_ID] = ""
-                    session_builder.stored_file(cred_path)
+                    session_builder.stored_file(cls.CRED_FILE)
                     cls.SESSION = session_builder.create()
                     return
             except RuntimeError:
-                Printer.hashtaged(PrintChannel.MANDATORY, f'Login via saved {creds["type"]} credentials failed! Falling back to interactive login')
+                Printer.hashtaged(PrintChannel.MANDATORY, f'Login via saved {creds.get("type", "<unknown-type>")} credentials failed! Falling back to interactive login')
                 # Path(cred_path).unlink()
         
         # login via commandline args (login5 token only)
@@ -697,12 +708,13 @@ class Zotify:
         oauth = OAuth(client_id, redirect_url, oauth_print).set_scopes(SCOPES).set_listen_all(True)
         session_builder.login_credentials = oauth.flow()
         if cls.CONFIG.get_save_credentials():
+            cls.CRED_FILE = cred_path
             if client_id != MercuryRequests.keymaster_client_id:
                 cls.OAUTH = oauth
-                oauth.save_creds(cred_path)
+                oauth.save_creds(cls.CRED_FILE)
             else:
                 session_builder.conf.store_credentials = True
-                session_builder.conf.stored_credentials_file = str(cred_path)
+                session_builder.conf.stored_credentials_file = str(cls.CRED_FILE)
         cls.SESSION = session_builder.create()
         return
     
@@ -756,6 +768,7 @@ class Zotify:
         cls.DOWNLOAD_QUALITY = quality
         cls.DOWNLOAD_BITRATE = bitrate
         Printer.debug(f'{"CLIENT_ID" if cls.OAUTH else ""} Session Initialized Successfully\n' +
+                      f'Using Credentials at {cls.CRED_FILE}\n' +
                       f'User Subscription Type: {"PREMIUM" if prem else "FREE"}\n' +
                       f'Zotify Version v{cls.VERSION}')
     
@@ -886,7 +899,6 @@ class Zotify:
     
     @classmethod
     def get_content_stream(cls, content, use_qual_pref: bool = True) -> Streamer | None:
-        global FORCE_STREAM_API_CALL
         from zotify.api import DLContent
         if not isinstance(content, DLContent): return
         content_id = cls.to_libre_content(content.__class__, content.uri)
@@ -894,7 +906,7 @@ class Zotify:
         qual = cls.DOWNLOAD_QUALITY if use_qual_pref else cls.parse_dl_quality()[1]
         Printer.logger(f'Fetching stream for {content.uri} at quality {qual.preferred.name}')
         try:
-            if not content.file_ids or FORCE_STREAM_API_CALL:
+            if not content.file_ids or cls.FORCE_STREAM_API_CALLS:
                 risky_method = False
                 lds = cls.SESSION.content_feeder().load(content_id, qual, False, None)
                 return lds.input_stream if lds else None
@@ -932,7 +944,7 @@ class Zotify:
             Printer.logger("\n".join(e.args), PrintChannel.ERROR)
         except Exception as e:
             if risky_method:
-                FORCE_STREAM_API_CALL = True
+                cls.FORCE_STREAM_API_CALLS = True
                 return cls.get_content_stream(content, use_qual_pref=use_qual_pref)
             Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO STREAM\n' +
                                                   'AN UNEXPECTED ERROR OCCURED - CHECK LOGS FOR DETAILS')
