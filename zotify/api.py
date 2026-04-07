@@ -1570,8 +1570,8 @@ class Query(Container):
                 filepaths: list[PurePath | None] = []
                 for dlc in dlcs:
                     if dlc is None: filepaths.append(None)
-                    else: # there should only exist one ParentStack where the target obj was the Query's requested_obj
-                        ps: ParentStack = next(ps for ps in dlc.real_filepaths if ps[1] == obj)
+                    else: # at most one ParentStack where the target obj was the Query's requested_obj
+                        ps: ParentStack | None = next((ps for ps in dlc.real_filepaths if ps[1] == obj), None)
                         filepaths.append(dlc.real_filepaths.get(ps))
                 M3U8(filepaths, cont_type, obj).add_content(dlcs, filepaths)
     
