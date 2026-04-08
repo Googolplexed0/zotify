@@ -1557,7 +1557,7 @@ class Query(Container):
             
             if issubclass(cont_type, DLContent): 
                 filepaths: list[PurePath | None] = [dlc.real_filepaths.get(ParentStack([self, dlc])) for dlc in obj_list]
-                M3U8(filepaths, cont_type, self).add_content(obj_list, filepaths)
+                M3U8(filepaths, cont_type, self).write(obj_list, filepaths)
                 continue
             
             for obj in obj_list:
@@ -1573,7 +1573,7 @@ class Query(Container):
                     else: # at most one ParentStack where the target obj was the Query's requested_obj
                         ps: ParentStack | None = next((ps for ps in dlc.real_filepaths if ps[1] == obj), None)
                         filepaths.append(dlc.real_filepaths.get(ps))
-                M3U8(filepaths, cont_type, obj).add_content(dlcs, filepaths)
+                M3U8(filepaths, cont_type, obj).write(dlcs, filepaths)
     
     def download(self):
         self._main_items = [c for content_type in self.requested_objs for c in content_type]
@@ -1795,7 +1795,7 @@ class LikedSong(UserItem):
                                                         'FAILED TO ' + reason + '\n' +
                                                         'FALLING BACK TO STANDARD M3U8 CREATION')
         
-        m3u8.add_content(liked_tracks, filepaths)
+        m3u8.write(liked_tracks, filepaths)
         m3u8.append(append_strs)
 
 

@@ -335,8 +335,8 @@ class SongArchive:
         
         with open(self.filepath, 'r', encoding='utf-8') as f:
             entries = f.readlines()
-        if self._global and self.UPDATE_ARCHIVE:
-            self.UPDATE_ARCHIVE = False
+        if self._global and SongArchive.UPDATE_ARCHIVE:
+            SongArchive.UPDATE_ARCHIVE = False
             self.upgrade_legacy_archive(entries)
             return self.read_entries()
         return entries
@@ -414,13 +414,7 @@ class M3U8():
                                                         '(CONSIDER USING FULL PATHS FOR LIKED SONGS M3U8)')
                 return i
     
-    def create(self):
-        if self.path is None: return
-        Path(self.path.parent).mkdir(parents=True, exist_ok=True)
-        with open(self.path, 'x', encoding='utf-8') as file:
-            file.write("#EXTM3U\n\n")
-    
-    def add_content(self, dlcs: list, cont_paths: list[PurePath | None]):
+    def write(self, dlcs: list, cont_paths: list[PurePath | None]):
         from zotify.api import DLContent, Container
         dlcs: list[DLContent | None] = dlcs
         
@@ -428,16 +422,17 @@ class M3U8():
             Printer.hashtaged(PrintChannel.WARNING, f'SKIPPING M3U8 CREATION FOR {self.name}\n' +
                                                      'NO CONTENT WITH VALID FILEPATHS FOUND')
             return
-        elif not Path(self.path).exists(): 
-            self.create()
-        if Zotify.CONFIG.get_m3u8_relative_paths():
+        elif Zotify.CONFIG.get_m3u8_relative_paths():
             cont_paths = [os.path.relpath(p, self.path.parent) if p else None for p in cont_paths]
         
-        misisng_name = f"{self.cont_type.clsn}"
-        if isinstance(self.cont_type, Container): misisng_name += f" {self.cont_type._contains}"
-        with open(self.path, 'a', encoding='utf-8') as file:
+        missing_name = f"{self.cont_type.clsn}"
+        if isinstance(self.cont_type, Container): missing_name += f" {self.cont_type._contains}"
+        
+        Path(self.path.parent).mkdir(parents=True, exist_ok=True)
+        with open(self.path, 'w', encoding='utf-8') as file:
+            file.write("#EXTM3U\n\n")
             for i, dlc, path in zip(range(len(dlcs)), dlcs, cont_paths):
-                file.write(f"#EXTINF:{dlc.duration_ms // 1000}, {dlc}\n" if dlc else f"# Missing {misisng_name} {i+1}\n")
+                file.write(f"#EXTINF:{dlc.duration_ms // 1000}, {dlc}\n" if dlc else f"# Missing {missing_name} {i+1}\n")
                 file.write(f"{path}\n\n" if path else "# None\n\n")
         
         Printer.hashtaged(PrintChannel.MANDATORY, f'M3U8 CREATED FOR {self.name}\n' +
