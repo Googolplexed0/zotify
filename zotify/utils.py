@@ -18,7 +18,7 @@ def create_download_directory(dir_path: str | PurePath) -> None:
     
     # add hidden file with song ids
     hidden_file_path = PurePath(dir_path).joinpath('.song_ids')
-    if Zotify.CONFIG.get_disable_dir_archives():
+    if Zotify.CONFIG.get_no_dir_archives():
         return
     if not Path(hidden_file_path).is_file():
         with open(hidden_file_path, 'w', encoding='utf-8') as f:
@@ -288,109 +288,82 @@ def wait_between_downloads(skip_wait: bool = False) -> None:
 
 
 # Song Archive Utils
-def upgrade_legacy_archive(entries: list[str], archive_path: PurePath) -> None:
-    """ Attempt to match a legacy archive's filename to a full filepath """
+class SongArchive:
+    """ Entry: id, date, author, name, filepath (only filename if from legacy archive) """
+    UPDATE_ARCHIVE: bool = False
     
-    rewrite_legacy = False
-    from zotify.api import Track
-    for i, entry in enumerate(entries):
-        entry_items = entry.strip().split('\t')
-        filename_or_path = PurePath(entry_items[-1])
-        if filename_or_path.is_absolute():
-            entries[i] = entry_items
-            continue
+    def __init__(self, dir_path: PurePath | None = None):
+        self._global = dir_path is None
+        self.filepath = Zotify.CONFIG.get_song_archive_location() if dir_path is None else dir_path / '.song_ids'
+        self.mode = 'a' if Path(self.filepath).exists() else 'w'
+        self.disabled = not Path(self.filepath).exists() or \
+                        (Zotify.CONFIG.get_no_song_archive() if self._global else Zotify.CONFIG.get_no_dir_archives())
+    
+    def upgrade_legacy_archive(self, entries: list[str]) -> None:
+        """ Attempt to match a legacy archive's filename to a full filepath """
         
-        rewrite_legacy = True
-        path_entry = filename_or_path
-        for glob_path in Path(Zotify.CONFIG.get_root_path()).glob('**/' + str(filename_or_path)):
-            reliable_tags, unreliable_tags = Track.read_audio_tags(PurePath(glob_path))
-            if ("trackid" in unreliable_tags and unreliable_tags["trackid"] == entry_items[0]
-            or  unconv_artist_format(reliable_tags[0])[0] == entry_items[2]
-            or  reliable_tags[2] == entry_items[3]):
-                path_entry = PurePath(glob_path)
-                break
+        rewrite_legacy = False
+        from zotify.api import Track
+        for i, entry in enumerate(entries):
+            entry_items = entry.strip().split('\t')
+            filename_or_path = PurePath(entry_items[-1])
+            if filename_or_path.is_absolute():
+                entries[i] = entry_items
+                continue
+            
+            rewrite_legacy = True
+            path_entry = filename_or_path
+            for glob_path in Path(Zotify.CONFIG.get_root_path()).glob('**/' + str(filename_or_path)):
+                reliable_tags, unreliable_tags = Track.read_audio_tags(PurePath(glob_path))
+                if ("trackid" in unreliable_tags and unreliable_tags["trackid"] == entry_items[0]
+                or  unconv_artist_format(reliable_tags[0])[0] == entry_items[2]
+                or  reliable_tags[2] == entry_items[3]):
+                    path_entry = PurePath(glob_path)
+                    break
+            
+            entries[i] = entry_items[:-1] + [path_entry]
         
-        entries[i] = entry_items[:-1] + [path_entry]
+        if rewrite_legacy:
+            Path(self.filepath).unlink()
+            mode = 'w'
+            for entry in entries:
+                self.add_entry(*entry, mode)
+                mode = 'a'
     
-    if rewrite_legacy:
-        Path(archive_path).unlink()
-        mode = 'w'
-        for entry in entries:
-            add_to_archive(*entry, archive_path, mode)
-            mode = 'a'
-
-
-def get_archived_entries(dir_path: PurePath | None = None) -> list[str]:
-    """ Returns list of downloaded song entries """
-    if dir_path:
-        archive_path = dir_path / '.song_ids'
-        disabled = Zotify.CONFIG.get_disable_dir_archives()
-    else:
-        archive_path = Zotify.CONFIG.get_song_archive_location()
-        disabled = Zotify.CONFIG.get_disable_song_archive()
-    
-    if disabled or not Path(archive_path).exists():
-        return []
-    
-    with open(archive_path, 'r', encoding='utf-8') as f:
-        # id, date, author, track, filepath (only filename if from legacy archive)
-        entries = f.readlines()
-    
-    if dir_path or not Zotify.UPDATE_ARCHIVE:
+    def read_entries(self) -> list[str]:
+        if self.disabled:   return []
+        
+        with open(self.filepath, 'r', encoding='utf-8') as f:
+            entries = f.readlines()
+        if self._global and self.UPDATE_ARCHIVE:
+            self.UPDATE_ARCHIVE = False
+            self.upgrade_legacy_archive(entries)
+            return self.read_entries()
         return entries
     
-    upgrade_legacy_archive(entries, archive_path)
-    Zotify.UPDATE_ARCHIVE = False
+    def ids(self) -> list[str]:
+        return [e.strip().split('\t')[0] for e in self.read_entries()]
     
-    return get_archived_entries(dir_path)
-
-
-def get_archived_item_ids(dir_path: PurePath | None = None) -> list[str]:
-    """ Returns list of downloaded item_ids """
-    entries = get_archived_entries(dir_path)
-    item_ids = [entry.strip().split('\t')[0] for entry in entries]
-    return item_ids
-
-
-def get_archived_item_paths(dir_path: PurePath | None = None) -> list[PurePath]:
-    """ Returns list of downloaded item_paths """
-    entries = get_archived_entries(dir_path)
-    item_paths = [PurePath(entry.strip().split('\t')[-1]) for entry in entries]
-    return item_paths
-
-
-def get_archived_path_from_id(item_id: str, dir_path: PurePath | None = None) -> PurePath:
-    return get_archived_item_paths(dir_path)[get_archived_item_ids(dir_path).index(item_id)]
-
-
-def add_to_archive(item_id: str, timestamp: str, author_name: str, item_name: str, item_path: PurePath, 
-                   archive_path: PurePath, mode: str) -> None:
-    """ Adds item record to the song archive at archive_path """
+    def paths(self) -> list[PurePath]:
+        return [PurePath(e.strip().split('\t')[-1]) for e in self.read_entries()]
     
-    if not timestamp:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(archive_path, mode, encoding='utf-8') as file:
-        file.write(f'{item_id}\t{timestamp}\t{author_name}\t{item_name}\t{item_path}\n')
-
-
-def add_obj_to_song_archive(obj, path: PurePath, dir_path: PurePath | None = None) -> None:
-    if dir_path:
-        archive_path = dir_path / '.song_ids'
-        disabled = Zotify.CONFIG.get_disable_dir_archives() or not Path(archive_path).exists()
-        mode = 'a' # should already exist from create_download_directory(), so only append mode
-    else:
-        archive_path = Zotify.CONFIG.get_song_archive_location()
-        disabled = Zotify.CONFIG.get_disable_song_archive()
-        mode = 'a' if Path(archive_path).exists() else 'w'
+    def id_path(self, item_id: str) -> PurePath:
+        return self.paths()[self.ids().index(item_id)]
     
-    if disabled: return
+    def add_entry(self, item_id: str, timestamp: str, author_name: str, item_name: str, item_path: PurePath, mode: str) -> None:
+        if not timestamp:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        entry = f'{item_id}\t{timestamp}\t{author_name}\t{item_name}\t{item_path}\n'
+        with open(self.filepath, mode, encoding='utf-8') as file:
+            file.write(entry)
     
-    from zotify.api import Track, Episode
-    obj: Track | Episode = obj
-    author_name = obj.artists[0].name if isinstance(obj, Track) else obj.show.publisher
-    item_name = obj.name if isinstance(obj, Track) else str(obj)
-    add_to_archive(obj.id, "", author_name, item_name, path,
-                   archive_path, mode)
+    def add_obj(self, obj, item_path: PurePath) -> None:
+        if self.disabled: return
+        from zotify.api import Track, Episode
+        obj: Track | Episode = obj
+        author_name = obj.artists[0].name if isinstance(obj, Track) else obj.show.publisher
+        item_name = obj.name if isinstance(obj, Track) else str(obj)
+        self.add_entry(obj.id, "", author_name, item_name, item_path, self.mode)
 
 
 # M3U8 Playlist File Utils

@@ -494,9 +494,9 @@ class Content(HierarchicalNode):
             parent_stack = ps if Zotify.CONFIG.get_optimized_dl() else ParentStack(ps.copy())
             self.real_filepaths[parent_stack] = path
             if not self.in_global_archive:
-                add_obj_to_song_archive(self, path)
-            if isinstance(self, Track) and not self.id in get_archived_item_ids(path.parent):
-                add_obj_to_song_archive(self, path, path.parent)
+                SongArchive().add_obj(self, path)
+            if isinstance(self, Track) and not self.id in SongArchive(path.parent).ids():
+                SongArchive(path.parent).add_obj(self, path)
 
 
 class DLContent(Content):
@@ -506,7 +506,7 @@ class DLContent(Content):
     def __init__(self, uri: str):
         super().__init__(uri)
         self.dl_status = ""
-        self.in_global_archive = self.id in get_archived_item_ids()
+        self.in_global_archive = self.id in SongArchive().ids()
         self.real_filepaths: dict[ParentStack, PurePath] = {}
         self._clone_to: set[ParentStack] = set()
         
@@ -537,7 +537,7 @@ class DLContent(Content):
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
         def handle_archive(dir_path: PurePath | None):
-            archived_path = get_archived_path_from_id(self.id, dir_path)
+            archived_path = SongArchive(dir_path).id_path(self.id)
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} DOWNLOADED PREVIOUSLY)\n'
                                                      f'FILE: "{self.rel_path(archived_path)}"')
             self.mark_downloaded(parent_stack, archived_path)
@@ -550,18 +550,18 @@ class DLContent(Content):
                 if file_match.stat().st_size:
                     path_exists = True
                     break
-        in_dir_archive = self.id in get_archived_item_ids(path.parent)
+        in_dir_archive = self.id in SongArchive(path.parent).ids()
         if not Zotify.CONFIG.get_optimized_dl():
             Printer.debug(f'Duplicate Check @ "{path}"\n' +
                           f'File Already Exists: {path_exists}\n' +
                           f'id in Local Archive: {in_dir_archive}\n' +
                           f'id in Global Archive: {self.in_global_archive}')
         
-        if path_exists and Zotify.CONFIG.get_skip_existing() and Zotify.CONFIG.get_disable_dir_archives():
+        if path_exists and Zotify.CONFIG.get_skip_existing() and Zotify.CONFIG.get_no_dir_archives():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.rel_path(path)}" (FILE ALREADY EXISTS)')
             self.mark_downloaded(parent_stack, path)
             return True
-        elif in_dir_archive and Zotify.CONFIG.get_skip_existing() and not Zotify.CONFIG.get_disable_dir_archives():
+        elif in_dir_archive and Zotify.CONFIG.get_skip_existing() and not Zotify.CONFIG.get_no_dir_archives():
             handle_archive(path.parent)
             return True
         elif self.in_global_archive and Zotify.CONFIG.get_skip_previously_downloaded():
@@ -1661,8 +1661,8 @@ class VerifyLibrary(Query):
     def fetch_verifiable_metadata(self) -> tuple[dict[str, list[PurePath]], list[list[dict]]]:
         """ ONLY WORKS WITH ARCHIVED TRACKS (THEORETICALLY GUARANTEES METADATA FETCH) """
         # prioritize most recent paths first
-        archived_ids = get_archived_item_ids()[::-1]
-        archived_filenames_or_paths = get_archived_item_paths()[::-1]
+        archived_ids = SongArchive().ids()[::-1]
+        archived_filenames_or_paths = SongArchive().paths()[::-1]
         
         paths_per_track: dict[str, list[PurePath]] = {}
         

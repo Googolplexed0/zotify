@@ -222,7 +222,9 @@ class Config:
             cls.Values[PRINT_SPLASH] = False
         
         # Check update_archive
-        Zotify.UPDATE_ARCHIVE = cls.debug() or args.update_archive or args.verify_library
+        if cls.debug() or args.update_archive or args.verify_library:
+            from zotify.utils import SongArchive
+            SongArchive.UPDATE_ARCHIVE = True
     
     @classmethod
     def get_default_json(cls) -> dict:
@@ -438,11 +440,11 @@ class Config:
         return PurePath(song_archive_dir / '.song_archive')
     
     @classmethod
-    def get_disable_song_archive(cls) -> bool:
+    def get_no_song_archive(cls) -> bool:
         return cls.get(DISABLE_SONG_ARCHIVE)
     
     @classmethod
-    def get_disable_dir_archives(cls) -> bool:
+    def get_no_dir_archives(cls) -> bool:
         return cls.get(DISABLE_DIRECTORY_ARCHIVES)
     
     @classmethod
@@ -640,7 +642,6 @@ class Zotify:
     # DYNAMICS
     TOTAL_API_CALLS         : int   = None
     DATETIME_LAUNCH         : str   = None
-    UPDATE_ARCHIVE          : bool  = False
     LEGACY_API_ENDOINTS     : bool  = True
     FORCE_LIBRE_METADATA    : bool  = False
     FORCE_STREAM_API_CALLS  : bool  = False
