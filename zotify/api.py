@@ -319,6 +319,12 @@ class Content(HierarchicalNode):
                         self.needs_expansion = episodes[NEXT] is not None
                     else:
                         self.needs_expansion = True
+
+                external_ids                : list[dict]        = resp.get(EXTERNAL_ID)
+                if external_ids:
+                    for id in external_ids:
+                        if id.get(TYPE) == ISRC:
+                            self.isrc: str = id[ID]
                 
                 owner_username              : str               = resp.get(OWNER_USERNAME)
                 if owner_username:
@@ -721,6 +727,7 @@ class Track(DLContent):
         self.track_number   : str                   = None
         self.album          : Album                 = None
         self.artists        : list[Artist]          = None
+        self.isrc           : str                   = None
         
         # only fetched if config set
         self.genres         : list[str]             = None
@@ -767,6 +774,9 @@ class Track(DLContent):
         if Zotify.CONFIG.get_disc_track_totals():
             update_repl(self.album.total_tracks,    "{total_tracks}")
             update_repl(self.album.total_discs,     "{total_discs}")
+
+        if self.isrc:
+            update_repl(self.isrc,                  "{isrc}")
         
         if isinstance(parent, Playlist):
             playlist_number = str(parent.tracks_or_eps.index(self) + 1).zfill(2)
@@ -885,6 +895,7 @@ class Track(DLContent):
         # Unreliable Tags
         custom_tag(         TRACKID,        self.id)
         custom_tag(         URI,            self.uri)
+        custom_tag(         ISRC,           self.isrc)
         
         if self.album and Zotify.CONFIG.get_disc_track_totals():
             set_tag_safe(TOTALTRACKS,       self.album.total_tracks)

@@ -256,6 +256,7 @@ The value is relative to the `ROOT_PATH` directory and may contain the following
 | `{track_number}` or `{disc_number}`    | (track, album, or artist only) The track/disc number         |
 | `{album}`                              | (track, album, or artist only) The album's name              |
 | `{album_artist}` or `{album_artists}`  | (track, album, or artist only) The album's artist(s)         |
+| `{isrc}`                               | (track, album, or artist only) The track's ISRC code         |
 | `{playlist}`                           | (playlist only) The playlist's name                          |
 | `{playlist_num}`                       | (playlist only) Incrementing track number                    |
 | `{ITEMTYPE_id}`                        | (only when item relevant) The specific item's id             |
