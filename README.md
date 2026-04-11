@@ -244,20 +244,21 @@ The options `CREDENTIALS_LOCATION` and `SONG_ARCHIVE_LOCATION` use the following
 
 ## Output Formatting
 
-With the option `OUTPUT` (or the commandline parameter `--output`) you can specify the pattern for the file structure of downloaded items (not podcasts).
+With the option `OUTPUT` (or the commandline parameter `--output`) you can specify the pattern for the file structure of downloaded tracks (not podcasts).
 The value is relative to the `ROOT_PATH` directory and may contain the following placeholders (`ITEMTYPE` may be `track`, `album`, `artist`, or `playlist`):
 
 | Placeholder                            | Description                                                  |
 |----------------------------------------|--------------------------------------------------------------|
-| `{id}`                                 | The downloaded item's id                                     |
-| `{name}`                               | The downloaded item's name                                   |
-| `{artist}` or `{artists}`              | The downloaded item's artist(s)                              |
-| `{date}` or  `{year}`                  | The downloaded item's release date/year                      |
-| `{track_number}` or `{disc_number}`    | (track, album, or artist only) The track/disc number         |
-| `{album}`                              | (track, album, or artist only) The album's name              |
-| `{album_artist}` or `{album_artists}`  | (track, album, or artist only) The album's artist(s)         |
+| `{id}`                                 | The downloaded track's id                                    |
+| `{name}`                               | The downloaded track's name                                  |
+| `{artist}` / `{artists}`               | The downloaded track's artist(s)                             |
+| `{date}` / `{year}`                    | The downloaded track's release date/year                     |
+| `{track_number}` / `{disc_number}`     | The downloaded track's track/disc number                     |
+| `{eac}` / `{isrc}` / `{upc}`           | The downloaded track's EAC/ISRC/UPC code                     |
+| `{album}`                              | The album's name                                             |
+| `{album_artist}` / `{album_artists}`   | The album's artist(s)                                        |
 | `{playlist}`                           | (playlist only) The playlist's name                          |
-| `{playlist_num}`                       | (playlist only) Incrementing track number                    |
+| `{playlist_num}`                       | (playlist only) Incrementing item number                     |
 | `{ITEMTYPE_id}`                        | (only when item relevant) The specific item's id             |
 | `{ITEMTYPE_name}`                      | (only when item relevant) The specific item's name           |
 
