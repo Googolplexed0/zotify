@@ -319,12 +319,15 @@ class Content(HierarchicalNode):
                         self.needs_expansion = episodes[NEXT] is not None
                     else:
                         self.needs_expansion = True
-
-                external_ids                : list[dict]        = resp.get(EXTERNAL_ID)
-                if external_ids:
-                    for id in external_ids:
-                        if id.get(TYPE) == ISRC:
-                            self.isrc: str = id[ID]
+                
+                external_id                 : list[dict]        = resp.get(EXTERNAL_ID)
+                external_ids                : dict              = resp.get(EXTERNAL_IDS)
+                if external_id or external_ids:
+                    if external_id:
+                        external_ids = {eid.get(TYPE): eid.get(ID) for eid in external_id}
+                    self.ean                : str               = external_ids.get(EAN)
+                    self.isrc               : str               = external_ids.get(ISRC)
+                    self.upc                : str               = external_ids.get(UPC)
                 
                 owner_username              : str               = resp.get(OWNER_USERNAME)
                 if owner_username:
@@ -724,10 +727,12 @@ class Track(DLContent):
     def __init__(self, uri: str) -> None:
         super().__init__(uri)
         self.disc_number    : int                   = None
+        self.ean            : str                   = None # European Article Number
+        self.isrc           : str                   = None # International Standard Recording Code
         self.track_number   : str                   = None
+        self.upc            : str                   = None # Universal Product Code (Type-A)
         self.album          : Album                 = None
         self.artists        : list[Artist]          = None
-        self.isrc           : str                   = None
         
         # only fetched if config set
         self.genres         : list[str]             = None
@@ -756,6 +761,9 @@ class Track(DLContent):
         update_repl(self.name,          "{name}", "{song_name}", "{track_name}", "{song_title}", "{track_title}")
         update_repl(self.track_number,  "{track_number}", "{song_number}", "{track_num}", "{song_num}", "{album_number}", "{album_num}")
         update_repl(self.disc_number,   "{disc_number}", "{disc_num}")
+        update_repl(self.ean,           "{ean}")
+        update_repl(self.isrc,          "{isrc}")
+        update_repl(self.upc,           "{upc}")
         
         if self.artists:
             artists_names = conv_artist_format(self.artists, FORCE_NO_LIST=True)
@@ -774,9 +782,6 @@ class Track(DLContent):
         if Zotify.CONFIG.get_disc_track_totals():
             update_repl(self.album.total_tracks,    "{total_tracks}")
             update_repl(self.album.total_discs,     "{total_discs}")
-
-        if self.isrc:
-            update_repl(self.isrc,                  "{isrc}")
         
         if isinstance(parent, Playlist):
             playlist_number = str(parent.tracks_or_eps.index(self) + 1).zfill(2)
@@ -895,7 +900,9 @@ class Track(DLContent):
         # Unreliable Tags
         custom_tag(         TRACKID,        self.id)
         custom_tag(         URI,            self.uri)
+        custom_tag(         EAN,            self.ean)
         custom_tag(         ISRC,           self.isrc)
+        custom_tag(         UPC,            self.upc)
         
         if self.album and Zotify.CONFIG.get_disc_track_totals():
             set_tag_safe(TOTALTRACKS,       self.album.total_tracks)
@@ -1344,11 +1351,14 @@ class Album(Container):
         self.album_type     : str                   = None
         self.compilation    : bool                  = None
         self.duration_ms    : int                   = None
+        self.ean            : str                   = None # European Article Number
         self.image_url      : str                   = None
+        self.isrc           : str                   = None # International Standard Recording Code
         self.label          : str                   = None
         self.release_date   : str                   = None
         self.total_discs    : int                   = None
         self.total_tracks   : str                   = None
+        self.upc            : str                   = None # Universal Product Code (Type-A)
         self.year           : str                   = None
         self.artists        : list[Artist]          = None
         self.tracks         : list[Track]           = self._main_items
