@@ -1,4 +1,6 @@
+import ffmpy
 import os
+import subprocess
 import re
 import time
 from datetime import datetime, timezone
@@ -236,6 +238,22 @@ def pct_error(act: float | int, expct: float | int) -> float:
     return abs(act - expct) / expct
 
 
+def run_ffm(in_path: PurePath, in_cmd: list[str] | None, out_path: PurePath | None = None, out_cmd: list[str] | None = None) -> str:
+        FFclass = ffmpy.FFmpeg if out_path else ffmpy.FFprobe
+        overwrite = ['-y'] if out_path else []
+        ff_m = FFclass(
+            global_options=['-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'] + overwrite,
+            inputs={in_path: in_cmd},
+            outputs={out_path: out_cmd} if out_path else None
+        )
+        stdout, stderr = ff_m.run(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        loggable_output = ("STDOUT:\n" + (stdout.decode().replace('\r\n', '\n') if stdout else ""),
+                           "STDERR:\n" + (stderr.decode().replace('\r\n', '\n') if stderr else ""))
+        Printer.logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
+        if out_path and Path(in_path).exists(): Path(in_path).unlink()
+        return stdout.decode().strip()
+
+
 # Time Utils
 def fmt_duration(duration: float | int, unit_conv: tuple[int] = (60, 60), connectors: tuple[str] = (":", ":"), smallest_unit: str = "s", ALWAYS_ALL_UNITS: bool = False) -> str:
     """ Formats a duration to a time string, defaulting to seconds -> hh:mm:ss format """
@@ -381,8 +399,7 @@ class M3U8():
     
     def dynamic_dir(self, cont_paths: list[PurePath | None]) -> PurePath | None:
         paths = {path for path in cont_paths if isinstance(path, PurePath) and path.is_relative_to(self.cont_type._path_root)}
-        dir = get_common_dir(paths)
-        return dir
+        return get_common_dir(paths) if any(paths) else None
     
     @staticmethod
     def fetch_songs(m3u8_path: PurePath) -> list[str]:

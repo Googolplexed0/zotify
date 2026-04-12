@@ -541,9 +541,8 @@ class Config:
         return cls.get(MD_ARTISTDELIMITER)
     
     @classmethod
-    def get_search_query_size(cls) -> str:
-        size = cls.get(SEARCH_QUERY_SIZE)
-        return str(size) if size else "10"
+    def get_search_query_size(cls) -> int:
+        return cls.get(SEARCH_QUERY_SIZE)
     
     @classmethod
     def get_strict_library_verify(cls) -> bool:
@@ -840,7 +839,8 @@ class Zotify:
             if resp.ok and resp.status_code == 200 and not responsejson.get(ERROR):
                 return responsejson
             elif not expectFail:
-                Printer.hashtaged(PrintChannel.WARNING, f'API ERROR (TRY {tryCount}) - RETRYING\n' +
+                retry_text = f"(RETRY {tryCount}) " if tryCount else ""
+                Printer.hashtaged(PrintChannel.WARNING, f'API ERROR {retry_text}- RETRYING\n' +
                                                         f'Status {responsejson.get(ERROR, {}).get(STATUS, "Unknown")}:  '+
                                                         f'{responsejson.get(ERROR, {}).get(MESSAGE, "No message provided")}')
             
@@ -857,33 +857,29 @@ class Zotify:
         return {}
     
     @classmethod
-    def invoke_url_nextable(cls, url: str, response_key: str = ITEMS, stop: int = 0, limit: int = 50, offset: int = 0,
-                            stripper: str | tuple[str] | None = None, params: dict | None = None) -> list[dict] | dict[list[dict]]:
-        p = {LIMIT: limit, OFFSET: offset}
-        if params: p.update(params)
-        resp = cls.invoke_url(url, p)
+    def invoke_url_nextable(cls, url: str, stripper: tuple[str] | str = None, max: int = 0, params: dict = {}) -> list[dict] | dict[str, list[dict]]:
         
-        items: dict[str | None, list[dict]] = dict()
-        strippers = stripper if isinstance(stripper, tuple) else (stripper,)
-        for strip in strippers:
+        def handle_next(resp: dict, strip: str | None, total: int = 0) -> list[dict]:
             nextable: dict = resp.get(strip, resp)
-            
-            if response_key not in nextable:
-                Printer.hashtaged(PrintChannel.WARNING, f'KEY "{response_key}" NOT FOUND IN API RESPONSE: {nextable}')
+            items: list[dict] = nextable.get(ITEMS)
+            if not items:
+                p = "PAGINATED " if total > 0 else ""
+                Printer.hashtaged(PrintChannel.WARNING, f'NO ITEMS FOUND IN {p}API RESPONSE')
+                Printer.debug(resp)
                 return []
-            
-            items[strip] = nextable[response_key]
-            while nextable.get(NEXT) is not None and not (stop and len(items[strip]) >= stop):
-                nextable = cls.invoke_url(nextable[NEXT])
-                if len(strippers) > 1: nextable: dict = nextable.get(strip, nextable)
-                if response_key not in nextable:
-                    Printer.hashtaged(PrintChannel.WARNING, f'KEY "{response_key}" NOT FOUND IN PAGINATED API RESPONSE: {nextable}')
-                    break
-                items[strip].extend(nextable[response_key])
-            if stop:
-                items[strip] = items[strip][:stop]
+            elif nextable.get(NEXT) is None or (max and total + len(items) >= max):
+                return items[:max-total]
+            return items + handle_next(cls.invoke_url(nextable[NEXT]), strip, total + len(items))
         
-        return items[strip] if len(strippers) == 1 and not isinstance(stripper, tuple) else items
+        resp = cls.invoke_url(url, {LIMIT: 50, OFFSET: 0} | params)
+        if isinstance(stripper, tuple) and not resp:
+            Printer.hashtaged(PrintChannel.WARNING, 'SEARCH FAILED\n' + 
+                                                    'IF AN API ERROR INDICATED "Invalid Limit",\n' +
+                                                    'RECOMMENDED TO SET CONFIG "API_CLIENT_LEGACY = False"')
+            return {}
+        elif isinstance(stripper, tuple): # resp is of form {TYPE : nextable_resp}, only used in search
+            return {strip: handle_next(resp, strip) for strip in stripper}
+        return handle_next(resp, stripper) if resp else []
     
     @classmethod
     def invoke_url_bulk(cls, url: str, bulk_items: list[str], stripper: str, limit: int = 50) -> list[dict]:

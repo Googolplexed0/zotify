@@ -1,10 +1,11 @@
 from __future__ import annotations
-import platform
 from contextlib import contextmanager
 from enum import Enum
+from functools import partial
 from itertools import cycle
 from mutagen import FileType
 from os import get_terminal_size, system
+from platform import system
 from pprint import pformat
 from re import split, escape
 from tabulate import tabulate
@@ -13,6 +14,7 @@ from time import sleep
 from tqdm import tqdm
 from tqdm.auto import tqdm as tqdmauto
 from traceback import TracebackException
+from urllib3 import HTTPResponse
 
 from zotify.const import *
 
@@ -54,6 +56,7 @@ class Printer:
     ACTIVE_LOADER: Loader | None = None
     ACTIVE_PBARS: list[tqdm] = []
     
+    # Helpers
     @staticmethod
     def _term_cols() -> int:
         try:
@@ -63,9 +66,66 @@ class Printer:
         return columns
     
     @staticmethod
-    def pretty(obj) -> str:
+    def _prefixes(msg: str, category: PrintCategory, channel: PrintChannel) -> tuple[str, PrintCategory]:
+        if category is PrintCategory.HASHTAG:
+            if channel in {PrintChannel.WARNING, PrintChannel.ERROR, PrintChannel.API_ERROR,
+                           PrintChannel.SKIPPING,}:
+                msg = channel.name + ":  " + msg
+            msg =  msg.replace("\n", "   ###\n###   ") + "   ###"
+            if channel is PrintChannel.DEBUG:
+                msg = category.value.replace("\n", "", 1) + msg
+                category = PrintCategory.DEBUG
+        elif category is PrintCategory.JSON:
+            msg = "#" * (Printer._term_cols()-1) + "\n" + msg + "\n" + "#" * Printer._term_cols()
+        
+        if Printer.LAST_PRINT is PrintCategory.DEBUG and category is PrintCategory.DEBUG:
+            pass
+        elif Printer.LAST_PRINT in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE} and category is PrintCategory.LOADER:
+            msg = "\n" + PrintCategory.LOADER_CYCLE.value + msg
+        elif Printer.LAST_PRINT in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE} and "LOADER" not in category.name:
+            msg = category.value.replace("\n", "", 1) + msg
+        else:
+            msg = category.value + msg
+        
+        return msg, category
+    
+    @staticmethod
+    def _obj_shrink(obj: list | tuple | dict) -> dict:
+        """ Shrinks API objects to remove data unnecessary data for debugging """
+        
+        def shrink(k: str) -> str:
+            if k in {AVAIL_MARKETS, IMAGES}:
+                return "LIST REMOVED FOR BREVITY"
+            elif k in {EXTERNAL_URLS, PREVIEW_URL}:
+                return "URL REMOVED FOR BREVITY"
+            elif k in {"_children"}:
+                return "SET REMOVED FOR BREVITY"
+            elif k in {"metadata_block_picture", "APIC:0", "covr"}:
+                return "BYTES REMOVED FOR BREVITY"
+            return None
+        
+        if isinstance(obj, list) and len(obj) > 0:
+            obj = [Printer._obj_shrink(item) for item in obj]
+        
+        elif isinstance(obj, tuple):
+            if len(obj) == 2 and isinstance(obj[0], str):
+                if shrink(obj[0]):
+                    obj = (obj[0], shrink(obj[0]))
+        
+        elif isinstance(obj, (dict, FileType)):
+            for k, v in obj.items():
+                if shrink(k):
+                    obj[k] = shrink(k)
+                else:
+                    obj[k] = Printer._obj_shrink(v)
+        
+        return obj
+    
+    # Primatives
+    @staticmethod
+    def pretty(obj, shrink: bool = False) -> str:
         if not isinstance(obj, str):
-            return pformat(obj, indent=2)
+            return pformat(Printer._obj_shrink(obj) if shrink else obj)
         
         if "http" in obj:
             delims = "/?&="
@@ -103,63 +163,6 @@ class Printer:
             else:
                 Zotify.LOGGER.info(msg)
     
-    @staticmethod
-    def _api_shrink(obj: list | tuple | dict) -> dict:
-        """ Shrinks API objects to remove data unnecessary data for debugging """
-        
-        def shrink(k: str) -> str:
-            if k in {AVAIL_MARKETS, IMAGES}:
-                return "LIST REMOVED FOR BREVITY"
-            elif k in {EXTERNAL_URLS, PREVIEW_URL}:
-                return "URL REMOVED FOR BREVITY"
-            elif k in {"_children"}:
-                return "SET REMOVED FOR BREVITY"
-            elif k in {"metadata_block_picture", "APIC:0", "covr"}:
-                return "BYTES REMOVED FOR BREVITY"
-            return None
-        
-        if isinstance(obj, list) and len(obj) > 0:
-            obj = [Printer._api_shrink(item) for item in obj]
-        
-        elif isinstance(obj, tuple):
-            if len(obj) == 2 and isinstance(obj[0], str):
-                if shrink(obj[0]):
-                    obj = (obj[0], shrink(obj[0]))
-        
-        elif isinstance(obj, (dict, FileType)):
-            for k, v in obj.items():
-                if shrink(k):
-                    obj[k] = shrink(k)
-                else:
-                    obj[k] = Printer._api_shrink(v)
-        
-        return obj
-    
-    @staticmethod
-    def _print_prefixes(msg: str, category: PrintCategory, channel: PrintChannel) -> tuple[str, PrintCategory]:
-        
-        if category is PrintCategory.HASHTAG:
-            if channel in {PrintChannel.WARNING, PrintChannel.ERROR, PrintChannel.API_ERROR,
-                           PrintChannel.SKIPPING,}:
-                msg = channel.name + ":  " + msg
-            msg =  msg.replace("\n", "   ###\n###   ") + "   ###"
-            if channel is PrintChannel.DEBUG:
-                msg = category.value.replace("\n", "", 1) + msg
-                category = PrintCategory.DEBUG
-        elif category is PrintCategory.JSON:
-            msg = "#" * (Printer._term_cols()-1) + "\n" + msg + "\n" + "#" * Printer._term_cols()
-        
-        if Printer.LAST_PRINT is PrintCategory.DEBUG and category is PrintCategory.DEBUG:
-            pass
-        elif Printer.LAST_PRINT in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE} and category is PrintCategory.LOADER:
-            msg = "\n" + PrintCategory.LOADER_CYCLE.value + msg
-        elif Printer.LAST_PRINT in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE} and "LOADER" not in category.name:
-            msg = category.value.replace("\n", "", 1) + msg
-        else:
-            msg = category.value + msg
-        
-        return msg, category
-    
     @classmethod
     @contextmanager
     def pause_loader(cls, ignore_pause: bool = False):
@@ -178,7 +181,7 @@ class Printer:
             if Zotify.CONFIG.get_standard_interface():
                 return
         if channel == PrintChannel.MANDATORY or Zotify.CONFIG.get(channel.value):
-            msg, category = Printer._print_prefixes(msg, category, channel)
+            msg, category = Printer._prefixes(msg, category, channel)
             with Printer.pause_loader(category in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE}):
                 for line in str(msg).splitlines():
                     if end == "\n":
@@ -198,21 +201,21 @@ class Printer:
     
     # Print Wrappers
     @staticmethod
-    def json_dump(obj: dict, channel: PrintChannel = PrintChannel.ERROR, category: PrintCategory = PrintCategory.JSON) -> None:
-        obj = Printer._api_shrink(obj)
-        Printer.new_print(channel, Printer.pretty(obj), category)
-    
-    @staticmethod
     def debug(*msg: tuple[str | object]) -> None:
-        for m in msg:
-            if isinstance(m, str):
-                Printer.new_print(PrintChannel.DEBUG, m, PrintCategory.DEBUG)
-            else:
-                Printer.json_dump(m, PrintChannel.DEBUG, PrintCategory.DEBUG)
+        with Printer.pause_loader():
+            for m in msg:
+                if isinstance(m, str):
+                    Printer.new_print(PrintChannel.DEBUG, m, PrintCategory.DEBUG)
+                else:
+                    Printer.new_print(PrintChannel.DEBUG, Printer.pretty(m), PrintCategory.DEBUG)
     
     @staticmethod
     def hashtaged(channel: PrintChannel, msg: str) -> None:
         Printer.new_print(channel, msg, PrintCategory.HASHTAG)
+    
+    @staticmethod
+    def json_dump(channel: PrintChannel, obj: dict) -> None:
+        Printer.new_print(channel, Printer.pretty(obj), PrintCategory.JSON)
     
     @staticmethod
     def traceback(e: Exception) -> None:
@@ -236,7 +239,7 @@ class Printer:
     @staticmethod
     def clear() -> None:
         """ Clear the console window """
-        if platform.system() == WINDOWS_SYSTEM:
+        if system() == WINDOWS_SYSTEM:
             system('cls')
         else:
             system('clear')
@@ -297,7 +300,8 @@ class Printer:
                 if not pbar_stack[-1].disable: Printer.ACTIVE_PBARS.pop()
     
     @staticmethod
-    def pbar_stream(stream, desc: str = "", total: int | None = None):
+    def pbar_stream(stream: HTTPResponse, total: int | None = None, desc: str = ""):
+        stream.read = partial(stream.read, decode_content=True)  # Decompress if needed
         return tqdmauto.wrapattr(stream, "read", total=total, desc=desc)
 
 

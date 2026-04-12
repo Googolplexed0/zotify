@@ -1,10 +1,7 @@
 from __future__ import annotations
-import ffmpy
-import functools
 import music_tag
 import requests
-import subprocess
-import uuid
+from uuid import uuid4
 
 from zotify.config import Zotify, Streamer
 from zotify.const import *
@@ -60,7 +57,7 @@ class Content(HierarchicalNode):
         self.uri = uri
         super().__init__()
         self.id = self.uri.split(":", 1)[-1]
-        self.local_file = self.id.count(":") > 0
+        self.is_local = self.id.count(":") > 0
         
         self.downloaded = False
         self.hasMetadata = False
@@ -196,13 +193,13 @@ class Content(HierarchicalNode):
                         self.needs_recursion = True
                     
                     # handle local files
-                    if not name: name = f"noname-{uuid.uuid4()}"
+                    if not name: name = f"noname-{uuid4()}"
                     if not uri:  uri = f":local:{type_attr_and_ind.lower()}:{name}:::"
                     item[URI] = uri
                 
                 def unknown_user(owner_username: str | None) -> dict | None:
                     if not owner_username: return None
-                    return { URI : f":{USER}:{uuid.uuid4()}",
+                    return { URI : f":{USER}:{uuid4()}",
                              TYPE: USER,
                              DISPLAY_NAME: owner_username   }
                 
@@ -340,18 +337,12 @@ class Content(HierarchicalNode):
                 
                 playlist_items              : dict              = resp.get(ITEMS)
                 if playlist_items and isinstance(obj, Playlist):
+                    self.length             : int               = resp.get(TOTAL)
                     items                   : list[dict]        = playlist_items.get(ITEMS)
                     if items:
-                        tracks_eps_empty: list[dict] = [item.get(ITEM) for item in items]
-                        for i, track_or_ep, item in zip(range(len(items)), tracks_eps_empty, items):
-                            if track_or_ep is None: 
-                                Printer.debug(f'Playlist Item {i} ({IS_LOCAL} == {item.get(IS_LOCAL)})\n' +
-                                               'Has Playlist Entry but no Metadata:\n' + 
-                                                Printer.pretty(item))
-                            ensure_uri(track_or_ep, track_or_ep.get(TYPE, TRACK) + str(i+len(obj.tracks_or_eps)+1))
-                            track_or_ep[ADDED_AT] = item.get(ADDED_AT)
-                            track_or_ep[ADDED_BY] = item.get(ADDED_BY)
-                            track_or_ep[IS_LOCAL] = item.get(IS_LOCAL)
+                        tracks_eps_empty = obj.unwrap(items)
+                        for i, t_or_e in enumerate(tracks_eps_empty):
+                            ensure_uri(t_or_e, TRACK + str(obj.ccount+i+1))
                         self.tracks_or_eps = obj.parse_relatives(tracks_eps_empty, (Track, Episode))
                         if not any(self.tracks_or_eps):
                             Printer.hashtaged(PrintChannel.WARNING,
@@ -405,7 +396,7 @@ class Content(HierarchicalNode):
                 if tracks and isinstance(obj, Album):
                     items                   : list[dict]        = tracks.get(ITEMS)
                     if items:
-                        for i, t in enumerate(items): ensure_uri(t, TRACK + str(i+len(obj.tracks)+1))
+                        for i, t in enumerate(items): ensure_uri(t, TRACK + str(obj.ccount+i+1))
                         self.tracks: list[Track] = obj.parse_relatives(items, Track)
                         self.needs_expansion = tracks.get(NEXT) is not None
                         if not self.needs_expansion:
@@ -433,7 +424,7 @@ class Content(HierarchicalNode):
                 setattr(self, ID, v)
             elif isinstance(self, Container) and k in self.__dict__ and getattr(self, k) == getattr(self, "_main_items"):
                 self._main_items.extend(v)
-            elif relative and k in {ADDED_AT, ADDED_BY, ALBUM_GROUP, IS_LOCAL}:
+            elif relative and k in {ADDED_AT, ADDED_BY, ALBUM_GROUP}:
                 relational_attr: dict[Container, str | bool | User] = getattr(self, k)
                 relational_attr.update({relative: v})
             elif not self.hasMetadata or getattr(self, k, None) is None:
@@ -448,11 +439,12 @@ class Content(HierarchicalNode):
         for i, resp in enumerate(resps):
             if not resp or not resp.get(TYPE) or not resp.get(URI):
                 reason = "EXPECTED RESPONSE FOR" if not resp else (f"{TYPE} OF" if not resp.get(TYPE) else f"{URI} OF")
+                relation = "PARENT" if make_parent else f"CHILD #{i+1 if not isinstance(self, Container) else self.ccount+i+1}"
                 with Printer.pause_loader():
                     Printer.hashtaged(PrintChannel.WARNING, f'MISSING {reason} RELATED METADATA OBJECT\n' +
-                                                            f'PARSING {"PARENT" if make_parent else "CHILD"} #{i} OF {self.clsn} ({self.id})\n' +
+                                                            f'PARSING {relation} OF {self.clsn} ({self.id})\n' +
                                                             f'EXPECTED RELATIVE TYPES: {[c.clsn for c in RelativeClasses]}')
-                    if resp: Printer.json_dump(resp, PrintChannel.WARNING)
+                    if resp: Printer.json_dump(PrintChannel.WARNING, resp)
                 new_relatives.append(None)
                 continue
             RelativeClass: type[Content | Container] = RelativeClasses[type_selector.index(resp[TYPE])]
@@ -579,6 +571,9 @@ class DLContent(Content):
         
         elif self.regex_check(skip_debug_print=Zotify.CONFIG.get_optimized_dl()):
             return True
+        elif self.is_local:
+            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} IS A LOCAL FILE)')
+            return True
         elif not self.is_playable:
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} IS UNAVAILABLE)')
             return True
@@ -614,28 +609,13 @@ class DLContent(Content):
         return fmt_duration(time.time() - time_start)
     
     def get_audio_duration(self, path: PurePath) -> float:
-        """ Returns the downloaded file's duration in seconds """
-        ff_m = ffmpy.FFprobe(
-            global_options=['-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'],
-            inputs={path: ["-show_entries", "format=duration"]},
-        )
-        stdout, stderr = ff_m.run(stdout=subprocess.PIPE)
-        loggable_output = [stdout.decode() if stdout else "",
-                           stderr.decode() if stderr else ""]
-        Printer.logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
-        duration = re.search(r'[\D]=([\d\.]*)', str(stdout)).groups()[0]
-        return float(duration)
+        stdout = run_ffm(path, ["-show_entries", "format=duration"])
+        duration = re.search(r'[\D]=([\d\.]*)', stdout).groups()[0]
+        return float(duration) # in seconds
     
     def get_audio_codec(self, path: PurePath) -> str:
-        ff_m = ffmpy.FFprobe(
-            global_options=['-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'],
-            inputs={path: ["-show_entries", "stream=codec_name"]},
-        )
-        stdout, stderr = ff_m.run(stdout=subprocess.PIPE)
-        loggable_output = [stdout.decode() if stdout else "",
-                           stderr.decode() if stderr else ""]
-        Printer.logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
-        return stdout.decode().strip().split("=")[1].split("\r")[0].split("\n")[0]
+        stdout = run_ffm(path, ["-show_entries", "stream=codec_name"])
+        return stdout.split("=")[1].split("\r")[0].split("\n")[0]
     
     def convert_audio_format(self, temppath: PurePath, path: PurePath) -> str | None:
         output_params = ['-c:a', self._codec]
@@ -650,26 +630,10 @@ class DLContent(Content):
                        f'Desired Codec: {self._codec.upper()}\n' +
                        f'Expected Log Level: {Zotify.CONFIG.get_ffmpeg_log_level().upper()}', PrintChannel.DEBUG)
         
-        def run_ffmpeg(custom_ffmpeg_args: list[str] = []) -> float:
-            ff_m = ffmpy.FFmpeg(
-            global_options=['-y', '-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'],
-            inputs={temppath: None},
-            outputs={path: output_params + custom_ffmpeg_args}
-            )
-            
-            stdout, stderr = ff_m.run(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            loggable_output = ["STDOUT:", stdout.decode().replace('\r\n', '\n') if stdout else "",
-                               "STDERR:", stderr.decode().replace('\r\n', '\n') if stderr else ""]
-            Printer.logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
-            
-            if Path(temppath).exists():
-                Path(temppath).unlink()
-            
-            return time.time()
-        
         time_ffmpeg_start = time.time()
         try:
-            return fmt_duration(run_ffmpeg(Zotify.CONFIG.get_custom_ffmpeg_args()) - time_ffmpeg_start)
+            run_ffm(temppath, None, path, output_params + Zotify.CONFIG.get_custom_ffmpeg_args())
+            return fmt_duration(time.time() - time_ffmpeg_start)
         except ffmpy.FFExecutableNotFoundError:
             Printer.hashtaged(PrintChannel.WARNING, 'FFMPEG NOT FOUND\n' +
                                                    f'SKIPPING CONVERSION TO {self._codec.upper()}')
@@ -679,7 +643,8 @@ class DLContent(Content):
                 Printer.hashtaged(PrintChannel.WARNING, str(e) + '\n' + 'CUSTOM FFMPEG ARGUMENTS FAILED')
         
         try:
-            return fmt_duration(run_ffmpeg() - time_ffmpeg_start)
+            run_ffm(temppath, None, path, output_params)
+            return fmt_duration(time.time() - time_ffmpeg_start)
         except Exception as e:
             Printer.hashtaged(PrintChannel.WARNING, str(e) + '\n' + f'SKIPPING CONVERSION TO {self._codec.upper()}')
             return
@@ -704,7 +669,7 @@ class DLContent(Content):
         Printer.hashtaged(PrintChannel.WARNING, f'ATTEMPT TO CLONE {self.clsn.upper()} "{self}" FAILED\n' + 
                                                 f'FALLING BACK TO REDOWNLOAD\n' +
                                                 f'EXPECTED SOURCE FILES THAT DO NOT EXIST:')
-        Printer.json_dump({str(k): str(v) for k, v in self.real_filepaths.items()})
+        Printer.json_dump(PrintChannel.WARNING, {str(k): str(v) for k, v in self.real_filepaths.items()})
         return False
     
     def clone_to_all(self) -> bool:
@@ -742,7 +707,6 @@ class Track(DLContent):
         self.added_at       : dict[Container, str]  = {}
         # only set by Playlist API
         self.added_by       : dict[Playlist, User]  = {}
-        self.is_local       : dict[Playlist, str]   = {}
     
     def fill_output_template(self, parent_stack: ParentStack, output_template: str = "") -> PurePath:
         parent: Container = parent_stack[-2]
@@ -755,6 +719,7 @@ class Track(DLContent):
         
         repl_dict: dict[str, str] = {}
         def update_repl(md_val, *replstrs: str):
+            # Printer.debug(replstrs[0])
             repl_dict.update(zip(replstrs, [md_val]*len(replstrs)))
         
         update_repl(self.id,            "{id}", "{track_id}", "{song_id}")
@@ -771,13 +736,14 @@ class Track(DLContent):
             update_repl(artists_names,          "{artists}", "{track_artists}", "{song_artists}")
         
         if self.album:
-            album_artists_names = conv_artist_format(self.album.artists, FORCE_NO_LIST=True)
             update_repl(self.album.id,              "{album_id}")
             update_repl(self.album.name,            "{album}", "{album_name}")
-            update_repl(self.album.artists[0].name, "{album_artist}")
-            update_repl(album_artists_names,        "{album_artists}")
             update_repl(self.album.release_date,    "{date}", "{release_date}")
             update_repl(self.album.year,            "{year}", "{release_year}")
+            if self.album.artists:
+                album_artists_names = conv_artist_format(self.album.artists, FORCE_NO_LIST=True)
+                update_repl(self.album.artists[0].name, "{album_artist}")
+                update_repl(album_artists_names,        "{album_artists}")
         
         if Zotify.CONFIG.get_disc_track_totals():
             update_repl(self.album.total_tracks,    "{total_tracks}")
@@ -961,7 +927,7 @@ class Track(DLContent):
                               'ID not Archived' if Zotify.CONFIG.get_skip_existing() else 'Skipping Disabled')
             temppath = path.with_suffix(".tmp")
             if Zotify.CONFIG.get_temp_download_dir():
-                temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid.uuid4())}_{self.id}.tmp'
+                temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
         
         stream = Zotify.get_content_stream(self)
         if stream is None:
@@ -1128,7 +1094,6 @@ class Episode(DLContent):
         # only set by Playlist API
         self.added_at       : dict[Playlist, str]   = {}
         self.added_by       : dict[Playlist, User]  = {}
-        self.is_local       : dict[Playlist, str]   = {}
     
     def fill_output_template(self, parent_stack: list[Container], output_template: str = "") -> PurePath:
         return self._path_root / fix_filename(self.show.name) / f"{self}.{self._ext}"
@@ -1158,9 +1123,8 @@ class Episode(DLContent):
         desc = "" if file_size else "(Unknown total file size)"
         
         path = Path(path).expanduser().resolve()
-        r.raw.read = functools.partial(r.raw.read, decode_content=True)  # Decompress if needed
-        with Printer.pbar_stream(r.raw, desc=desc, total=file_size) as r_raw:
-            pathlike_move_safe(r_raw, path)
+        with Printer.pbar_stream(r.raw, desc=desc, total=file_size) as f_stream:
+            pathlike_move_safe(f_stream, path)
         
         time_dl_end = time.time()
         return fmt_duration(time_dl_end - time_start)
@@ -1183,7 +1147,7 @@ class Episode(DLContent):
                               'ID not Archived' if Zotify.CONFIG.get_skip_existing() else 'Skipping Disabled')
             temppath = path.with_suffix(".tmp")
             if Zotify.CONFIG.get_temp_download_dir():
-                temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid.uuid4())}_{self.id}.tmp'
+                temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
         
         self.set_dl_status("Downloading Stream")
         if not self.fetch_partner_url():
@@ -1246,13 +1210,17 @@ class Container(Content):
         self.needs_expansion = False
         self.needs_recursion = False
     
+    @property
+    def ccount(self):
+        return len(self._main_items)
+    
     def fetch_items(self, args: list[str] = [], hide_loader: bool = False) -> list[dict]:
         item_key = ITEMS if isinstance(self, Playlist) else self._contains.lowers
         with Loader(f'Fetching {self.type_attr} {item_key}...', disabled=hide_loader):
             argstr = arg_comb(self._fetch_args, *args)
             if self._nextable:
                 resp = Zotify.invoke_url_nextable(f'{self.url}/{self.id}/{item_key.replace(" ", "-")}?{MARKET_APPEND}{argstr}',
-                                                  limit=self._fetch_q, offset=len(self._main_items))
+                                                  params={LIMIT: self._fetch_q, OFFSET: self.ccount})
             else:
                 resp = Zotify.invoke_url(f'{self.url}/{self.id}/{item_key.replace(" ", "-")}?{MARKET_APPEND}{argstr}')
                 _, resp = resp.popitem()
@@ -1317,16 +1285,20 @@ class Playlist(Container):
         self.owner              : User                      = None
         self.tracks_or_eps      : list[Track | Episode]     = self._main_items
     
+    def unwrap(self, playlist_items: list[dict[str, dict]]) -> list[dict | None]:
+        tracks_eps_empty: list[dict] = [item.get(ITEM) for item in playlist_items]
+        for i, track_or_ep, item in zip(range(len(playlist_items)), tracks_eps_empty, playlist_items):
+            if track_or_ep is None:
+                # Printer.debug(f'Playlist Item {self.ccount+i+1} ({IS_LOCAL} == {item.get(IS_LOCAL)})\n' +
+                #                 'Has Playlist Entry but no Metadata:', item)
+                continue
+            track_or_ep[ADDED_AT] = item.get(ADDED_AT)
+            track_or_ep[ADDED_BY] = item.get(ADDED_BY)
+            track_or_ep[IS_LOCAL] = item.get(IS_LOCAL)
+        return tracks_eps_empty
+    
     def fetch_items(self, hide_loader: bool = False) -> list[dict | None]:
-        playlist_items: list[dict[str, dict]] = super().fetch_items(hide_loader=hide_loader)
-        for item in playlist_items:
-            if not item.get(TRACK): continue
-            item[TRACK][ADDED_AT] = item.get(ADDED_AT)
-            item[TRACK][ADDED_BY] = item.get(ADDED_BY)
-            item[TRACK][IS_LOCAL] = item.get(IS_LOCAL)
-        track_or_episode_resps = [item[TRACK] if item.get(TRACK) and item[TRACK].get(URI) else None for item in playlist_items]
-        self.length = len(track_or_episode_resps)
-        return track_or_episode_resps
+        return self.unwrap( super().fetch_items(hide_loader=hide_loader) )
 
 
 class User(Container):
@@ -1465,7 +1437,7 @@ class Audiobook(Container):
 # end not implemented
 
 
-# sets Query fetch order and quantuty by type
+# sets Query fetch order and quantity by type
 ITEM_FETCH: dict[type[DLContent] | type[Container], int] = {
     Playlist:   0,
     Artist:    50,
@@ -1519,16 +1491,16 @@ class Query(Container):
         super().__init__(f"{self.type_attr}:{timestamp}" )
         del self.name
         
-        self.requested_urls = "" # for debug only
         self.parsed_request : list[list[str]]                                        = []
         self.requested_objs : list[list[DLContent | Container | None]]               = []
         self._main_items    : list[DLContent | Container | None] | list[ParentStack] = []
     
     def request(self, requested_urls: str) -> Query:
-        self.requested_urls = requested_urls # only used here, can remove later
-        self.parsed_request = bulk_regex_urls(self.requested_urls)
+        self.parsed_request = bulk_regex_urls(requested_urls)
         n_urls = len(set.union(*[set(l) for l in self.parsed_request]))
-        Printer.debug(f'Request Parsed as {n_urls} URL' + ("s" if n_urls > 1 else ""))
+        [c for c in self.parsed_request if any(c)]
+        Printer.debug(f'Requested URL String: {requested_urls}\n' + 
+                      f'Parsed URI List ({n_urls}): {self.parsed_request}\n')
         return self
     
     def fetch_query_metadata(self) -> list[list[dict]]:
@@ -1544,10 +1516,10 @@ class Query(Container):
         return self.requested_objs
     
     def fetch_extra_metadata(self):
-        alltracks = {t for t in self.ALL_NODES if isinstance(t, Track) and not t.local_file}
+        alltracks = {t for t in self.ALL_NODES if isinstance(t, Track) and not t.is_local}
         
         artists = set().union(*(set(track.artists) for track in alltracks))
-        artist_uris: dict[str, Artist] = {a.uri: a for a in artists if not a.local_file and not a.hasMetadata
+        artist_uris: dict[str, Artist] = {a.uri: a for a in artists if not a.is_local and not a.hasMetadata
                                           and not "".join(a.name.lower().split()) == "variousartists"}
         if Zotify.CONFIG.get_save_genres() and artist_uris:
             artist_resps = self.fetch_uris_metadata(artist_uris.keys(), Artist, loader_text=GENRE)
@@ -1559,7 +1531,7 @@ class Query(Container):
                 genres.sort()
                 track.genres = genres
         
-        albums = {track.album for track in alltracks if track.album and not track.album.local_file}
+        albums = {track.album for track in alltracks if track.album and not track.album.is_local}
         album_uris: dict[str, Album] = {a.uri: a for a in albums if not a.hasMetadata}
         if (Zotify.CONFIG.get_disc_track_totals() or Zotify.CONFIG.get_download_parent_album()) and albums:
             loader_text = "parent album" if Zotify.CONFIG.get_download_parent_album() else "track/disc total"
@@ -1645,11 +1617,11 @@ class Query(Container):
             Printer.back_up() # closing a visible pbar will print an extra newline
         
         if isinstance(interrupt, KeyboardInterrupt):
-            Printer.hashtaged(PrintChannel.MANDATORY, "USER CANCELED DOWNLOADS EARLY\n"+
-                                                      "ATTEMPTING TO CLEAN UP")
+            Printer.hashtaged(PrintChannel.MANDATORY, 'USER CANCELED DOWNLOADS EARLY\n'+
+                                                      'ATTEMPTING TO CLEAN UP')
         elif interrupt is not None:
-            Printer.hashtaged(PrintChannel.ERROR, "UNEXPECTED ERROR DURING DOWNLOADS\n"+
-                                                  "ATTEMPTING TO CLEAN UP")
+            Printer.hashtaged(PrintChannel.ERROR, 'UNEXPECTED ERROR DURING DOWNLOADS\n'+
+                                                  'ATTEMPTING TO CLEAN UP')
             Printer.hashtaged(PrintChannel.ERROR, str(interrupt))
         
         if Zotify.CONFIG.get_export_m3u8() and self.requested_objs:
@@ -1657,10 +1629,10 @@ class Query(Container):
                 self.create_m3u8_playlists()
         
         if interrupt is not None:
-            Printer.hashtaged(PrintChannel.ERROR, "CLEAN UP COMPLETE\n"+
-                                                  "LOGGING ERROR AND TRACEBACK")
+            Printer.hashtaged(PrintChannel.MANDATORY, 'CLEAN UP COMPLETE')
             Printer.logger(interrupt, PrintChannel.ERROR)
             if not isinstance(interrupt, KeyboardInterrupt):
+                Printer.hashtaged(PrintChannel.ERROR, 'LOGGING ERROR AND TRACEBACK')
                 Printer.logger(self.__dict__, PrintChannel.ERROR)
                 raise interrupt.with_traceback(traceback)
     

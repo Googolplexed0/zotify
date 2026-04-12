@@ -287,8 +287,8 @@ Multiple filters can be stacked, with latter filters overwriting prior filters. 
 | Filter Tag                  | Type       | Valid Values                                              | Default Value                    |
 |-----------------------------|------------|-----------------------------------------------------------|----------------------------------|
 | `/t`, `/type`               | `ITEMTYPE` | `track`, `album`, `artist`, `playlist`, `show`, `episode` | `track,album,artist,playlist`    |
-| `/s`, `/size`               | int        | 0 < i <= 1050                                             | `SEARCH_QUERY_SIZE` Config == 10 |
-| `/o`, `/offset`             | int        | 0 < i <= 1000                                             | 0                                |
+| `/s`, `/size`               | int        | 1 <= i <= 1000                                            | `SEARCH_QUERY_SIZE` Config       |
+| `/o`, `/offset`             | int        | 0 <= i <= 999                                             | 0                                |
 | `/ie`, `/include-external`  | bool       | True, False                                               | False                            |
 
 ### Example Filtered Search Queries
