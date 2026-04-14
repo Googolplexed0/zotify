@@ -113,7 +113,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 
 | File Options                 | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
-| `OUTPUT`                     | `--output`                          | Master output file pattern (overwrites all others)    | See [Output Format Examples](#output-formatting) |
+| `OUTPUT`                     | `--output`                          | Master output file pattern (overwrites all others)    | See [Output Format Examples](#example-output-values) |
 | `OUTPUT_SINGLE`              | `-os`, `--output-single`            | Output file pattern for single tracks             | See [Output Format Examples](#example-output-values) |
 | `OUTPUT_ALBUM`               | `-oa`, `--output-album`             | Output file pattern for albums                    | See [Output Format Examples](#example-output-values) |
 | `OUTPUT_PLAYLIST_EXT`        | `-oe`, `--output-ext-playlist`      | Output file pattern for playlists                 | See [Output Format Examples](#example-output-values) |
@@ -164,6 +164,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `M3U8_LOCATION`              | `--m3u8-location`                   | Directory where .m3u8 files are saved, `""` being the output directory       | `""`                      |
 | `M3U8_REL_PATHS`             | `--m3u8-relative-paths`             | List .m3u8 track paths relative to the .m3u8 file's directory                | True                      |
 | `LIKED_SONGS_ARCHIVE_M3U8`   | `--liked-songs-archive-m3u8`        | Use cumulative/archiving method when exporting .m3u8 file for Liked Songs    | True                      |
+| `OUTPUT_M3U8`                | `-om`, `--output-m3u8`              | Output file pattern for .m3u8 files, `""` being the playlist's output pattern| `"{name}"`                |
 
 | Lyrics Options               | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
@@ -242,7 +243,7 @@ The options `CREDENTIALS_LOCATION` and `SONG_ARCHIVE_LOCATION` use the following
 | MacOS           | `/Users/<USERNAME>/Library/Application Support/Zotify/` |
 | Linux           | `/home/<USERNAME>/.local/share/zotify/`                 |
 
-## Output Formatting
+## Track Output Formatting
 
 With the option `OUTPUT` (or the commandline parameter `--output`) you can specify the pattern for the file structure of downloaded tracks (not podcasts).
 The value is relative to the `ROOT_PATH` directory and may contain the following placeholders (`ITEMTYPE` may be `track`, `album`, `artist`, or `playlist`):
@@ -273,6 +274,16 @@ The value is relative to the `ROOT_PATH` directory and may contain the following
 `OUTPUT_LIKED_SONGS`    :   `Liked Songs/{artist}_{song_name}`
 
 `OUTPUT_LYRICS`         :   `{artist}_{song_name}`
+
+## Playlist File Output Formatting
+
+This works the same as [Track Output Formatting](#track-output-formatting) but for the M3U8 file name. These are placeholders for the `OUTPUT_M3U8` (or `--output-m3U8`) option
+
+| Placeholder                            | Description                                                  |
+|----------------------------------------|--------------------------------------------------------------|
+| `{id}`                                 | The playlist's id                                            |
+| `{name}`                               | The playlist's name                                          |
+| `{owner_id}`                           | The playlist owner's id                                      |
 
 ## Search Query Formatting
 

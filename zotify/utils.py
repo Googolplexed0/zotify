@@ -387,14 +387,32 @@ class SongArchive:
 # M3U8 Playlist File Utils
 class M3U8():
     def __init__(self, cont_paths: list[PurePath | None], cont_type: type, creator):
-        from zotify.api import Content, Container, Query
+        from zotify.api import Content, Container, Playlist, Query
         self.cont_type: type[Content] = cont_type
-        self.creator: Query | Container = creator
+        self.creator: Query | Playlist | Container = creator
         self.name = self.cont_type.uppers if isinstance(self.creator, Query) else f'"{self.creator.name}"'
         
         dir = Zotify.CONFIG.get_m3u8_location()
         if not dir: dir = self.dynamic_dir(cont_paths)
-        filename = fix_filename(f"{self.creator.id}_{self.cont_type.lowers}" if isinstance(self.creator, Query) else self.creator.name) + ".m3u8"
+        if isinstance(self.creator, Query):
+            filename = fix_filename(f"{self.creator.id}_{self.cont_type.lowers}")
+        else:
+            output_template = Zotify.CONFIG.get_m3u8_filename()
+
+            repl_dict: dict[str, str] = {}
+            def update_repl(md_val, *replstrs: str):
+                repl_dict.update(zip(replstrs, [md_val]*len(replstrs)))
+
+            update_repl(self.creator.id,             "{id}")
+            update_repl(self.creator.name,           "{name}")
+            update_repl(self.creator.owner.name,     "{owner_id}")
+
+            for replstr, md_val in repl_dict.items():
+                output_template = output_template.replace(replstr, fix_filename(md_val)) 
+
+            filename = output_template
+
+        filename = filename + ".m3u8"
         self.path = dir / filename if dir else None
     
     def dynamic_dir(self, cont_paths: list[PurePath | None]) -> PurePath | None:
