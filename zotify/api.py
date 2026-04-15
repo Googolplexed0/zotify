@@ -199,7 +199,7 @@ class Content(HierarchicalNode):
                 
                 def unknown_user(owner_username: str | None) -> dict | None:
                     if not owner_username: return None
-                    return { URI : f":{USER}:{uuid4()}",
+                    return { URI : f":{USER}:{owner_username}",
                              TYPE: USER,
                              DISPLAY_NAME: owner_username   }
                 
@@ -1305,7 +1305,7 @@ class User(Container):
     _contains = Playlist
     def __init__(self, uri: str):
         super().__init__(uri)
-        self.display_name   : str   = None
+        self.display_name   : str   = None # will be id if not permit_client_api()
         self.external_urls  : dict  = None
 
 

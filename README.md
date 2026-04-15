@@ -162,6 +162,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
 | `EXPORT_M3U8`                | `-e`, `--export-m3u8`               | Export tracks/albums/episodes/playlists with an accompanying .m3u8 file      | False                     |
 | `M3U8_LOCATION`              | `--m3u8-location`                   | Directory where .m3u8 files are saved, `""` being the output directory       | `""`                      |
+| `OUTPUT_M3U8`                | `-om`, `--output-m3u8`              | Output file pattern for Container .m3u8 files, `""` being the Query default  | `{name}`                  |
 | `M3U8_REL_PATHS`             | `--m3u8-relative-paths`             | List .m3u8 track paths relative to the .m3u8 file's directory                | True                      |
 | `LIKED_SONGS_ARCHIVE_M3U8`   | `--liked-songs-archive-m3u8`        | Use cumulative/archiving method when exporting .m3u8 file for Liked Songs    | True                      |
 
@@ -273,6 +274,19 @@ The value is relative to the `ROOT_PATH` directory and may contain the following
 `OUTPUT_LIKED_SONGS`    :   `Liked Songs/{artist}_{song_name}`
 
 `OUTPUT_LYRICS`         :   `{artist}_{song_name}`
+
+## M3U8 File Output Formatting
+
+With the option `OUTPUT_M3U8` (or the commandline parameter `--output-m3u8`) you can specify the pattern for the filename of Container playlist files. Unlike [Output Formatting](#output-formatting), this value cannot include subdirectories (no `/` or `\`) but may contain the following placeholders:
+
+| Placeholder                            | Description                                                         |
+|----------------------------------------|---------------------------------------------------------------------|
+| `{content_type}`                       | The type of content the Container holds (`track`, `episode`, etc.)  |
+| `{id}`                                 | The Container's id                                                  |
+| `{name}`                               | The Container's name                                                |
+| `{owner_id}`                           | (playlist only) The playlist owner's id                             |
+| `{owner_name}`                         | (playlist only) The playlist owner's name                           |
+| `{snapshot_id}`                        | (playlist only) The playlist's snapshot id                          |
 
 ## Search Query Formatting
 
