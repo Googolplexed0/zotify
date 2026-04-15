@@ -1305,7 +1305,7 @@ class User(Container):
     _contains = Playlist
     def __init__(self, uri: str):
         super().__init__(uri)
-        self.display_name   : str   = None
+        self.display_name   : str   = None # will be id if not permit_client_api()
         self.external_urls  : dict  = None
 
 
