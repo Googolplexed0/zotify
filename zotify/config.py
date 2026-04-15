@@ -85,9 +85,9 @@ CONFIG_VALUES = {
     # Playlist File Options
     EXPORT_M3U8:                { 'default': 'False',                   'type': bool,   'arg': ('-e, --export-m3u8'                      ,) },
     M3U8_LOCATION:              { 'default': '',                        'type': str,    'arg': ('--m3u8-location'                        ,) },
+    OUTPUT_M3U8:                { 'default': '{name}',                  'type': str,    'arg': ('-om', '--output-m3u8'                   ,) },
     M3U8_REL_PATHS:             { 'default': 'True',                    'type': bool,   'arg': ('--m3u8-relative-paths'                  ,) },
     LIKED_SONGS_ARCHIVE_M3U8:   { 'default': 'True',                    'type': bool,   'arg': ('--liked-songs-archive-m3u8'             ,) },
-    OUTPUT_M3U8:                { 'default': '{name}',                  'type': str,    'arg': ('-om', '--output-m3u8'                   ,) },
     
     # Lyrics Options
     LYRICS_TO_METADATA:         { 'default': 'True',                    'type': bool,   'arg': ('--lyrics-to-metadata'                   ,) },
@@ -475,16 +475,16 @@ class Config:
         return m3u8_path
     
     @classmethod
+    def get_m3u8_filename(cls) -> str:
+        return cls.get(OUTPUT_M3U8)
+    
+    @classmethod
     def get_m3u8_relative_paths(cls) -> bool:
         return cls.get(M3U8_REL_PATHS)
     
     @classmethod
     def get_liked_songs_archive_m3u8(cls) -> bool:
         return cls.get(LIKED_SONGS_ARCHIVE_M3U8)
-
-    @classmethod
-    def get_m3u8_filename(cls) -> str:
-        return cls.get(OUTPUT_M3U8)
     
     # Lyrics Options
     @classmethod
@@ -873,7 +873,7 @@ class Zotify:
                 Printer.debug(resp)
                 return []
             elif nextable.get(NEXT) is None or (max and total + len(items) >= max):
-                return items[:max-total]
+                return items[:max-total] if max else items
             return items + handle_next(cls.invoke_url(nextable[NEXT]), strip, total + len(items))
         
         resp = cls.invoke_url(url, {LIMIT: 50, OFFSET: 0} | params)

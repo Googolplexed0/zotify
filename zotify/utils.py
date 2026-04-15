@@ -386,34 +386,42 @@ class SongArchive:
 
 # M3U8 Playlist File Utils
 class M3U8():
-    def __init__(self, cont_paths: list[PurePath | None], cont_type: type, creator):
-        from zotify.api import Content, Container, Playlist, Query
+    def __init__(self, cont_paths: list[PurePath | None], cont_type: type, parent_cont):
+        from zotify.api import Content, Container, Query
         self.cont_type: type[Content] = cont_type
-        self.creator: Query | Playlist | Container = creator
-        self.name = self.cont_type.uppers if isinstance(self.creator, Query) else f'"{self.creator.name}"'
+        parent_cont: Container | Query = parent_cont
+        self.name = self.cont_type.uppers if isinstance(parent_cont, Query) else f'"{parent_cont.name}"'
         
         dir = Zotify.CONFIG.get_m3u8_location()
         if not dir: dir = self.dynamic_dir(cont_paths)
-        if isinstance(self.creator, Query):
-            filename = fix_filename(f"{self.creator.id}_{self.cont_type.lowers}")
-        else:
-            output_template = Zotify.CONFIG.get_m3u8_filename()
-
-            repl_dict: dict[str, str] = {}
-            def update_repl(md_val, *replstrs: str):
-                repl_dict.update(zip(replstrs, [md_val]*len(replstrs)))
-
-            update_repl(self.creator.id,             "{id}")
-            update_repl(self.creator.name,           "{name}")
-            update_repl(self.creator.owner.name,     "{owner_id}")
-
-            for replstr, md_val in repl_dict.items():
-                output_template = output_template.replace(replstr, fix_filename(md_val)) 
-
-            filename = output_template
-
-        filename = filename + ".m3u8"
-        self.path = dir / filename if dir else None
+        self.path = dir / (self.fill_output_template(parent_cont) + ".m3u8") if dir else None
+    
+    def fill_output_template(self, parent_cont):
+        from zotify.api import Container, Playlist, Query
+        parent_cont: Container | Query = parent_cont
+        
+        output_template = Zotify.CONFIG.get_m3u8_filename()
+        if not output_template or isinstance(parent_cont, Query):
+            return fix_filename(f"{parent_cont.id}_{self.cont_type.lowers}")
+        
+        repl_dict: dict[str, str] = {}
+        def update_repl(md_val, *replstrs: str):
+            repl_dict.update(zip(replstrs, [md_val]*len(replstrs)))
+        
+        update_repl(self.cont_type,                     "{content_type}")
+        update_repl(parent_cont.id,                     "{id}")
+        update_repl(parent_cont.name,                   "{name}")
+        
+        if isinstance(parent_cont, Playlist):
+            if parent_cont.owner:
+                update_repl(parent_cont.owner.id,       "{owner_id}")
+                update_repl(parent_cont.owner.name,     "{owner_name}")
+            update_repl(parent_cont.snapshot_id,        "{snapshot_id}")
+        
+        for replstr, md_val in repl_dict.items():
+            output_template = output_template.replace(replstr, fix_filename(md_val)) 
+        
+        return output_template
     
     def dynamic_dir(self, cont_paths: list[PurePath | None]) -> PurePath | None:
         paths = {path for path in cont_paths if isinstance(path, PurePath) and path.is_relative_to(self.cont_type._path_root)}
