@@ -199,7 +199,7 @@ class Content(HierarchicalNode):
                 
                 def unknown_user(owner_username: str | None) -> dict | None:
                     if not owner_username: return None
-                    return { URI : f":{USER}:{uuid4()}",
+                    return { URI : f":{USER}:{owner_username}",
                              TYPE: USER,
                              DISPLAY_NAME: owner_username   }
                 
