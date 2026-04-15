@@ -7,10 +7,10 @@ It's like youtube-dl, but for that other music platform.
 
 import argparse
 
-from zotify import __version__
 from zotify.app import client
-from zotify.config import CONFIG_VALUES, DEPRECIATED_CONFIGS
+from zotify.config import Zotify, CONFIG_VALUES, DEPRECIATED_CONFIGS
 from zotify.termoutput import Printer
+
 
 class DepreciatedAction(argparse.Action):
     def __init__(self, option_strings, dest, **kwargs):
@@ -22,9 +22,11 @@ class DepreciatedAction(argparse.Action):
         Printer.depreciated_warning(option_string, self.help, CONFIG=False)
         setattr(namespace, self.dest, values)
 
+
 DEPRECIATED_FLAGS = (
     {"flags":    ('-d', '--download',),     "type":    str,     "help":    'Use `--file` (`-f`) instead'},
 )
+
 
 def main():
     parser = argparse.ArgumentParser(prog='zotify',
@@ -32,11 +34,33 @@ def main():
     
     parser.register('action', 'depreciated_ignore_warn', DepreciatedAction)
     
+    # no args
     parser.add_argument('--version',
                         action='version',
-                        version=f'Zotify {__version__}',
+                        version=f'Zotify {Zotify.VERSION}',
                         help='Show the version of Zotify')
+    parser.add_argument('--persist',
+                        action='store_true',
+                        dest='persist',
+                        help='Perform multiple queries with a single persistent Session')
+    parser.add_argument('--update-config',
+                        action='store_true',
+                        dest='update_config',
+                        help='Updates the `config.json` file while keeping all current settings unchanged')
+    parser.add_argument('--update-archive',
+                        action='store_true',
+                        dest='update_archive',
+                        help='Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged')
+    parser.add_argument('--debug',
+                        action='store_true',
+                        dest='debug',
+                        help='Enable debug mode, prints extra information and creates a `config_DEBUG.json` file')
+    parser.add_argument('-ns', '--no-splash',
+                        action='store_true',
+                        dest='no_splash',
+                        help='Suppress the splash screen when loading')
     
+    # with args
     parser.add_argument('-c', '--config', '--config-location',
                         type=str,
                         dest='config_location',
@@ -50,47 +74,44 @@ def main():
                         dest='token',
                         help='Authentication token')
     
-    parser.add_argument('-ns', '--no-splash',
-                        action='store_true',
-                        help='Suppress the splash screen when loading')
-    parser.add_argument('--debug',
-                        action='store_true',
-                        help='Enable debug mode, prints extra information and creates a `config_DEBUG.json` file')
-    parser.add_argument('--update-config',
-                        action='store_true',
-                        help='Updates the `config.json` file while keeping all current settings unchanged')
-    
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument('urls',
                        type=str,
                        # action='extend',
-                       default='',
                        nargs='*',
+                       default="",
                        help='Download track(s), album(s), playlist(s), podcast episode(s), or artist(s) specified by the URL(s) passed as a command line argument(s). If an artist\'s URL is given, all albums by the specified artist will be downloaded. Can take multiple URLs as multiple arguments.')
-    group.add_argument('-l', '--liked',
-                       dest='liked_songs',
-                       action='store_true',
-                       help='Download all Liked Songs on your account')
-    group.add_argument('-a', '--artists',
-                       dest='followed_artists',
-                       action='store_true',
-                       help='Download all songs by all followed artists')
-    group.add_argument('-p', '--playlist',
-                       action='store_true',
-                       help='Download playlist(s) saved by your account (interactive)')
-    group.add_argument('-s', '--search',
-                       type=str,
-                       nargs='?',
-                       const=' ',
-                       help='Search tracks/albums/artists/playlists based on argument (interactive)')
     group.add_argument('-f', '--file',
                        type=str,
                        dest='file_of_urls',
                        help='Download all tracks/albums/episodes/playlists URLs within the file passed as argument')
-    group.add_argument('-v', '--verify-library',
-                       dest='verify_library',
+    group.add_argument('-l', '--liked', '--liked-songs', 
                        action='store_true',
+                       dest='liked_songs',
+                       help='Download all Liked Songs on your account')
+    group.add_argument('-p', '--playlist', '--playlists', '--user-playlists',
+                       action='store_true',
+                       dest='user_playlists',
+                       help='Download playlist(s) created/saved by your account (interactive)')
+    group.add_argument('-a', '--artist', '--artists', '--followed-artists',
+                       action='store_true',
+                       dest='followed_artists',
+                       help='Download all songs by followed artist(s) (interactive)')
+    group.add_argument('-m', '--album', '--albums', '--followed-albums',
+                       action='store_true',
+                       dest='followed_albums',
+                       help='Download followed albums (interactive)')
+    group.add_argument('-s', '--search',
+                       type=str,
+                       dest='search',
+                       nargs='?',
+                       const=' ',
+                       help='Search tracks/albums/artists/playlists based on argument (interactive)')
+    group.add_argument('-v', '--verify-library',
+                       action='store_true',
+                       dest='verify_library',
                        help='Check metadata for all tracks in ROOT_PATH or listed in SONG_ARCHIVE, updating the metadata if necessary. This will not download any new tracks, but may take a very, very long time.')
+    modes = group._group_actions.copy()
     
     for flag in DEPRECIATED_FLAGS: 
         group.add_argument(*flag["flags"],
@@ -102,7 +123,7 @@ def main():
         parser.add_argument(*DEPRECIATED_CONFIGS[key]['arg'],
                             type=str,
                             action='depreciated_ignore_warn',
-                            help=f'Delete the {key} flag from the commandline call'
+                            help=f'Delete the `{key}` flag from the commandline call'
                             )
     
     for key in CONFIG_VALUES:
@@ -112,15 +133,9 @@ def main():
                             default=None,
                             )
     
-    parser.set_defaults(func=client)
-    
     args = parser.parse_args()
-    try:
-        args.func(args)
-    except KeyboardInterrupt:
-        print("\n")
-        raise
-    print("\n")
+    Zotify.boot(args)
+    client(args, modes)
 
 
 if __name__ == '__main__':

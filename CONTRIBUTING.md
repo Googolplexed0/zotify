@@ -14,16 +14,14 @@ Zotify is a community-driven project. There are many different ways to contribut
 
 ## What we aren't looking for
 
-Please don't use the issues section to request help installing or setting up the project. It should be reserved for bugs when running the code, and feature requests. Instead use the support channel in either our Discord or Matrix server.
-Please do not make a new pull request just to fix a typo or any small issue like that. We'd rather you just make an issue reporting it and we will fix it in the next commit. This helps to prevent commit spamming.
+Please don't use the Issues section for help installing or setting up the project. It should be reserved for [Bug Reports] and [Feature Requests].
+Please do not make a new Pull Request just to fix a typo, formatting, or something that does not affect functionality. We'd rather you just make an issue to report it and it will be fixed in the next commit (this helps to prevent commit spamming).
 
 # Ground rules
 
 ## Expectations
 
 * Ensure all code is linted with pylint before pushing.
-* Ensure all code passes the [Testing Criteria] (coming soon).
-* If you're planning on contributing a new feature, join the Discord or Matrix and discuss it with the Dev Team.
 * Please don't commit multiple new features at once.
 * Follow the [Python Community Code of Conduct](https://www.python.org/psf/codeofconduct/)
 
@@ -36,7 +34,3 @@ Here are a couple of friendly tutorials on making pull requests: http://makeapul
 
 The dev team looks at Pull Requests around once per day. After feedback has been given we expect responses within one week. After a week we may close the pull request if it isn't showing any activity.
 You may be asked by a maintainer to "rebase" your PR, they're saying that a lot of code has changed, and that you need to update your branch so it's easier to merge.
-
-# Community
-
-Come and chat with us on Discord or Matrix. Devs try to respond to mentions at least once per day.

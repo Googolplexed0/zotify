@@ -32,7 +32,7 @@
 
 *Useable across system from the command line*
 
-`pipx install git+https://github.com/Googolplexed0/zotify.git`
+`pipx install git+https://github.com/Googolplexed0/zotify.git@new-hierarchy`
 
 </details>
 
@@ -40,7 +40,19 @@
 
 *Useable when launched as a Python module*
 
-`python -m pip install git+https://github.com/Googolplexed0/zotify.git`
+`python -m pip install git+https://github.com/Googolplexed0/zotify.git@new-hierarchy`
+
+</details>
+
+<details><summary><strong>Updating</strong></summary>
+
+*Update in accordance with your install method*
+
+**If Executable (pipx):**
+`pipx install -f git+https://github.com/Googolplexed0/zotify.git@new-hierarchy`
+
+**If Module:**
+`python -m pip install --force-reinstall git+https://github.com/Googolplexed0/zotify.git@new-hierarchy`
 
 </details>
 
@@ -69,26 +81,32 @@ If an artist's URL is given, all albums by the specified artist will be download
 
 ### Basic Flags and Modes
 
-`(python -m) zotify <{mode flag}> <{config flag} {config value}> <track/album/playlist/episode/artist url>`
+`(python -m) zotify <{config flag} {config value}> <{mode flag}> <track/album/playlist/episode/artist url>`
 
-| Command Line Config Flag           | Function                                                                                                                |
-|------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
-| `-h`, `--help`                     | See this message                                                                                                        |
-| `--version`                        | Show the version of Zotify                                                                                              |
-| `-c`, `--config-location`          | Specify a directory containing a Zotify `config.json` file to load settings (Also accepts a filepath to a `.json` file) |
-| `-u`, `--username`                 | Account username                                                                                                        |
-| `--token`                          | Authentication token                                                                                                    |
-| `--debug`                          | Enable debug mode, prints extra information and creates a `config_DEBUG.json` file                                      |
-| `--update-config`                  | Updates the `config.json` file while keeping all current settings unchanged                                             |
+| Command Line Config Flag (no value) | Function                                                                                                       |
+|-------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `-h`, `--help`                      | See this message                                                                                               |
+| `--version`                         | Show the version of Zotify                                                                                     |
+| `--persist`                         | Perform multiple Queries on the same Session, requiring only one account login                                 |
+| `--update-config`                   | Updates the `config.json` file while keeping all current settings unchanged                                    |
+| `--update-archive`                  | Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged          |
+| `--debug`                           | Enable debug mode, printing extra information and creating a `config_DEBUG.json` file                          |
 
-| Command Line Mode Flag (exclusive) | Mode                                                                                                      |
-|------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| `-s`, `--search`                   | Search tracks/albums/artists/playlists based on argument (interactive)                                    |
-| `-p`, `--playlist`                 | Download playlist(s) saved by your account (interactive)                                                  |
-| `-l`, `--liked`                    | Download all Liked Songs on your account                                                                  |
-| `-a`, `--artists`                  | Download all songs by all followed artists                                                                |
-| `-f`, `--file`                     | Download all tracks/albums/episodes/playlists URLs within the file passed as argument                     |
-| `-v`, `--verify-library`           | Check metadata for all tracks in ROOT_PATH or listed in SONG_ARCHIVE, updating the metadata if necessary  |
+| Command Line Config Flag            | Value                                                                                                          |
+|-------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `-c`, `--config-location`           | Specify a directory containing a Zotify `config.json` file (or a filepath to a `.json` file) to load settings  |
+| `-u`, `--username`                  | Account username                                                                                               |
+| `--token`                           | Authentication token                                                                                           |
+
+| Command Line Mode Flag (exclusive)  | Mode                                                                                                           |
+|-------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `-s`, `--search`                    | Search tracks/albums/artists/playlists based on passed argument (interactive)                                  |
+| `-p`, `--playlist`                  | Download playlist(s) created/saved by your account (interactive)                                               |
+| `-a`, `--artists`                   | Download all songs by followed artist(s) (interactive)                                                         |
+| `-m`, `--albums`                    | Download followed albums (interactive)                                                                         |
+| `-l`, `--liked`                     | Download all Liked Songs on your account                                                                       |
+| `-f`, `--file`                      | Download all tracks/albums/episodes/playlists URLs within the file passed as argument                          |
+| `-v`, `--verify-library`            | Check metadata for all tracks in ROOT_PATH or listed in SONG_ARCHIVE, updating the metadata if necessary       |
 
 <details><summary>
 
@@ -103,27 +121,33 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
 | `ROOT_PATH`                  | `-rp`, `--root-path`                | Directory where music is saved (replaces `.` in other path configs)          | `~/Music/Zotify Music`    |
 | `SAVE_CREDENTIALS`           | `--save-credentials`                | Whether login credentials should be saved                                    | True                      |
-| `CREDENTIALS_LOCATION`       | `--creds`, `--credentials-location` | Directory containing credentials.json                    | See [Path Option Parser](#path-option-parser) |
+| `CREDENTIALS_LOCATION`       | `--creds`, `--credentials-location` | Directory/Filepath to store/load a Zotify `credentials.json` file | See [Path Option Parser](#path-option-parser) |
 
 | File Options                 | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
 | `OUTPUT`                     | `--output`                          | Master output file pattern (overwrites all others)    | See [Output Format Examples](#output-formatting) |
-| `OUTPUT_PLAYLIST`            | `-op`, `--output-playlist`          | Output file pattern for playlists                 | See [Output Format Examples](#example-output-values) |
-| `OUTPUT_PLAYLIST_EXT`        | `-oe`, `--output-ext-playlist`      | Output file pattern for extended playlists        | See [Output Format Examples](#example-output-values) |
-| `OUTPUT_LIKED_SONGS`         | `-ol`, `--output-liked-songs`       | Output file pattern for user's Liked Songs        | See [Output Format Examples](#example-output-values) |
 | `OUTPUT_SINGLE`              | `-os`, `--output-single`            | Output file pattern for single tracks             | See [Output Format Examples](#example-output-values) |
 | `OUTPUT_ALBUM`               | `-oa`, `--output-album`             | Output file pattern for albums                    | See [Output Format Examples](#example-output-values) |
+| `OUTPUT_PLAYLIST_EXT`        | `-oe`, `--output-ext-playlist`      | Output file pattern for playlists                 | See [Output Format Examples](#example-output-values) |
+| `OUTPUT_LIKED_SONGS`         | `-ol`, `--output-liked-songs`       | Output file pattern for user's Liked Songs        | See [Output Format Examples](#example-output-values) |
 | `ROOT_PODCAST_PATH`          | `-rpp`, `--root-podcast-path`       | Directory where podcasts are saved                                           | `~/Music/Zotify Podcasts` |
 | `SPLIT_ALBUM_DISCS`          | `--split-album-discs`               | Saves each disc of an album into its own subfolder                           | False                     |
 | `MAX_FILENAME_LENGTH`        | `--max-filename-length`             | Maximum character length of filenames, truncated to fit, 0 meaning no limit  | 0                         |
 
 | Download Options             | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
-| `BULK_WAIT_TIME`             | `--bulk-wait-time`                  | The wait time between track downloads, in seconds                                        | 1             |
-| `DOWNLOAD_REAL_TIME`         | `-rt`, `--download-real-time`       | Downloads songs as fast as they would be played, should prevent account bans             | False         |
+| `OPTIMIZED_DOWNLOADING`      | `--optimized-downloading`           | Whether to sort download order by item duration to reduce API ratelimiting               | True          |
+| `DOWNLOAD_RATE_LIMITER`      | `-dlr`, `--download-rate-limiter`   | Slowdown multiplier based on the item's REAL_TIME_PLAY duration, 0 meaning disabled      | 0.0           |
+| `BULK_WAIT_TIME`             | `--bulk-wait-time`                  | The wait time between track downloads, in seconds                                        | 1.0           |
 | `TEMP_DOWNLOAD_DIR`          | `-td`, `--temp-download-dir`        | Directory where tracks are temporarily downloaded first, `""` meaning disabled           | `""`          |
+
+| Album/Artist Options         | Command Line Config Flag            | Description                                                                              | Default Value |
+|------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
 | `DOWNLOAD_PARENT_ALBUM`      | `--download-parent-album`           | Download a track's parent album, including itself (uses `OUTPUT_ALBUM` file pattern)     | False         |
 | `NO_COMPILATION_ALBUMS`      | `--no-compilation-albums`           | Skip downloading an album if API metadata labels it a compilation (not recommended)      | False         |
+| `NO_VARIOUS_ARTISTS`         | `--no-various-artists`              | Skip downloading an album if the album's artist is "`Various Artists`"                   | False         |
+| `NO_ARTIST_APPEARS_ON`       | `--no-artist-appears-on`            | Skip album from an artist's discography if artist only "appears on" the album            | False         |
+| `DISCOG_BY_ALBUM_ARTIST`     | `--discog-by-album-artist`          | Skip album from an artist's discography unless the artist is the album's artist          | False         |
 
 | Regex Options                | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
@@ -133,9 +157,10 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 
 | Encoding Options             | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
-| `DOWNLOAD_FORMAT`            | `--codec`, `--download-format`      | Audio codec of downloads, copy avoids remuxing (aac, fdk_aac, mp3, ogg, opus, vorbis)    | copy          |
-| `DOWNLOAD_QUALITY`           | `-q`, `--download-quality`          | Audio quality of downloads, auto selects highest available (normal, high, very_high*)    | auto          |
-| `TRANSCODE_BITRATE`          | `-b`, `--bitrate`                   | Overwrite the bitrate for FFMPEG encoding (not recommended)                              |               |
+| `DOWNLOAD_FORMAT`            | `--codec`, `--download-format`      | Audio codec, copy avoids remuxing (aac, fdk_aac, mp3, ogg, opus, vorbis)                 | copy          |
+| `DOWNLOAD_QUALITY`           | `-q`, `--download-quality`          | Source audio quality, auto selects highest available (normal, high, very_high\*)         | auto          |
+| `TRANSCODE_BITRATE`          | `-b`, `--bitrate`                   | Overwrite the bitrate for FFMPEG encoding (NOT RECOMMENDED)                              |               |
+| `CUSTOM_FFMEPG_ARGS`         | `--custom-ffmpeg-args`              | Additional FFMPEG functions or filters to apply to downloaded audio (space delimited)    |  `""`         |
 
 | Archive Options              | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
@@ -145,56 +170,63 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `SKIP_EXISTING`              | `-ie`, `--skip-existing`            | Skip songs already present in the expected output directory                             | True           |
 | `SKIP_PREVIOUSLY_DOWNLOADED` | `-ip`, `--skip-prev-downloaded`     | Use the global song_archive file to skip previously downloaded songs                    | False          |
 
-| Playlist File Config Key     | Command Line Config Flag            | Description                                                                  | Default Value             |
+| Playlist File Options        | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
 | `EXPORT_M3U8`                | `-e`, `--export-m3u8`               | Export tracks/albums/episodes/playlists with an accompanying .m3u8 file      | False                     |
 | `M3U8_LOCATION`              | `--m3u8-location`                   | Directory where .m3u8 files are saved, `""` being the output directory       | `""`                      |
+| `OUTPUT_M3U8`                | `-om`, `--output-m3u8`              | Output file pattern for Container .m3u8 files, `""` being the Query default  | `{name}`                  |
 | `M3U8_REL_PATHS`             | `--m3u8-relative-paths`             | List .m3u8 track paths relative to the .m3u8 file's directory                | True                      |
 | `LIKED_SONGS_ARCHIVE_M3U8`   | `--liked-songs-archive-m3u8`        | Use cumulative/archiving method when exporting .m3u8 file for Liked Songs    | True                      |
 
-| Lyric File Options           | Command Line Config Flag            | Description                                                                  | Default Value             |
-|------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
-| `DOWNLOAD_LYRICS`            | `--download-lyrics`                 | Whether lyrics should be downloaded (synced, with unsynced as fallback)      | True                      |
-| `LYRICS_LOCATION`            | `--lyrics-location`                 | Directory where .lrc files are saved, `""` being the output directory        | `""`                      |
-| `ALWAYS_CHECK_LYRICS`        | `--always-check-lyrics`             | Always try to download a song's lyrics, even if skipping the song            | False                     |
-| `LYRICS_MD_HEADER`           | `--lyrics-md-header`                | Include optional metadata ([see tags here](https://en.wikipedia.org/wiki/LRC_(file_format)#Core_format)) at the start of a .lrc file                     | False                     |
+| Lyrics Options               | Command Line Config Flag            | Description                                                                              | Default Value |
+|------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
+| `LYRICS_TO_METADATA`         | `--lyrics-to-metadata`              | Whether lyrics should be fetched and written to audio file tag metadata                  | True          |
+| `LYRICS_TO_FILE`             | `--lyrics-to-file`                  | Whether lyrics should be fetched and written to a .lrc file                              | True          |
+| `LYRICS_LOCATION`            | `--lyrics-location`                 | Directory where .lrc files are saved, `""` being the output directory                    | `""`          |
+| `OUTPUT_LYRICS`              | `-oy`, `--output-lyrics`            | Output file pattern for .lrc files, `""` being the Track's output pattern  | See [Output Format Examples](#example-output-values) |
+| `ALWAYS_CHECK_LYRICS`        | `--always-check-lyrics`             | Always download a song's lyrics, even when skipped (unless `OPTIMIZED_DOWNLOADING`)      | False         |
+| `LYRICS_MD_HEADER`           | `--lyrics-md-header`                | Include track metadata to a .lrc file([see tags here](https://en.wikipedia.org/wiki/LRC_(file_format)#Core_format)) at the start of a .lrc file | False                     |
 
 | Metadata Options             | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
 | `LANGUAGE`                   | `--language`                        | Language in which metadata/tags are requested                                            | en            |
-| `STRICT_LIBRARY_VERIFY`      | `--strict-library-verify`           | Whether unreliable tags should be forced to match when verifying local library           | True          |
 | `MD_DISC_TRACK_TOTALS`       | `--md-disc-track-totals`            | Whether track totals and disc totals should be saved in metadata                         | True          |
 | `MD_SAVE_GENRES`             | `--md-save-genres`                  | Whether genres should be saved in metadata                                               | True          |
 | `MD_ALLGENRES`               | `--md-allgenres`                    | Save all relevant genres in metadata                                                     | False         |
 | `MD_GENREDELIMITER`          | `--md-genredelimiter`               | Delimiter character to split genres in metadata, use `""` if array-like tags desired     | `", "`        |
 | `MD_ARTISTDELIMITER`         | `--md-artistdelimiter`              | Delimiter character to split artists in metadata, use `""` if array-like tags desired    | `", "`        |
-| `MD_SAVE_LYRICS`             | `--md-save-lyrics`                  | Whether lyrics should be saved in metadata, requires `--download-lyrics` be True         | True          |
+| `SEARCH_QUERY_SIZE`          | `--search-query-size`               | Number of items to fetch per category when performing a search                           | 10            |
+| `STRICT_LIBRARY_VERIFY`      | `--strict-library-verify`           | Whether unreliable tags should be forced to match when verifying local library           | True          |
 | `ALBUM_ART_JPG_FILE`         | `--album-art-jpg-file`              | Save album art as a separate .jpg file                                                   | False         |
 
 | API Options                  | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
+| `API_CLIENT_ID`              | `--client-id`                       | Client ID for a Developer App to route metadata API requests through         | `""`                      |
+| `API_CLIENT_LEGACY`          | `--client-legacy`                   | Whether the Developer App can access legacy endpoints\*\*                    | True                      |
 | `RETRY_ATTEMPTS`             | `--retry-attempts`                  | Number of times to retry failed API requests                                 | 1                         |
 | `CHUNK_SIZE`                 | `--chunk-size`                      | Chunk size for downloading                                                   | 20000                     |
-| `OAUTH_ADDRESS`              | `--redirect-uri`                    | Local server address listening for OAuth login requests                      | 0.0.0.0                   |
-| `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests                                | 127.0.0.1                 |
+| `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests (port is handled internally)   | 127.0.0.1                 |
 
-| Terminal & Logging Options   | Command Line Config Flag            | Description                                                                  | Default Value             |
-|------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
-| `PRINT_SPLASH`               | `--print-splash`                    | Show the Zotify logo at startup                                              | False                     |
-| `PRINT_PROGRESS_INFO`        | `--print-progress-info`             | Show message contianing download progress information                        | True                      |
-| `PRINT_SKIPS`                | `--print-skips`                     | Show message when a track is skipped                                         | True                      |
-| `PRINT_DOWNLOADS`            | `--print-downloads`                 | Show message when a track is downloaded successfully                         | True                      |
-| `PRINT_DOWNLOAD_PROGRESS`    | `--print-download-progress`         | Show track download progress bar                                             | True                      |
-| `PRINT_URL_PROGRESS`         | `--print-url-progress`              | Show url progress bar                                                        | True                      |
-| `PRINT_ALBUM_PROGRESS`       | `--print-album-progress`            | Show album progress bar                                                      | True                      |
-| `PRINT_ARTIST_PROGRESS`      | `--print-artist-progress`           | Show artist progress bar                                                     | True                      |
-| `PRINT_PLAYLIST_PROGRESS`    | `--print-playlist-progress`         | Show playlist progress bar                                                   | True                      |
-| `PRINT_WARNINGS`             | `--print-warnings`                  | Show warnings                                                                | True                      |
-| `PRINT_ERRORS`               | `--print-errors`                    | Show errors                                                                  | True                      |
-| `PRINT_API_ERRORS`           | `--print-api-errors`                | Show API errors                                                              | True                      |
-| `FFMPEG_LOG_LEVEL`           | `--ffmpeg-log-level`                | FFMPEG's logged level of detail when completing a transcoded download        | error                     |
+| Terminal & Logging Options   | Command Line Config Flag            | Description                                                                              | Default Value |
+|------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
+| `PRINT_SPLASH`               | `--print-splash`                    | Show the Zotify logo at startup                                                          | False         |
+| `PRINT_PROGRESS_INFO`        | `--print-progress-info`             | Show message contianing download progress information                                    | True          |
+| `PRINT_SKIPS`                | `--print-skips`                     | Show message when a track is skipped                                                     | True          |
+| `PRINT_DOWNLOADS`            | `--print-downloads`                 | Show message when a track is downloaded successfully                                     | True          |
+| `PRINT_DOWNLOAD_PROGRESS`    | `--print-download-progress`         | Show track download progress bar                                                         | True          |
+| `PRINT_URL_PROGRESS`         | `--print-url-progress`              | Show url progress bar                                                                    | True          |
+| `PRINT_ALBUM_PROGRESS`       | `--print-album-progress`            | Show album progress bar                                                                  | True          |
+| `PRINT_ARTIST_PROGRESS`      | `--print-artist-progress`           | Show artist progress bar                                                                 | True          |
+| `PRINT_PLAYLIST_PROGRESS`    | `--print-playlist-progress`         | Show playlist progress bar                                                               | True          |
+| `PRINT_WARNINGS`             | `--print-warnings`                  | Show warnings                                                                            | True          |
+| `PRINT_ERRORS`               | `--print-errors`                    | Show errors                                                                              | True          |
+| `PRINT_API_ERRORS`           | `--print-api-errors`                | Show API errors                                                                          | True          |
+| `STANDARD_INTERFACE`         | `--standard-interface`              | Silence all non-mandatory prints and loaders, instead show a standardized dashboard      | False         |
+| `FFMPEG_LOG_LEVEL`           | `--ffmpeg-log-level`                | FFMPEG's logged level of detail when completing a transcoded download                    | error         |
 
-\* very_high (320k) is limited to Premium accounts only  
+**\* very_high (320k) is limited to Premium accounts only**
+
+**\*\* Developer Apps created before 2026-02 *may* be legacy**
 
 </details>
 
@@ -225,37 +257,77 @@ The options `CREDENTIALS_LOCATION` and `SONG_ARCHIVE_LOCATION` use the following
 
 ## Output Formatting
 
-With the option `OUTPUT` (or the commandline parameter `--output`) you can specify the pattern for the file structure of downloaded songs (not podcasts).  
-The value is relative to the `ROOT_PATH` directory and may contain the following placeholders:
+With the option `OUTPUT` (or the commandline parameter `--output`) you can specify the pattern for the file structure of downloaded tracks (not podcasts).
+The value is relative to the `ROOT_PATH` directory and may contain the following placeholders (`ITEMTYPE` may be `track`, `album`, `artist`, or `playlist`):
 
-| Placeholder       | Description                                                  |
-|-------------------|--------------------------------------------------------------|
-| `{artist}`        | The song artist                                              |
-| `{album_artist}`  | The album artist                                             |
-| `{album}`         | The song album                                               |
-| `{song_name}`     | The song name                                                |
-| `{release_year}`  | The song release year                                        |
-| `{disc_number}`   | The disc number                                              |
-| `{track_number}`  | The track number                                             |
-| `{id}`            | The song id                                                  |
-| `{track_id}`      | The track id                                                 |
-| `{album_id}`      | (only when downloading albums) ID of the album               |
-| `{album_num}`     | (only when downloading albums) Incrementing track number     |
-| `{playlist}`      | (only when downloading playlists) Name of the playlist       |
-| `{playlist_id}`   | (only when downloading playlists) ID of the playlist         |
-| `{playlist_num}`  | (only when downloading playlists) Incrementing track number  |
+| Placeholder                            | Description                                                  |
+|----------------------------------------|--------------------------------------------------------------|
+| `{id}`                                 | The downloaded track's id                                    |
+| `{name}`                               | The downloaded track's name                                  |
+| `{artist}` / `{artists}`               | The downloaded track's artist(s)                             |
+| `{date}` / `{year}`                    | The downloaded track's release date/year                     |
+| `{track_number}` / `{disc_number}`     | The downloaded track's track/disc number                     |
+| `{eac}` / `{isrc}` / `{upc}`           | The downloaded track's EAC/ISRC/UPC code                     |
+| `{album}`                              | The album's name                                             |
+| `{album_artist}` / `{album_artists}`   | The album's artist(s)                                        |
+| `{playlist}`                           | (playlist only) The playlist's name                          |
+| `{playlist_num}`                       | (playlist only) Incrementing item number                     |
+| `{ITEMTYPE_id}`                        | (only when item relevant) The specific item's id             |
+| `{ITEMTYPE_name}`                      | (only when item relevant) The specific item's name           |
 
 ### Example Output Values
 
-`OUTPUT_PLAYLIST`       :   `{playlist}/{artist}_{song_name}`
+`OUTPUT_SINGLE`         :   `{artist}/{album}/{artist}_{song_name}`
+
+`OUTPUT_ALBUM`          :   `{album_artist}/{album}/{album_num}_{artist}_{song_name}`
 
 `OUTPUT_PLAYLIST_EXT`   :   `{playlist}/{playlist_num}_{artist}_{song_name}`
 
 `OUTPUT_LIKED_SONGS`    :   `Liked Songs/{artist}_{song_name}`
 
-`OUTPUT_SINGLE`         :   `{artist}/{album}/{artist}_{song_name}`
+`OUTPUT_LYRICS`         :   `{artist}_{song_name}`
 
-`OUTPUT_ALBUM`          :   `{album_artist}/{album}/{album_num}_{artist}_{song_name}`
+## M3U8 File Output Formatting
+
+With the option `OUTPUT_M3U8` (or the commandline parameter `--output-m3u8`) you can specify the pattern for the filename of Container playlist files. Unlike [Output Formatting](#output-formatting), this value cannot include subdirectories (no `/` or `\`) but may contain the following placeholders:
+
+| Placeholder                            | Description                                                         |
+|----------------------------------------|---------------------------------------------------------------------|
+| `{content_type}`                       | The type of content the Container holds (`track`, `episode`, etc.)  |
+| `{id}`                                 | The Container's id                                                  |
+| `{name}`                               | The Container's name                                                |
+| `{owner_id}`                           | (playlist only) The playlist owner's id                             |
+| `{owner_name}`                         | (playlist only) The playlist owner's name                           |
+| `{snapshot_id}`                        | (playlist only) The playlist's snapshot id                          |
+
+## Search Query Formatting
+
+Searches (performed with either with the mode flag `-s` or no mode flag) can be filtered with the following general format:
+
+`<search term(s)> <{filter tag} {filter value}>`
+
+Multiple filters can be stacked, with latter filters overwriting prior filters. **The `SEARCH_QUERY_SIZE` config will be overwritten by the `/limit` filter if it is set.**
+
+### Supported Filters
+
+| Filter Tag                  | Type       | Valid Values                                              | Default Value                    |
+|-----------------------------|------------|-----------------------------------------------------------|----------------------------------|
+| `/t`, `/type`               | `ITEMTYPE` | `track`, `album`, `artist`, `playlist`, `show`, `episode` | `track,album,artist,playlist`    |
+| `/s`, `/size`               | int        | 1 <= i <= 1000                                            | `SEARCH_QUERY_SIZE` Config       |
+| `/o`, `/offset`             | int        | 0 <= i <= 999                                             | 0                                |
+| `/ie`, `/include-external`  | bool       | True, False                                               | False                            |
+
+### Example Filtered Search Queries
+
+Only Search for Playlists                    :   `Awesome Tunes /t playlist`
+
+Search for Lots of Artists                   :   `Taylor /t artist /s 50`
+
+Skip the First 100 Search Results            :   `LMFAO Party Rock /o 100`
+
+Smaller Default Search, Including Podcasts   :   `Country /t track,album,artist,playlist,episode /s 5`
+
+Search for Externally-Hosted Podcasts        :   `Life is Crazy Sometimes /t show /ie True /s 30`
 
 ## Regex Formatting
 
@@ -267,15 +339,35 @@ You can add multiple patterns into a single regex by chaining the "or" construct
 
 Check for Live Performances   :   `^.*?\\(?(?:Live|Live (?:from|in|at) .*?)\\)?$`
 
+## FFMPEG Argument Formatting
+
+With `CUSTOM_FFMEPG_ARGS` (or the commandline parameter `--custom-ffmpeg-args`), you can specify additional audio processing functions to be applied to downloaded audio files. To understand available FFMPEG options and filtergraphs, see the [FFMPEG Documentation](https://ffmpeg.org/ffmpeg.html#Audio-Options) and [FFMPEG Filters Documentation](https://ffmpeg.org/ffmpeg-filters.html#Audio-Filters). Make sure to escape any extra quotes `"`, as the argument parser expects a single string of space-delimited key-value pairs.
+
+### Example FFMPEG Argument Values
+
+Increase Volume by 50%                                :   `"-af volume=1.5"`
+
+Decrease Volume by 50% for the First 30 Seconds       :   `"-af volume=0.5:enable='between(t,0,30)'"`
+
+Slow Audio Tempo to 60% (pitch/frequency unaffected)  :   `"-af atempo=0.6"`
+
+Increase Volume and Tempo by 50%                      :   `"-af volume=1.5,atempo=1.5"`
+
 ## Docker Usage
 
-### Build the docker image from the Dockerfile
+### Build a Docker Image from the Dockerfile
 
 `docker build -t zotify .`
 
-### Create and run a container from the image
+### Create and Run a Container from the Docker Image
 
-`docker run --rm -p 4381:4381 -v "$PWD/Zotify Music:/root/Music/Zotify Music" -v "$PWD/Zotify Podcasts:/root/Music/Zotify Podcasts" -it zotify`
+`docker run -it --rm -p 4381:4381 -v "$PWD/Zotify Music:/root/Music/Zotify Music" -v "$PWD/Zotify Podcasts:/root/Music/Zotify Podcasts" zotify`
+
+## Podman Usage
+
+`podman run -it --rm --name zotify --network=host -v "$PWD/Zotify Music:/root/Music/Zotify Music" -v "$PWD/Zotify Podcasts:/root/Music/Zotify Podcasts" zotify`
+
+(Recommended Additional Configs: `--cap-drop=ALL --security-opt=no-new-privileges`)
 
 ## Common Questions
 
@@ -295,7 +387,7 @@ If you see this, don't worry! Just try logging back in. If you see the incorrect
 
 </summary>
 
-If you see this, don't worry! Recent API changes have introduced rate limits, where requests for track info or audio streams may be rejected if too many requests are sent in a short time period. This can be mitigated by enabling `DOWNLOAD_REAL_TIME` and/or setting a nonzero `BULK_WAIT_TIME`. A recommended `BULK_WAIT_TIME` of `30` seconds has been shown to significantly minimize, if not completely negate, audio key request denials (see [this analysis by HxDxRx](https://github.com/zotify-dev/zotify/issues/186#issuecomment-2608381052))
+If you see this, don't worry! Recent API changes have introduced rate limits, where requests for track info or audio streams may be rejected if too many requests are sent in a short time period. This can be mitigated by setting `DOWNLOAD_RATE_LIMITER > 0` and/or setting a nonzero `BULK_WAIT_TIME`. A recommended `BULK_WAIT_TIME` of `30` seconds has been shown to significantly minimize, if not completely negate, audio key request denials (see [this analysis by HxDxRx](https://github.com/zotify-dev/zotify/issues/186#issuecomment-2608381052))
 
 </details>
 
@@ -305,18 +397,21 @@ If you see this, don't worry! Recent API changes have introduced rate limits, wh
 
 </summary>
 
-Currently no user has reported their account getting banned after using Zotify.
+Only one user has ever reported an account getting suspended after using Zotify, and this only occurred after ***several days** of non-stop usage*.
 
-It is recommended you use Zotify with a burner account.
-Alternatively, there is a configuration option labeled `DOWNLOAD_REAL_TIME`, this limits the download speed to the duration of the song being downloaded thus appearing less suspicious.
-This option is much slower and is only recommended for premium users who wish to download songs in 320kbps without buying premium on a burner account.
+Zotify is recommended for use with a burner account, in reasonable batches of content, for reasonable periods of time.
+
+Ultimately, you use this program at your own risk.
 
 </details>
 
 ## Disclaimer
 
-Zotify is intended to be used in compliance with DMCA, Section 1201, for educational, private and fair use. \
-Zotify contributors are not responsible for any misuse of the program or source code.
+Zotify is intended to be used in compliance with DMCA, Section 1201, for educational, private, and fair use.
+
+Zotify contributors are not responsible for any misuse of this program or source code.
+
+Zotify is not associated with any external entities, organizations, companies, or services.
 
 ## Contributing
 

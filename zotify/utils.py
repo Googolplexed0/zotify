@@ -1,18 +1,15 @@
-import datetime
+import ffmpy
 import os
-import re
 import subprocess
-import requests
-import music_tag
-from music_tag.file import TAG_MAP_ENTRY
-from music_tag.mp4 import freeform_set
-from mutagen.id3 import TXXX
-from time import sleep
+import re
+import time
+from datetime import datetime, timezone
+from fractions import Fraction
 from pathlib import Path, PurePath
+from shutil import move, copyfile, copyfileobj
 
 from zotify.config import Zotify
-from zotify.const import ALBUMARTIST, ARTIST, TRACKTITLE, ALBUM, YEAR, DISCNUMBER, TRACKNUMBER, ARTWORK, \
-    TOTALTRACKS, TOTALDISCS, EXT_MAP, LYRICS, COMPILATION, GENRE, EXT_MAP, MP3_CUSTOM_TAG_PREFIX, M4A_CUSTOM_TAG_PREFIX
+from zotify.const import EXT_MAP
 from zotify.termoutput import PrintChannel, Printer
 
 
@@ -23,14 +20,14 @@ def create_download_directory(dir_path: str | PurePath) -> None:
     
     # add hidden file with song ids
     hidden_file_path = PurePath(dir_path).joinpath('.song_ids')
-    if Zotify.CONFIG.get_disable_directory_archives():
+    if Zotify.CONFIG.get_no_dir_archives():
         return
     if not Path(hidden_file_path).is_file():
         with open(hidden_file_path, 'w', encoding='utf-8') as f:
             pass
 
 
-def fix_filename(name: str | PurePath | Path ):
+def fix_filename(name: str | PurePath | Path ) -> str:
     """
     Replace invalid characters on Linux/Windows/MacOS with underscores.
     list from https://stackoverflow.com/a/31976060/819417
@@ -55,102 +52,173 @@ def fix_filename(name: str | PurePath | Path ):
     return name
 
 
-def fill_output_template(output_template: str, track_metadata: dict, extra_keys: dict) -> tuple[str, str]:
+def fix_filepath(path: PurePath, rel_to: PurePath) -> PurePath:
+    """ Fix all parts of a filepath """
+    fixed_parts = [fix_filename(part) for part in path.relative_to(rel_to).parts]
     
-    for k in extra_keys:
-        output_template = output_template.replace("{"+k+"}", fix_filename(extra_keys[k]))
+    # maxlen = Zotify.CONFIG.get_max_filepath_length()
+    # fixed_parts.reverse()
+    # while len("/".join(fixed_parts)) > maxlen:
+    #     diff = len("/".join(fixed_parts)) - maxlen
+    #     trimmable = [p for p in fixed_parts if len(p) > 5]
+    #     name = trimmable[0][:max(5, len(trimmable[0]) - diff)]
+    #     fixed_parts[fixed_parts.index(trimmable[0])] = name
+    # fixed_parts.reverse()
     
-    (scraped_track_id, name, artists, artist_ids, release_date, release_year, track_number, total_tracks,
-     album, album_artists, disc_number, compilation, duration_ms, image_url, is_playable) = track_metadata.values()
-    
-    output_template = output_template.replace("{artist}", fix_filename(artists[0]))
-    output_template = output_template.replace("{album_artist}", fix_filename(album_artists[0]))
-    output_template = output_template.replace("{album}", fix_filename(album))
-    output_template = output_template.replace("{song_name}", fix_filename(name))
-    output_template = output_template.replace("{release_year}", fix_filename(release_year))
-    output_template = output_template.replace("{disc_number}", fix_filename(disc_number))
-    output_template = output_template.replace("{track_number}", fix_filename(track_number))
-    output_template = output_template.replace("{total_tracks}", fix_filename(total_tracks))
-    output_template = output_template.replace("{id}", fix_filename(scraped_track_id))
-    output_template = output_template.replace("{track_id}", fix_filename(scraped_track_id))
-    
-    ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower())
-    output_template += f".{ext}"
-    
-    return output_template, fix_filename(artists[0]) + ' - ' + fix_filename(name)
+    return rel_to.joinpath(*fixed_parts)
 
 
-def walk_directory_for_tracks(path: str | PurePath) -> set[Path]:
-    # path must already exist
-    track_paths = set()
-    
-    for dirpath, dirnames, filenames in os.walk(Path(path)):
+def walk_directory_for_tracks(root_path: PurePath):
+    Path(root_path).mkdir(parents=True, exist_ok=True)
+    for dirpath, dirnames, filenames in os.walk(Path(root_path)):
         for filename in filenames:
-            if filename.endswith(tuple(set(EXT_MAP.values()))):
-                track_paths.update({Path(dirpath) / filename,})
+            if filename.endswith(tuple(EXT_MAP.values())):
+                yield PurePath(dirpath) / filename
+
+
+def pathlike_move_safe(src: PurePath | bytes, dst: PurePath, copy: bool = False) -> PurePath:
+    Path(dst.parent).mkdir(parents=True, exist_ok=True)
     
-    return track_paths
+    if not isinstance(src, PurePath):
+        with Path(dst).open("wb") as file:
+            copyfileobj(src, file)
+        return dst
+    
+    if not copy:
+        # Path(oldpath).rename(newpath)
+        move(src, dst)
+    else:
+        copyfile(src, dst)
+    return dst
+
+
+def check_path_dupes(path: PurePath) -> PurePath:
+    if not (Path(path).is_file() and Path(path).stat().st_size):
+        return path
+    c = len([file for file in Path(path.parent).iterdir() if file.match(path.stem + "*")])
+    new_path = path.with_stem(f"{path.stem}_{c}") # guaranteed to be unique
+    return new_path
+
+
+def get_common_dir(allpaths: set[PurePath]) -> PurePath:
+    if len({p.name for p in allpaths}) == 1:
+        # only one path or only multiples of one path
+        return allpaths.pop().parent
+    return PurePath(os.path.commonpath(allpaths))
 
 
 # Input Processing Utils
-def regex_input_for_urls(search_input: str, non_global: bool = False) -> tuple[
-    str | None, str | None, str | None, str | None, str | None, str | None]:
-    """ Since many kinds of search may be passed at the command line, process them all here. """
+def safe_typecast(d: dict, k: str, to_cast: type, except_channel: PrintChannel = PrintChannel.WARNING):
+    raw_val = d.get(k)
+    if raw_val is None:
+        return None
+    elif isinstance(raw_val, to_cast):
+        return raw_val
+    elif to_cast is bool:
+        if str(raw_val).lower() in {"0", "no", "false"}:
+            return False
+        return True
+    elif to_cast is float and isinstance(raw_val, str) and "/" in raw_val:
+        return Fraction(''.join(raw_val.split()))
+    try:
+        return to_cast(raw_val)
+    except Exception:
+        Printer.hashtaged(except_channel, f'COULD NOT CAST VALUE OF KEY "{k}" TO TYPE {str(to_cast).upper()}')
+        raise
+
+
+def strlist_compressor(strs: list[str]) -> str:
+    res = []
+    for s in strs:
+        res.extend(s.split())
+    return " ".join(res)
+
+
+def bulk_regex_urls(urls: str | list[str]) -> list[list[str]]:
+    if isinstance(urls, list):
+        urls = strlist_compressor(urls)
     
-    link_types = ("track", "album", "playlist", "episode", "show", "artist")
-    base_uri = r'^sp'+r'otify:%s:([0-9a-zA-Z]{22})$'
-    base_url = r'^(?:https?://)?open\.sp'+r'otify\.com(?:/intl-\w+)?/%s/([0-9a-zA-Z]{22})(?:\?si=.+?)?$'
-    if non_global:
-        base_uri = base_uri[1:-1]
-        base_url = base_url[1:-1]
+    base_uri = r'%s[:/]([0-9a-zA-Z]{22})'
     
-    result = [None, None, None, None, None, None]
-    for i, req_type in enumerate(link_types):
-        uri_res = re.search(base_uri % req_type, search_input)
-        url_res = re.search(base_url % req_type, search_input)
+    matched_uris = []
+    from zotify.api import ITEM_FETCH
+    for req_type in ITEM_FETCH:
+        ids_by_type = re.findall(base_uri % req_type.type_attr, urls)
+        matched_uris.append([f"{req_type.type_attr}:{s}" for s in ids_by_type])
+    return matched_uris
+
+
+def edge_zip(sorted_list: list) -> list:
+    """ Performs sort in place: [1,2,3,4,5] -> [1,5,2,4,3] (Assumes list is ascending) """
+    n = len(sorted_list)
+    sorted_list[::2], sorted_list[1::2] = sorted_list[:(n+1)//2], sorted_list[:(n+1)//2-1:-1]
+    return sorted_list
+
+
+def arg_comb(*args: str):
+    return "&" + "&".join(args) if args else ""
+
+
+def clamp(low: int, i: int, high: int) -> int:
+    return max(low, min(i, high))
+
+
+def select(items: list, inline_prompt: str = 'ID(s): ', first_ID: int = 1, only_one: bool = False) -> list:
+    Printer.user_make_select_prompt(only_one)
+    while True:
+        selection = ""
+        while not selection or selection == " ":
+            selection = Printer.get_input(inline_prompt)
         
-        if uri_res is not None or url_res is not None:
-            result[i] = uri_res.group(1) if uri_res else url_res.group(1)
-    
-    return tuple(result)
-
-
-def split_sanitize_intrange(raw_input: str) -> list[int]:
-    """ Returns a list of IDs from a string input, including ranges and single IDs """
-    
-    # removes all non-numeric characters except for commas and hyphens
-    sanitized = re.sub(r"[^\d\-,]*", "", raw_input.strip())
+        # only allow digits and commas and hyphens
+        sanitized = re.sub(r"[^\d\-,]*", "", selection.strip())
+        if [s for s in sanitized if s.isdigit()]:
+            break # at least one digit
+        Printer.hashtaged(PrintChannel.MANDATORY, 'INVALID SELECTION')
     
     if "," in sanitized:
         IDranges = sanitized.split(',')
     else:
         IDranges = [sanitized,]
     
-    inputs = []
+    indices = []
     for ids in IDranges:
         if "-" in ids:
             start, end = ids.split('-') # will probably error if this is a negative number or malformed range
-            inputs.extend(list(range(int(start), int(end) + 1)))
+            indices.extend(list(range(int(start), int(end) + 1)))
         else:
-            inputs.append(int(ids))
-    inputs.sort()
-    
-    return inputs
+            indices.append(int(ids))
+    indices.sort()
+    return [items[i-first_ID] for i in (indices[:1] if only_one else indices) if i-first_ID >= 0]
 
 
-# Metadata Utils
-def conv_artist_format(artists: list[str], FORCE_NO_LIST: bool = False) -> list[str] | str:
-    """ Returns converted artist format """
+# Metadata & Codec Utils
+def unconv_artist_format(artists: list[str] | str) -> list[str]:
     if Zotify.CONFIG.get_artist_delimiter() == "":
-        # if len(artists) == 1:
-        #     return artists[0]
-        return ", ".join(artists) if FORCE_NO_LIST else artists
+        return artists
+    return artists.split(Zotify.CONFIG.get_artist_delimiter())
+
+
+def conv_artist_format(artists: list, FORCE_NO_LIST: bool = False) -> list[str] | str:
+    """ Returns converted artist format """
+    
+    from zotify.api import Artist
+    artists: list[Artist] | list[str] = artists
+    if not artists:
+        return ""
+    
+    artist_names = [a.name for a in artists] if isinstance(artists[0], Artist) else artists
+    if Zotify.CONFIG.get_artist_delimiter() == "":
+        # if len(artist_names) == 1:
+        #     return artist_names[0]
+        return ", ".join(artist_names) if FORCE_NO_LIST else artist_names
     else:
-        return Zotify.CONFIG.get_artist_delimiter().join(artists)
+        return Zotify.CONFIG.get_artist_delimiter().join(artist_names)
 
 
 def conv_genre_format(genres: list[str]) -> list[str] | str:
     """ Returns converted genre format """
+    
     if not genres:
         return ""
     
@@ -165,184 +233,28 @@ def conv_genre_format(genres: list[str]) -> list[str] | str:
         return Zotify.CONFIG.get_genre_delimiter().join(genres)
 
 
-def set_audio_tags(track_path: PurePath, track_metadata: dict, total_discs: str | None, genres: list[str], lyrics: list[str] | None) -> None:
-    """ sets music_tag metadata """
-    
-    (scraped_track_id, track_name, artists, artist_ids, release_date, release_year, track_number, total_tracks,
-     album, album_artists, disc_number, compilation, duration_ms, image_url, is_playable) = track_metadata.values()
-    ext = EXT_MAP[Zotify.CONFIG.get_download_format().lower()]
-    
-    tags = music_tag.load_file(track_path)
-    
-    # Reliable Tags
-    tags[ARTIST] = conv_artist_format(artists)
-    tags[GENRE] = conv_genre_format(genres)
-    tags[TRACKTITLE] = track_name
-    tags[ALBUM] = album
-    tags[ALBUMARTIST] = conv_artist_format(album_artists)
-    tags[YEAR] = release_year
-    tags[DISCNUMBER] = disc_number
-    tags[TRACKNUMBER] = track_number
-    
-    # Unreliable Tags
-    if ext == "mp3":
-        tags.mfile.tags.add(TXXX(encoding=3, desc='TRACKID', text=[scraped_track_id]))
-    elif ext == "m4a":
-        freeform_set(tags, M4A_CUSTOM_TAG_PREFIX + "trackid",  type('tag', (object,), {'values': [scraped_track_id]})())
-    else:
-        tags.tag_map["trackid"] = TAG_MAP_ENTRY(getter="trackid", setter="trackid", type=str)
-        tags["trackid"] = scraped_track_id
-    
-    if Zotify.CONFIG.get_disc_track_totals():
-        tags[TOTALTRACKS] = total_tracks
-        if total_discs is not None:
-            tags[TOTALDISCS] = total_discs
-    
-    if compilation:
-        tags[COMPILATION] = compilation
-    
-    if lyrics and Zotify.CONFIG.get_save_lyrics_tags():
-        tags[LYRICS] = "".join(lyrics)
-    
-    if ext == "mp3" and not Zotify.CONFIG.get_disc_track_totals():
-        # music_tag python library writes DISCNUMBER and TRACKNUMBER as X/Y instead of X for mp3
-        # this method bypasses all internal formatting, probably not resilient against arbitrary inputs
-        tags.set_raw("mp3", "TPOS", str(disc_number))
-        tags.set_raw("mp3", "TRCK", str(track_number))
-    
-    tags.save()
+def pct_error(act: float | int, expct: float | int) -> float:
+    act = float(act); expct = float(expct)
+    return abs(act - expct) / expct
 
 
-def get_audio_tags(track_path: Path) -> tuple[tuple, tuple]:
-    tags = music_tag.load_file(track_path)
-    
-    artists = conv_artist_format(tags[ARTIST].values)
-    genres = conv_genre_format(tags[GENRE].values)
-    track_name = tags[TRACKTITLE].val
-    album_name = tags[ALBUM].val
-    album_artist = conv_artist_format(tags[ALBUMARTIST].values)
-    release_year = str(tags[YEAR].val)
-    disc_number = str(tags[DISCNUMBER].val)
-    track_number = str(tags[TRACKNUMBER].val).zfill(2)
-    
-    unreliable_tags = [TOTALTRACKS, TOTALDISCS, COMPILATION, LYRICS]
-    custom_tags = ["trackid"]
-    if track_path.suffix.lower() == ".mp3":
-        custom_tags = [MP3_CUSTOM_TAG_PREFIX + tag.upper() for tag in custom_tags]
-    elif track_path.suffix.lower() == ".m4a":
-        custom_tags = [M4A_CUSTOM_TAG_PREFIX + tag for tag in custom_tags]
-    unreliable_tags.extend(custom_tags)
-    
-    # Printer.debug(tags.mfile.tags.__dict__)
-    tag_dict = dict(tags.mfile.tags)
-    utag_vals = []
-    for utag in unreliable_tags:
-        val = None
-        fetch_method = "legit"
-        try:
-            val = tags[utag].val
-        except:
-            fetch_method = "hacky"
-            if utag in tag_dict:
-                val = tag_dict[utag]
-        
-        if utag == LYRICS:
-            val = [line + "\n" for line in val.splitlines()]
-        elif utag == COMPILATION:
-            val = int(val)
-        elif MP3_CUSTOM_TAG_PREFIX in utag:
-            val = val.text
-            if len(val) == 1:
-                val = val[0]
-        elif M4A_CUSTOM_TAG_PREFIX in utag:
-            if len(val) == 1:
-                val = val[0].decode()
-            else:
-                val = [v.decode() for v in val]
-        else:
-            val = val[0] if isinstance(val, (list, tuple)) and len(val) == 1 else val
-            val = val if val else None
-        # Printer.debug(f"{fetch_method} {utag}", val)
-        utag_vals.append(val)
-    
-    return (artists, genres, track_name, album_name, album_artist, release_year, disc_number, track_number), \
-           tuple(utag_vals)
-
-
-def compare_audio_tags(track_path: str | Path, reliable_tags: tuple, unreliable_tags: tuple) -> list | bool:
-    """ Compares music_tag metadata to provided metadata, returns Truthy value if discrepancy is found """
-    
-    reliable_tags_onfile, unreliable_tags_onfile = get_audio_tags(track_path)
-    
-    mismatches = []
-    
-    # Definite tags must match
-    if len(reliable_tags) != len(reliable_tags_onfile):
-        if not Zotify.CONFIG.debug():
-            return True
-    
-    for i in range(len(reliable_tags)):
-        if isinstance(reliable_tags[i], list) and isinstance(reliable_tags_onfile[i], list):
-            if sorted(reliable_tags[i]) != sorted(reliable_tags_onfile[i]):
-                mismatches.append( (reliable_tags[i], reliable_tags_onfile[i]) )
-        else:
-            if str(reliable_tags[i]) != str(reliable_tags_onfile[i]):
-                mismatches.append( (reliable_tags[i], reliable_tags_onfile[i]) )
-    
-    if mismatches:
-        return mismatches
-    
-    # If more unreliable tags are received from API than found on file, assume the file is outdated
-    if sum([bool(tag) for tag in unreliable_tags]) > sum([bool(tag) for tag in unreliable_tags_onfile]):
-        if not Zotify.CONFIG.get_strict_library_verify() and not Zotify.CONFIG.debug():
-            return True
-    
-    # stickler check for unreliable tags
-    for i in range(len(unreliable_tags)):
-        if isinstance(unreliable_tags[i], list) and isinstance(unreliable_tags_onfile[i], list):
-            # do not sort lyrics, since order matters
-            if unreliable_tags[i] != unreliable_tags_onfile[i]:
-                mismatches.append( (unreliable_tags[i], unreliable_tags_onfile[i]) )
-        else:
-            if str(unreliable_tags[i]) != str(unreliable_tags_onfile[i]):
-                mismatches.append( (unreliable_tags[i], unreliable_tags_onfile[i]) )
-    
-    return mismatches
-
-
-def set_music_thumbnail(track_path: PurePath, image_url: str, mode: str) -> None:
-    """ Fetch an album cover image, set album cover tag, and save to file if desired """
-    
-    # jpeg format expected from request
-    img = requests.get(image_url).content
-    tags = music_tag.load_file(track_path)
-    tags[ARTWORK] = img
-    tags.save()
-    
-    if not Zotify.CONFIG.get_album_art_jpg_file():
-        return
-    
-    jpg_filename = 'cover.jpg' if '{album}' in Zotify.CONFIG.get_output(mode) else track_path.stem + '.jpg'
-    jpg_path = Path(track_path).parent.joinpath(jpg_filename)
-    
-    if not jpg_path.exists():
-        with open(jpg_path, 'wb') as jpg_file:
-            jpg_file.write(img)
+def run_ffm(in_path: PurePath, in_cmd: list[str] | None, out_path: PurePath | None = None, out_cmd: list[str] | None = None) -> str:
+        FFclass = ffmpy.FFmpeg if out_path else ffmpy.FFprobe
+        overwrite = ['-y'] if out_path else []
+        ff_m = FFclass(
+            global_options=['-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'] + overwrite,
+            inputs={in_path: in_cmd},
+            outputs={out_path: out_cmd} if out_path else None
+        )
+        stdout, stderr = ff_m.run(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        loggable_output = ("STDOUT:\n" + (stdout.decode().replace('\r\n', '\n') if stdout else ""),
+                           "STDERR:\n" + (stderr.decode().replace('\r\n', '\n') if stderr else ""))
+        Printer.logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
+        if out_path and Path(in_path).exists(): Path(in_path).unlink()
+        return stdout.decode().strip()
 
 
 # Time Utils
-def get_downloaded_track_duration(filename: str) -> float:
-    """ Returns the downloaded file's duration in seconds """
-    
-    command = ['ffprobe', '-show_entries', 'format=duration', '-i', f'{filename}']
-    output = subprocess.run(command, capture_output=True)
-    
-    duration = re.search(r'[\D]=([\d\.]*)', str(output.stdout)).groups()[0]
-    duration = float(duration)
-    
-    return duration
-
-
 def fmt_duration(duration: float | int, unit_conv: tuple[int] = (60, 60), connectors: tuple[str] = (":", ":"), smallest_unit: str = "s", ALWAYS_ALL_UNITS: bool = False) -> str:
     """ Formats a duration to a time string, defaulting to seconds -> hh:mm:ss format """
     duration_secs = int(duration // 1)
@@ -365,127 +277,212 @@ def fmt_duration(duration: float | int, unit_conv: tuple[int] = (60, 60), connec
         return f'{h}'.zfill(2) + connectors[0] + f'{m}'.zfill(2) + connectors[1] + f'{s}'.zfill(2)
 
 
-def strptime_utc(dtstr) -> datetime.datetime:
-    return datetime.datetime.strptime(dtstr[:-1], '%Y-%m-%dT%H:%M:%S').replace(tzinfo=datetime.timezone.utc)
+def dt_to_str(dt: datetime) -> str:
+    return dt.strftime(r'%Y-%m-%d_%H:%M:%S')
 
 
-def wait_between_downloads() -> None:
+def timestamp_utc(timestamp_ms: str | None) -> str | None:
+    if not timestamp_ms: return None
+    dt = datetime.fromtimestamp(int(timestamp_ms) / 1000, tz=timezone.utc)
+    return dt_to_str(dt)
+
+
+def strptime_utc(dtstr: str) -> datetime:
+    return datetime.strptime(dtstr[:-1], r'%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
+
+
+def wait_between_downloads(skip_wait: bool = False) -> None:
     waittime = Zotify.CONFIG.get_bulk_wait_time()
     if not waittime or waittime <= 0:
         return
     
+    if skip_wait:
+        time.sleep(min(0.5, waittime))
+        return
+    
     if waittime > 5:
         Printer.hashtaged(PrintChannel.DOWNLOADS, f'PAUSED: WAITING FOR {waittime} SECONDS BETWEEN DOWNLOADS')
-    sleep(waittime)
+    time.sleep(waittime)
 
 
 # Song Archive Utils
-def get_archived_entries() -> list[str]:
-    """ Returns list of all time downloaded song entries """
+class SongArchive:
+    """ Entry: id, date, author, name, filepath (only filename if from legacy archive) """
+    UPDATE_ARCHIVE: bool = False
     
-    archive_path = Zotify.CONFIG.get_song_archive_location()
+    def __init__(self, dir_path: PurePath | None = None):
+        self._global = dir_path is None
+        self.filepath = Zotify.CONFIG.get_song_archive_location() if dir_path is None else dir_path / '.song_ids'
+        self.mode = 'a' if Path(self.filepath).exists() else 'w'
+        self.disabled = not Path(self.filepath).exists() or \
+                        (Zotify.CONFIG.get_no_song_archive() if self._global else Zotify.CONFIG.get_no_dir_archives())
     
-    entries = []
-    if Path(archive_path).exists() and not Zotify.CONFIG.get_disable_song_archive():
-        with open(archive_path, 'r', encoding='utf-8') as f:
-            entries = f.readlines()
-    
-    return entries
-
-
-def get_archived_song_ids() -> list[str]:
-    """ Returns list of all-time downloaded track_ids """
-    
-    entries = get_archived_entries()
-    
-    track_ids = [entry.strip().split('\t')[0] for entry in entries]
-    
-    return track_ids
-
-
-def add_to_song_archive(track_id: str, filename: str, author_name: str, track_name: str) -> None:
-    """ Adds song id to all time installed songs archive """
-    
-    if Zotify.CONFIG.get_disable_song_archive():
-        return
-    
-    archive_path = Zotify.CONFIG.get_song_archive_location()
-    if Path(archive_path).exists():
-        with open(archive_path, 'a', encoding='utf-8') as file:
-            file.write(f'{track_id}\t{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t{author_name}\t{track_name}\t{filename}\n')
-    else:
-        with open(archive_path, 'w', encoding='utf-8') as file:
-            file.write(f'{track_id}\t{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t{author_name}\t{track_name}\t{filename}\n')
-
-
-def get_directory_song_ids(download_path: str) -> list[str]:
-    """ Gets song ids of songs in directory """
-    
-    track_ids = []
-    
-    hidden_file_path = PurePath(download_path).joinpath('.song_ids')
-    
-    if Path(hidden_file_path).is_file() and not Zotify.CONFIG.get_disable_directory_archives():
-        with open(hidden_file_path, 'r', encoding='utf-8') as file:
-            track_ids.extend([line.strip().split('\t')[0] for line in file.readlines()])
-    
-    return track_ids
-
-
-def add_to_directory_song_archive(track_path: PurePath, track_id: str, author_name: str, track_name: str) -> None:
-    """ Appends song_id to .song_ids file in directory """
-    
-    if Zotify.CONFIG.get_disable_directory_archives():
-        return
-    
-    hidden_file_path = track_path.parent / '.song_ids'
-    # not checking if file exists because we need an exception
-    # to be raised if something is wrong
-    with open(hidden_file_path, 'a', encoding='utf-8') as file:
-        file.write(f'{track_id}\t{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\t{author_name}\t{track_name}\t{track_path.name}\n')
-
-
-# Playlist File Utils
-def add_to_m3u8(duration_ms: int, track_name: str, track_path: PurePath, m3u8_path: PurePath | None) -> str | None:
-    """ Adds song to a .m3u8 playlist, returning the song label in m3u8 format"""
-    
-    if m3u8_path is None:
-        m3u_dir = Zotify.CONFIG.get_m3u8_location()
-        if m3u_dir is None:
-            m3u_dir = track_path.parent
-        m3u8_path = m3u_dir / (Zotify.DATETIME_LAUNCH + "_zotify.m3u8")
-    elif m3u8_path.name == "Liked Songs.m3u8": # may get confused if playlist is named "Liked Songs"
-        m3u8_path = track_path.parent / (Zotify.DATETIME_LAUNCH + "_zotify.m3u8")
-        if not Path(track_path.parent / "Liked Songs.m3u8").exists() or "justCreatedLikedSongsM3U8" in globals():
-            m3u8_path = track_path.parent / "Liked Songs.m3u8"
-            global justCreatedLikedSongsM3U8; justCreatedLikedSongsM3U8 = True # hacky, terrible, truly awful: too bad!
-    
-    if not Path(m3u8_path).exists():
-        Path(m3u8_path.parent).mkdir(parents=True, exist_ok=True)
-        with open(m3u8_path, 'x', encoding='utf-8') as file:
-            file.write("#EXTM3U\n\n")
-    
-    track_label_m3u = None
-    with open(m3u8_path, 'a', encoding='utf-8') as file:
-        track_label_m3u = f"#EXTINF:{duration_ms // 1000}, {track_name}\n"
-        if Zotify.CONFIG.get_m3u8_relative_paths():
-            track_path = os.path.relpath(track_path, m3u8_path.parent)
+    def upgrade_legacy_archive(self, entries: list[str]) -> None:
+        """ Attempt to match a legacy archive's filename to a full filepath """
         
-        file.write(track_label_m3u)
-        file.write(f"{track_path}\n\n")
-    return track_label_m3u
+        rewrite_legacy = False
+        from zotify.api import Track
+        for i, entry in enumerate(entries):
+            entry_items = entry.strip().split('\t')
+            filename_or_path = PurePath(entry_items[-1])
+            if filename_or_path.is_absolute():
+                entries[i] = entry_items
+                continue
+            
+            rewrite_legacy = True
+            path_entry = filename_or_path
+            for glob_path in Path(Zotify.CONFIG.get_root_path()).glob('**/' + str(filename_or_path)):
+                reliable_tags, unreliable_tags = Track.read_audio_tags(PurePath(glob_path))
+                if ("trackid" in unreliable_tags and unreliable_tags["trackid"] == entry_items[0]
+                or  unconv_artist_format(reliable_tags[0])[0] == entry_items[2]
+                or  reliable_tags[2] == entry_items[3]):
+                    path_entry = PurePath(glob_path)
+                    break
+            
+            entries[i] = entry_items[:-1] + [path_entry]
+        
+        if rewrite_legacy:
+            Path(self.filepath).unlink()
+            mode = 'w'
+            for entry in entries:
+                self.add_entry(*entry, mode)
+                mode = 'a'
+    
+    def read_entries(self) -> list[str]:
+        if self.disabled:   return []
+        
+        with open(self.filepath, 'r', encoding='utf-8') as f:
+            entries = f.readlines()
+        if self._global and SongArchive.UPDATE_ARCHIVE:
+            SongArchive.UPDATE_ARCHIVE = False
+            self.upgrade_legacy_archive(entries)
+            return self.read_entries()
+        return entries
+    
+    def ids(self) -> list[str]:
+        return [e.strip().split('\t')[0] for e in self.read_entries()]
+    
+    def paths(self) -> list[PurePath]:
+        return [PurePath(e.strip().split('\t')[-1]) for e in self.read_entries()]
+    
+    def id_path(self, item_id: str) -> PurePath:
+        return self.paths()[self.ids().index(item_id)]
+    
+    def add_entry(self, item_id: str, timestamp: str, author_name: str, item_name: str, item_path: PurePath, mode: str) -> None:
+        if not timestamp:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        entry = f'{item_id}\t{timestamp}\t{author_name}\t{item_name}\t{item_path}\n'
+        with open(self.filepath, mode, encoding='utf-8') as file:
+            file.write(entry)
+    
+    def add_obj(self, obj, item_path: PurePath) -> None:
+        if self.disabled: return
+        from zotify.api import Track, Episode
+        obj: Track | Episode = obj
+        author_name = obj.artists[0].name if isinstance(obj, Track) else obj.show.publisher
+        item_name = obj.name if isinstance(obj, Track) else str(obj)
+        self.add_entry(obj.id, "", author_name, item_name, item_path, self.mode)
 
 
-def fetch_m3u8_songs(m3u8_path: PurePath) -> list[str] | None:
-    """ Fetches the songs and associated file paths in an .m3u8 playlist"""
+# M3U8 Playlist File Utils
+class M3U8():
+    def __init__(self, cont_paths: list[PurePath | None], cont_type: type, parent_cont):
+        from zotify.api import Content, Container, Query
+        self.cont_type: type[Content] = cont_type
+        parent_cont: Container | Query = parent_cont
+        self.name = self.cont_type.uppers if isinstance(parent_cont, Query) else f'"{parent_cont.name}"'
+        
+        dir = Zotify.CONFIG.get_m3u8_location()
+        if not dir: dir = self.dynamic_dir(cont_paths)
+        self.path = dir / (self.fill_output_template(parent_cont) + ".m3u8") if dir else None
     
-    if not Path(m3u8_path).exists():
-        return
+    def fill_output_template(self, parent_cont):
+        from zotify.api import Container, Playlist, Query
+        parent_cont: Container | Query = parent_cont
+        
+        output_template = Zotify.CONFIG.get_m3u8_filename()
+        if not output_template or isinstance(parent_cont, Query):
+            return fix_filename(f"{parent_cont.id}_{self.cont_type.lowers}")
+        
+        repl_dict: dict[str, str] = {}
+        def update_repl(md_val, *replstrs: str):
+            repl_dict.update(zip(replstrs, [md_val]*len(replstrs)))
+        
+        update_repl(self.cont_type,                     "{content_type}")
+        update_repl(parent_cont.id,                     "{id}")
+        update_repl(parent_cont.name,                   "{name}")
+        
+        if isinstance(parent_cont, Playlist):
+            if parent_cont.owner:
+                update_repl(parent_cont.owner.id,       "{owner_id}")
+                update_repl(parent_cont.owner.name,     "{owner_name}")
+            update_repl(parent_cont.snapshot_id,        "{snapshot_id}")
+        
+        for replstr, md_val in repl_dict.items():
+            output_template = output_template.replace(replstr, fix_filename(md_val)) 
+        
+        return output_template
     
-    with open(m3u8_path, 'r', encoding='utf-8') as file:
-        linesraw = file.readlines()[2:-1]
-        # group by song and filepath
-        # songsgrouped = []
-        # for i in range(len(linesraw)//3):
-        #     songsgrouped.append(linesraw[3*i:3*i+3])
-    return linesraw
+    def dynamic_dir(self, cont_paths: list[PurePath | None]) -> PurePath | None:
+        paths = {path for path in cont_paths if isinstance(path, PurePath) and path.is_relative_to(self.cont_type._path_root)}
+        return get_common_dir(paths) if any(paths) else None
+    
+    @staticmethod
+    def fetch_songs(m3u8_path: PurePath) -> list[str]:
+        if not Path(m3u8_path).exists(): return []
+        
+        with open(m3u8_path, 'r', encoding='utf-8') as file:
+            linesraw = file.readlines()[2:]
+            # songsgrouped = [] # group by song and filepath
+            # for i in range(len(linesraw)//3):
+            #     songsgrouped.append(linesraw[3*i:3*i+3])
+        return linesraw
+    
+    @staticmethod
+    def find_sync_point(filepaths: list[PurePath | None], m3u8_entry_path: str) -> int | None:
+        for i, filepath in enumerate(filepaths):
+            Printer.logger(f"{filepath} == {m3u8_entry_path}")
+            if str(filepath) == m3u8_entry_path:
+                return i
+            elif str(filepath) in m3u8_entry_path:
+                Printer.hashtaged(PrintChannel.WARNING, 'TRACK FILEPATH WITHIN LIKED SONG M3U8 ENTRY\n' +
+                                                        'M3U8 MAY NOT PLAY/LINK TO FILES CORRECTLY\n' +
+                                                        'POSSIBLY FROM NON-UPDATED SONG ARCHIVE FILE\n' +
+                                                        "(CONSIDER RUNNING --update-archive)")
+                return i
+            elif m3u8_entry_path in str(filepath):
+                Printer.hashtaged(PrintChannel.WARNING, 'LIKED SONG M3U8 ENTRY WITHIN TRACK FILEPATH\n' +
+                                                        'M3U8 MAY NOT PLAY/LINK TO FILES CORRECTLY\n' +
+                                                        'POSSIBLY FROM M3U8 USING RELATIVE PATHS\n' +
+                                                        '(CONSIDER USING FULL PATHS FOR LIKED SONGS M3U8)')
+                return i
+    
+    def write(self, dlcs: list, cont_paths: list[PurePath | None]):
+        from zotify.api import DLContent, Container
+        dlcs: list[DLContent | None] = dlcs
+        
+        if self.path is None:
+            Printer.hashtaged(PrintChannel.WARNING, f'SKIPPING M3U8 CREATION FOR {self.name}\n' +
+                                                     'NO CONTENT WITH VALID FILEPATHS FOUND')
+            return
+        elif Zotify.CONFIG.get_m3u8_relative_paths():
+            cont_paths = [os.path.relpath(p, self.path.parent) if p else None for p in cont_paths]
+        
+        missing_name = f"{self.cont_type.clsn}"
+        if isinstance(self.cont_type, Container): missing_name += f" {self.cont_type._contains}"
+        
+        Path(self.path.parent).mkdir(parents=True, exist_ok=True)
+        with open(self.path, 'w', encoding='utf-8') as file:
+            file.write("#EXTM3U\n\n")
+            for i, dlc, path in zip(range(len(dlcs)), dlcs, cont_paths):
+                file.write(f"#EXTINF:{dlc.duration_ms // 1000}, {dlc}\n" if dlc else f"# Missing {missing_name} {i+1}\n")
+                file.write(f"{path}\n\n" if path else "# None\n\n")
+        
+        Printer.hashtaged(PrintChannel.MANDATORY, f'M3U8 CREATED FOR {self.name}\n' +
+                                                  f'SAVED TO: {self.cont_type.rel_path(self.path)}')
+    
+    def append(self, append_strs: list[str]):
+        if self.path is None or not Path(self.path).exists() or not append_strs:
+            return
+        with open(self.path, 'a', encoding='utf-8') as file:
+            file.writelines(append_strs)

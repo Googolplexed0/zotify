@@ -147,6 +147,7 @@ cython_debug/
 
 # uv dependencies 
 uv.lock
+.python-version
 
 # Configuration
 .zotify/

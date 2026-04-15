@@ -1,326 +1,230 @@
-from argparse import Namespace
-from librespot.audio.decoders import AudioQuality
-from pathlib import Path, PurePath
+from argparse import Namespace, Action
+from pathlib import Path
 
-from zotify.album import download_album, download_artist_albums
 from zotify.config import Zotify
-from zotify.const import TRACK, NAME, ID, ARTIST, ARTISTS, ITEMS, TRACKS, EXPLICIT, ALBUM, ALBUMS, OWNER, \
-    PLAYLIST, PLAYLISTS, DISPLAY_NAME, USER_FOLLOWED_ARTISTS_URL, USER_SAVED_TRACKS_URL, SEARCH_URL, TRACK_BULK_URL
-from zotify.playlist import get_playlist_info, download_from_user_playlist, download_playlist
-from zotify.podcast import download_episode, download_show
+from zotify.const import *
 from zotify.termoutput import Printer, PrintChannel
-from zotify.track import download_track, update_track_metadata
-from zotify.utils import split_sanitize_intrange, regex_input_for_urls, walk_directory_for_tracks, get_archived_entries
+from zotify.utils import bulk_regex_urls, clamp, select
 
 
-def download_from_urls(urls: list[str]) -> int:
-    """ Downloads from a list of urls """
-    download = 0
+def filter_search_query(search_query: str, item_types: tuple[str]) -> dict[str, str | int]:
+    max_items = 1000
+    default_size = clamp(1, Zotify.CONFIG.get_search_query_size(), max_items)
+    search_filters: dict[str, list[set | str]] = {
+        TYPE:               [{'/t',  '/type',},                  ','.join(item_types[:4])   ],
+        SEARCH_QUERY_SIZE:  [{'/l',  '/limit', '/s', '/size',},  default_size               ],
+        OFFSET:             [{'/o',  '/offset',},                0                          ],
+        INCLUDE_EXTERNAL:   [{'/ie', '/include-external',},      "False"                    ],
+        'q':                [{},                                 search_query               ],
+    }
+    for k, v in search_filters.items():
+        search_filters[k][0] = {" " + flag + " " for flag in v[0]}
     
-    pos = 7
-    pbar = Printer.pbar(urls, unit='url', pos=pos, 
-                        disable=not Zotify.CONFIG.get_show_url_pbar())
-    pbar_stack = [pbar]
-    Printer.debug(f'Starting Download of {len(urls)} URLs')
+    if "/" not in search_query:
+        return {k: v[-1] for k, v in search_filters.items() if v[-1]}
     
-    for url in pbar:
-        result = regex_input_for_urls(url, non_global=True)
-        if all({res is None for res in result}):
-            Printer.hashtaged(PrintChannel.WARNING, f'No valid content_id found in {url}, skipping...')
-            continue
-        
-        track_id, album_id, playlist_id, episode_id, show_id, artist_id = result
-        if track_id is not None:
-            download_track('single', track_id, None, pbar_stack)
-        elif album_id is not None:
-            download_album(album_id, pbar_stack)
-        elif playlist_id is not None:
-            download_playlist({ID: playlist_id,
-                               NAME: get_playlist_info(playlist_id)[0]},
-                               pbar_stack)
-        elif episode_id is not None:
-            download_episode(episode_id, pbar_stack)
-        elif show_id is not None:
-            download_show(show_id, pbar_stack)
-        elif artist_id is not None:
-            download_artist_albums(artist_id, pbar_stack)
-        
-        download += 1 
-        Printer.refresh_all_pbars(pbar_stack)
+    Printer.debug(f"Filtering Search Query: {search_query}")
+    parsed_query = [search_query]
+    for filter_param in search_filters:
+        filter_flags = search_filters[filter_param][0]
+        for filter_flag in filter_flags:
+            val_and_suffix = None
+            for i, part in enumerate(parsed_query):
+                if filter_flag not in part:
+                    continue
+                parsed_query.remove(part)
+                prefix, val_and_suffix = part.split(filter_flag, 1)
+                parsed_query.insert(i, val_and_suffix)
+                parsed_query.insert(i, prefix)
+                for k, v in search_filters.items():
+                    search_filters[k][-1] = val_and_suffix if k == filter_param \
+                                      else v[-1].replace(filter_flag + val_and_suffix, "").strip()
+                break
+            if val_and_suffix:
+                break
     
-    return download
+    # type / value validation
+    for k, v in list(search_filters.items()):
+        if   k == TYPE:                fv = ",".join([t for t in v[-1].split(",") if t in item_types])
+        elif k == SEARCH_QUERY_SIZE:   fv = clamp(1, int(v[-1]), max_items)
+        elif k == OFFSET:              fv = clamp(0, int(v[-1]), max_items - 1)
+        elif k == INCLUDE_EXTERNAL:    fv = "audio" if v[-1].lower() == "true" else ""
+        else:                          fv = v[-1]
+        if fv:     search_filters[k] = fv
+        else:  del search_filters[k]
+    
+    Printer.debug(search_filters)
+    return search_filters
 
 
-def search(search_term) -> None:
-    """ Searches download server's API for relevant data """
-    params = {'limit': '10',
-              'offset': '0',
-              'q': search_term,
-              'type': 'track,album,artist,playlist'}
+def fetch_search_display(search_query: str) -> list[str]:
+    table_headers = {
+        TRACKS:     ('ID', 'Name', 'Artists'    ),
+        ALBUMS:     ('ID', 'Name', 'Artists'    ),
+        ARTISTS:    ('ID', 'Name'               ),
+        PLAYLISTS:  ('ID', 'Name', 'Owner'      ),
+        EPISODES:   ('ID', 'Name', 'Show'       ),
+        SHOWS:      ('ID', 'Name', 'Publisher'  ),
+    }
+    params = filter_search_query(search_query, tuple(t[:-1] for t in table_headers))
     
-    # Parse args
-    splits = search_term.split()
-    for split in splits:
-        index = splits.index(split)
-        
-        if split[0] == '-' and len(split) > 1:
-            if len(splits)-1 == index:
-                raise IndexError('No parameters passed after option: {}\n'.
-                                 format(split))
-        
-        if split == '-l' or split == '-limit':
-            try:
-                int(splits[index+1])
-            except ValueError:
-                raise ValueError('Parameter passed after {} option must be an integer.\n'.
-                                 format(split))
-            if int(splits[index+1]) > 50:
-                raise ValueError('Invalid limit passed. Max is 50.\n')
-            params['limit'] = splits[index+1]
-        
-        if split == '-t' or split == '-type':
+    url = f"{SEARCH_URL}?{MARKET_APPEND}"
+    params[LIMIT] = 50 if Zotify.CONFIG.permit_legacy_api() else 10
+    items: dict[str, list[dict]] = Zotify.invoke_url_nextable(url, stripper=tuple(t for t in table_headers if t[:-1] in params[TYPE]),
+                                                              max=params.pop(SEARCH_QUERY_SIZE), params=params)
+    
+    search_result_uris = []
+    for item_type, headers in table_headers.items():
+        if not any(items.get(item_type, [])): continue
+        resps: list[dict] = [i for i in items[item_type] if i is not None]
+        counter = len(search_result_uris) + 1
+        if   item_type == TRACKS:
+             data = [ [resps.index(t) + counter,
+                       str(t[NAME]) + (" [E]" if t[EXPLICIT] else ""),
+                       ', '.join([artist[NAME] for artist in t[ARTISTS]]) ] for t in resps]
+        elif item_type == ALBUMS:
+             data = [ [resps.index(m) + counter,
+                       str(m[NAME]),
+                       ', '.join([artist[NAME] for artist in m[ARTISTS]]) ] for m in resps]
+        elif item_type == ARTISTS:
+             data = [ [resps.index(a) + counter,
+                       str(a[NAME])                                       ] for a in resps]
+        elif item_type == PLAYLISTS:
+             data = [ [resps.index(p) + counter,
+                       str(p[NAME]),
+                       str(p[OWNER][DISPLAY_NAME])                        ] for p in resps]
+        if   item_type == EPISODES:
+             data = [ [resps.index(e) + counter,
+                       str(e[NAME]) + (" [E]" if e[EXPLICIT] else ""),
+                       str(e[SHOW][NAME])                                 ] for e in resps]
+        elif item_type == SHOWS:
+             data = [ [resps.index(s) + counter,
+                       str(s[NAME]) + (" [E]" if s[EXPLICIT] else ""),
+                       str(s[PUBLISHER])                                  ] for s in resps]
+        search_result_uris.extend([i[URI] for i in resps])
+        Printer.table(item_type.capitalize(), headers, data)
+    
+    return search_result_uris
 
-            allowed_types = ['track', 'playlist', 'album', 'artist']
-            passed_types = []
-            for i in range(index+1, len(splits)):
-                if splits[i][0] == '-':
-                    break
 
-                if splits[i] not in allowed_types:
-                    raise ValueError('Parameters passed after {} option must be from this list:\n{}'.
-                                     format(split, '\n'.join(allowed_types)))
-
-                passed_types.append(splits[i])
-            params['type'] = ','.join(passed_types)
+def search_and_select(search: str = ""):
+    """ Perform search Queries and allow user to select results """
+    from zotify.api import Query
     
-    if len(params['type']) == 0:
-        params['type'] = 'track,album,artist,playlist'
+    while not search or search == ' ':
+        search = Printer.get_input('Enter search: ')
     
-    # Clean search term
-    search_term_list = []
-    for split in splits:
-        if split[0] == "-":
-            break
-        search_term_list.append(split)
-    if not search_term_list:
-        raise ValueError("Invalid query.")
-    params["q"] = ' '.join(search_term_list)
+    if any(bulk_regex_urls(search)):
+        Printer.hashtaged(PrintChannel.WARNING, 'URL DETECTED IN SEARCH, TREATING SEARCH AS URL REQUEST')
+        Query(Zotify.DATETIME_LAUNCH).request(search).execute()
+        return
     
-    resp = Zotify.invoke_url_with_params(SEARCH_URL, **params)
+    search_result_uris = fetch_search_display(search)
     
-    counter = 1
-    search_results = []
-    
-    total_tracks = 0
-    if TRACK in params['type'].split(','):
-        tracks = resp[TRACKS][ITEMS]
-        if len(tracks) > 0:
-            track_data = []
-            for track in tracks:
-                if track[EXPLICIT]:
-                    explicit = '[E]'
-                else:
-                    explicit = ''
-                
-                track_data.append([counter, f'{track[NAME]} {explicit}',
-                                  ','.join([artist[NAME] for artist in track[ARTISTS]])])
-                search_results.append({
-                    ID: track[ID],
-                    NAME: track[NAME],
-                    'type': TRACK,
-                })
-                counter += 1
-            total_tracks = counter - 1
-            Printer.table("TRACKS", ('ID', 'Name', 'Artists'), track_data)
-            del tracks
-            del track_data
-    
-    total_albums = 0
-    if ALBUM in params['type'].split(','):
-        albums = resp[ALBUMS][ITEMS]
-        if len(albums) > 0:
-            album_data = []
-            for album in albums:
-                album_data.append([counter, album[NAME],
-                                  ','.join([artist[NAME] for artist in album[ARTISTS]])])
-                search_results.append({
-                    ID: album[ID],
-                    NAME: album[NAME],
-                    'type': ALBUM,
-                })
-                
-                counter += 1
-            total_albums = counter - total_tracks - 1
-            Printer.table("ALBUMS", ('ID', 'Album', 'Artists'), album_data)
-            del albums
-            del album_data
-    
-    total_artists = 0
-    if ARTIST in params['type'].split(','):
-        artists = resp[ARTISTS][ITEMS]
-        if len(artists) > 0:
-            artist_data = []
-            for artist in artists:
-                artist_data.append([counter, artist[NAME]])
-                search_results.append({
-                    ID: artist[ID],
-                    NAME: artist[NAME],
-                    'type': ARTIST,
-                })
-                counter += 1
-            total_artists = counter - total_tracks - total_albums - 1
-            Printer.table("ARTISTS", ('ID', 'Name'), artist_data)
-            del artists
-            del artist_data
-    
-    total_playlists = 0
-    if PLAYLIST in params['type'].split(','):
-        playlists = resp[PLAYLISTS][ITEMS]
-        if len(playlists) > 0:
-            playlist_data = []
-            for playlist in playlists:
-                playlist_data.append(
-                    [counter, playlist[NAME], playlist[OWNER][DISPLAY_NAME]])
-                search_results.append({
-                    ID: playlist[ID],
-                    NAME: playlist[NAME],
-                    'type': PLAYLIST,
-                })
-                counter += 1
-            total_playlists = counter - total_artists - total_tracks - total_albums - 1
-            Printer.table("PLAYLISTS", ('ID', 'Name', 'Owner'), playlist_data)
-            del playlists
-            del playlist_data
-    
-    if total_tracks + total_albums + total_artists + total_playlists == 0:
+    if not search_result_uris:
         Printer.hashtaged(PrintChannel.MANDATORY, 'NO RESULTS FOUND - EXITING...')
         return
     
-    Printer.search_select()
-    choices = split_sanitize_intrange(Printer.get_input('ID(s): '))
-    
-    if choices == [0]:
-        return
-    
-    pos = 7
-    pbar = Printer.pbar(choices, unit='choice', pos=pos, 
-                        disable=not Zotify.CONFIG.get_show_url_pbar())
-    pbar_stack = [pbar]
-    
-    for choice in pbar:
-        if choice > len(search_results):
-            continue
-        
-        selection = search_results[choice - 1]
-        if selection['type'] == TRACK:
-            download_track('single', selection[ID], None, pbar_stack)
-        elif selection['type'] == ALBUM:
-            download_album(selection[ID], pbar_stack)
-        elif selection['type'] == ARTIST:
-            download_artist_albums(selection[ID], pbar_stack)
-        else:
-            download_playlist(selection, pbar_stack)
-        Printer.refresh_all_pbars(pbar_stack)
+    uris: list[str] = select(search_result_uris)
+    Query(Zotify.DATETIME_LAUNCH).request(' '.join(uris)).execute()
 
 
-def client(args: Namespace) -> None:
-    """ Connects to download server to perform query's and get songs to download """
-    Zotify(args)
+def perform_query(args: Namespace) -> None:
+    """ Perform Query according to type """
+    from zotify.api import Query, LikedSong, UserPlaylist, FollowedArtist, SavedAlbum, VerifyLibrary
     
-    Printer.splash()
-    
-    quality_options = {
-        'auto': AudioQuality.VERY_HIGH if Zotify.check_premium() else AudioQuality.HIGH,
-        'normal': AudioQuality.NORMAL,
-        'high': AudioQuality.HIGH,
-        'very_high': AudioQuality.VERY_HIGH
-    }
-    Zotify.DOWNLOAD_QUALITY = quality_options.get(Zotify.CONFIG.get_download_quality(),
-                                                  quality_options["auto"])
-    
-    if args.file_of_urls:
-        urls: list[str] = []
-        filename: str = args.file_of_urls
-        if Path(filename).exists():
-            with open(filename, 'r', encoding='utf-8') as file:
-                urls.extend([line.strip() for line in file.readlines()])
+    try:
+        if args.urls or args.file_of_urls:
+            urls = ""
+            if args.urls:
+                urls: str = args.urls
+            elif args.file_of_urls:
+                if Path(args.file_of_urls).exists():
+                    with open(args.file_of_urls, 'r', encoding='utf-8') as file:
+                        urls = " ".join([line.strip() for line in file.readlines()])
+                else:
+                    Printer.hashtaged(PrintChannel.ERROR, f'FILE {args.file_of_urls} NOT FOUND')
             
-            download_from_urls(urls)
+            if len(urls) > 0:
+                Query(Zotify.DATETIME_LAUNCH).request(urls).execute()
+        
+        elif args.verify_library:
+            VerifyLibrary(Zotify.DATETIME_LAUNCH).execute()
+        
+        elif not Zotify.CONFIG.get_api_client_id():
+            Printer.hashtaged(PrintChannel.MANDATORY, 'NO DEVELOPER CLIENT - SEARCH AND USERITEM QUERIES NON-FUNCTIONAL')
+            return
+        
+        elif args.liked_songs:
+            LikedSong(Zotify.DATETIME_LAUNCH).execute()
+        
+        elif args.user_playlists:
+            UserPlaylist(Zotify.DATETIME_LAUNCH).execute()
+        
+        elif args.followed_artists:
+            FollowedArtist(Zotify.DATETIME_LAUNCH).execute()
+        
+        elif args.followed_albums:
+            SavedAlbum(Zotify.DATETIME_LAUNCH).execute()
+        
+        elif args.search:
+            search_and_select(args.search)
         
         else:
-            Printer.hashtaged(PrintChannel.ERROR, f'FILE {filename} NOT FOUND')
+            search_and_select()
     
-    elif args.urls:
-        if len(args.urls) > 0:
-            if len(args.urls) == 1 and " " in args.urls[0]:
-                args.urls = args.urls[0].split(' ')
-            download_from_urls(args.urls)
+    except BaseException as e:
+        # catch all but do not throw KeyboardInterrupts
+        if isinstance(e, KeyboardInterrupt):
+            Printer.hashtaged(PrintChannel.MANDATORY, "ABORTING QUERY")
+            return
+        Zotify.end()
+        raise
+
+
+def client(args: Namespace, modes: list[Action]) -> None:
+    """ Perform Queries as needed """
     
-    elif args.playlist:
-        download_from_user_playlist()
-    
-    elif args.liked_songs:
+    ask_mode = False
+    if any([getattr(args, mode.dest) for mode in modes]):
+        perform_query(args)
+    elif not args.persist:
+        # this maintains current behavior when no mode/url present
+        Printer.hashtaged(PrintChannel.MANDATORY, "NO MODE SELECTED, DEFAULTING TO SEARCH")
+        perform_query(args)
         
-        liked_songs = Zotify.invoke_url_nextable(USER_SAVED_TRACKS_URL, ITEMS)
-        pos = 3
-        pbar = Printer.pbar(liked_songs, unit='song', pos=pos, 
-                            disable=not Zotify.CONFIG.get_show_playlist_pbar())
-        pbar_stack = [pbar]
+        # TODO: decide if this alt behavior should be implemented
+        # Printer.hashtaged(PrintChannel.MANDATORY, "NO MODE SELECTED, PLEASE SELECT ONE")
+        # ask_mode = True
+    
+    while args.persist or ask_mode:
+        ask_mode = False
+        mode_data = [[i+1, mode.dest.upper().replace('_', ' ')] for i, mode in enumerate(modes)]
+        Printer.table("Modes", ("ID", "MODE"), [[0, "EXIT"]] + mode_data)
+        try:
+            selected_mode: Action | None = select([None] + modes, inline_prompt="MODE SELECTION: ", first_ID=0, only_one=True)[0]
+        except KeyboardInterrupt:
+            selected_mode = None
         
-        for song in pbar:
-            if not song[TRACK][NAME] or not song[TRACK][ID]:
-                Printer.hashtaged(PrintChannel.SKIPPING, 'SONG NO LONGER EXISTS\n' +\
-                                                        f'Track_Name: {song[TRACK][NAME]} - Track_ID: {song[TRACK][ID]}')
+        if selected_mode is None:
+            Printer.hashtaged(PrintChannel.MANDATORY, "CLOSING SESSION")
+            break
+        
+        # clear previous run modes
+        for mode in modes:
+            if mode.nargs:
+                setattr(args, mode.dest, None)
             else:
-                download_track('liked', song[TRACK][ID], None, pbar_stack)
-                pbar.set_description(song[TRACK][NAME])
-                Printer.refresh_all_pbars(pbar_stack)
-    
-    elif args.followed_artists:
-        followed_artists = Zotify.invoke_url_nextable(USER_FOLLOWED_ARTISTS_URL, ITEMS, stripper=ARTISTS)
-        pos = 7
-        pbar = Printer.pbar(followed_artists, unit='artist', pos=pos, 
-                            disable=not Zotify.CONFIG.get_show_url_pbar())
-        pbar_stack = [pbar]
+                setattr(args, mode.dest, False)
         
-        for artist in pbar:
-            download_artist_albums(artist[ID], pbar_stack)
-            pbar.set_description(artist[NAME])
-            Printer.refresh_all_pbars(pbar_stack)
-    
-    elif args.search:
-        if args.search == ' ':
-            search(Printer.get_input('Enter search: '))
+        # set new mode
+        if selected_mode.nargs:
+            mode_args = Printer.get_input(f"\nMODE ARGUMENTS ({selected_mode.dest.upper().replace('_', ' ')}): ")
+            setattr(args, selected_mode.dest, mode_args)
         else:
-            # this seems unnecessay, but the original code had this check so it gets to live another day
-            if regex_input_for_urls(args.search, non_global=True) != (None, None, None, None, None, None):
-                Printer.hashtaged(PrintChannel.WARNING, 'URL DETECTED IN SEARCH, TREATING SEARCH AS URL REQUEST')
-                download_from_urls([args.search])
-            else:
-                search(args.search)
-    
-    elif args.verify_library:
-        # ONLY WORKS WITH ARCHIVED TRACKS (THEORETICALLY GUARANTEES BULK_URL TO WORK)
-        archived_tracks = get_archived_entries()
-        archived_ids = [entry.strip().split('\t')[0] for entry in archived_tracks]
-        archived_filenames = [PurePath(entry.strip().split('\t')[4]).stem for entry in archived_tracks]
+            setattr(args, selected_mode.dest, True)
         
-        track_paths: list[Path] = []; track_ids: list[str] = []
-        library = walk_directory_for_tracks(Zotify.CONFIG.get_root_path())
-        for entry in library:
-            if entry.stem in archived_filenames:
-                track_paths.append(entry)
-                track_ids.append(archived_ids[archived_filenames.index(entry.stem)])
-        
-        tracks = Zotify.invoke_url_bulk(TRACK_BULK_URL, track_ids, TRACKS)
-        
-        pos = 1
-        pbar = Printer.pbar(track_paths, unit='tracks', pos=pos, 
-                            disable=not Zotify.CONFIG.get_show_url_pbar())
-        for i, track_path in enumerate(pbar):
-            update_track_metadata(track_ids[i], track_path, tracks[i])
+        Zotify.start()
+        perform_query(args)
     
-    else:
-        search(Printer.get_input('Enter search: '))
-    
-    Printer.debug(f"Total API Calls: {Zotify.TOTAL_API_CALLS}")
+    Zotify.end()
