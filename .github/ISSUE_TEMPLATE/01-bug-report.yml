@@ -1,7 +1,6 @@
 name: Bug Report
 title: "[Bug Report] <title>"
 description: To Request Bug Investigation and Fixes
-type: bug
 labels: ["bug"]
 projects: ["Googolplexed0/zotify"]
 assignees:
