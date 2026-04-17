@@ -68,9 +68,9 @@ def fetch_search_display(search_query: str) -> list[str]:
     }
     params = filter_search_query(search_query, tuple(t[:-1] for t in table_headers))
     
-    url = f"{SEARCH_URL}?{MARKET_APPEND}"
+    search_url = f"{SEARCH_URL}?{MARKET_APPEND}"
     params[LIMIT] = 50 if Zotify.CONFIG.permit_legacy_api() else 10
-    items: dict[str, list[dict]] = Zotify.invoke_url_nextable(url, stripper=tuple(t for t in table_headers if t[:-1] in params[TYPE]),
+    items: dict[str, list[dict]] = Zotify.invoke_url_nextable(search_url, stripper=tuple(t for t in table_headers if t[:-1] in params[TYPE]),
                                                               max=params.pop(SEARCH_QUERY_SIZE), params=params)
     
     search_result_uris = []

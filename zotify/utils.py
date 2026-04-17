@@ -239,19 +239,22 @@ def pct_error(act: float | int, expct: float | int) -> float:
 
 
 def run_ffm(in_path: PurePath, in_cmd: list[str] | None, out_path: PurePath | None = None, out_cmd: list[str] | None = None) -> str:
-        FFclass = ffmpy.FFmpeg if out_path else ffmpy.FFprobe
-        overwrite = ['-y'] if out_path else []
-        ff_m = FFclass(
-            global_options=['-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'] + overwrite,
-            inputs={in_path: in_cmd},
-            outputs={out_path: out_cmd} if out_path else None
-        )
-        stdout, stderr = ff_m.run(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        loggable_output = ("STDOUT:\n" + (stdout.decode().replace('\r\n', '\n') if stdout else ""),
-                           "STDERR:\n" + (stderr.decode().replace('\r\n', '\n') if stderr else ""))
-        Printer.logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
-        if out_path and Path(in_path).exists(): Path(in_path).unlink()
-        return stdout.decode().strip()
+    FFclass = ffmpy.FFprobe
+    ff_config = {
+        "global_options": ['-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'],
+        "inputs": {in_path: in_cmd}
+    }
+    if out_path: 
+        FFclass = ffmpy.FFmpeg
+        ff_config["global_options"].append('-y')
+        ff_config["outputs"] = {out_path: out_cmd}
+    
+    stdout, stderr = FFclass(**ff_config).run(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    loggable_output = ("STDOUT:\n" + (stdout.decode().replace('\r\n', '\n') if stdout else ""),
+                        "STDERR:\n" + (stderr.decode().replace('\r\n', '\n') if stderr else ""))
+    Printer.logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
+    if out_path and Path(in_path).exists(): Path(in_path).unlink()
+    return stdout.decode().strip()
 
 
 # Time Utils

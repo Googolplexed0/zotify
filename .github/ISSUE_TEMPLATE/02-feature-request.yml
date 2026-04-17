@@ -1,0 +1,52 @@
+name: Feature Request
+title: "[Feature Request] <title>"
+description: Suggest an Idea or Upgrade to This Project
+type: feature
+labels: ["considering", "enhancement"]
+projects: ["Googolplexed0/zotify"]
+
+body:
+  - type: dropdown
+    id: os
+    attributes:
+      label: Related Problem/Issue
+      description: Is this Feature Request related to an existing GitHub Issue or Bug Report?
+      options:
+        - Yes
+        - No
+    validations:
+      required: true
+  
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: |
+        *If Yes:* Please link to the associated GitHub Issue
+        *If No:* Please provide a clear and concise description of what the problem is
+    validations:
+      required: true
+  
+  - type: textarea
+    id: solution
+    attributes:
+      label: Ideal Solution
+      description: A clear and concise description of what you want to happen
+    validations:
+      required: true
+  
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Considered Alternatives
+      description: A clear and concise description of any alternative solutions or features you've considered
+    validations:
+      required: true
+  
+  - type: textarea
+    id: extras
+    attributes:
+      label: Additional Context
+      description: Add any other context or screenshots about the feature request here
+    validations:
+      required: false

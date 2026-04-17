@@ -48,7 +48,7 @@ class Content(HierarchicalNode):
     _to_str_attrs: list[str] = [URI, NAME]
     _to_db_attrs: list[str] = []
     _fetch_args = ""
-    url = ""
+    _url = ""
     
     def __init__(self, uri: str):
         # uri   == {type} : {id}
@@ -113,7 +113,7 @@ class Content(HierarchicalNode):
         resp = {}
         if Zotify.CONFIG.permit_legacy_api() or (Zotify.CONFIG.permit_client_api() and not cls is Playlist):
             argstr = arg_comb(cls._fetch_args, *args)
-            resp = Zotify.invoke_url(f'{cls.url}/{uri.split(":")[-1]}?{MARKET_APPEND}{argstr}')
+            resp = Zotify.invoke_url(f'{cls._url}/{uri.split(":")[-1]}?{MARKET_APPEND}{argstr}')
         else:
             resp = Zotify.invoke_libre_md(cls, uri)
             if cls is Track and resp.get(DURATION):
@@ -134,9 +134,9 @@ class Content(HierarchicalNode):
         
         if Zotify.CONFIG.permit_legacy_api() and not ContClass is Playlist:
             with Loader(f"Fetching bulk {loader_text} information...", disabled=hide_loader):
-                url = f"{ContClass.url}?{MARKET_APPEND}&{BULK_APPEND}"
+                fetch_url = f"{ContClass._url}?{MARKET_APPEND}&{BULK_APPEND}"
                 ids = [uri.split(":")[-1] for uri in uris]
-                resps = Zotify.invoke_url_bulk(url, ids, ContClass.lowers, ITEM_FETCH[ContClass])
+                resps = Zotify.invoke_url_bulk(fetch_url, ids, ContClass.lowers, ITEM_FETCH[ContClass])
             if resps: return resps
             Printer.hashtaged(PrintChannel.WARNING, 'API BULK ENDPOINTS NOT ACCESSIBLE FOR THIS CLIENT_ID\n' +
                                                     'THIS WILL ALSO INHIBIT PLAYLIST ITEM FETCHING\n' +
@@ -687,7 +687,7 @@ class Track(DLContent):
     _to_db_attrs = [TRACK_NUMBER, ARTISTS, ALBUM]
     _codec = CODEC_MAP_TRACK.get(Zotify.CONFIG.get_download_format().lower(), "copy")
     _ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower(), "ogg")
-    url = TRACK_URL
+    _url = TRACK_URL
     
     def __init__(self, uri: str) -> None:
         super().__init__(uri)
@@ -1078,7 +1078,7 @@ class Episode(DLContent):
     _to_db_attrs = [SHOW]
     _codec = CODEC_MAP_EPISODE.get(Zotify.CONFIG.get_download_format().lower(), "copy")
     _ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower(), "copy")
-    url = EPISODE_URL
+    _url = EPISODE_URL
     
     def __init__(self, uri: str):
         super().__init__(uri)
@@ -1219,10 +1219,10 @@ class Container(Content):
         with Loader(f'Fetching {self.type_attr} {item_key}...', disabled=hide_loader):
             argstr = arg_comb(self._fetch_args, *args)
             if self._nextable:
-                resp = Zotify.invoke_url_nextable(f'{self.url}/{self.id}/{item_key.replace(" ", "-")}?{MARKET_APPEND}{argstr}',
+                resp = Zotify.invoke_url_nextable(f'{self._url}/{self.id}/{item_key.replace(" ", "-")}?{MARKET_APPEND}{argstr}',
                                                   params={LIMIT: self._fetch_q, OFFSET: self.ccount})
             else:
-                resp = Zotify.invoke_url(f'{self.url}/{self.id}/{item_key.replace(" ", "-")}?{MARKET_APPEND}{argstr}')
+                resp = Zotify.invoke_url(f'{self._url}/{self.id}/{item_key.replace(" ", "-")}?{MARKET_APPEND}{argstr}')
                 _, resp = resp.popitem()
             return resp
     
@@ -1268,7 +1268,7 @@ class Playlist(Container):
     _preloaded = 100
     _fetch_q = 100
     _fetch_args = "additional_types=track%2Cepisode"
-    url = PLAYLIST_URL
+    _url = PLAYLIST_URL
     
     def __init__(self, uri: str):
         super().__init__(uri)
@@ -1316,7 +1316,7 @@ class Album(Container):
     _to_db_attrs = [TOTAL_TRACKS, ARTISTS]
     _contains = Track
     _preloaded = 50
-    url = ALBUM_URL
+    _url = ALBUM_URL
     
     def __init__(self, uri: str):
         super().__init__(uri)
@@ -1377,7 +1377,7 @@ class Artist(Container):
     _contains = Album if not _toptrackmode else TopTrack
     _fetch_q = 20 if not _toptrackmode else 100
     _nextable = not _toptrackmode
-    url = ARTIST_URL
+    _url = ARTIST_URL
     
     def __init__(self, uri: str):
         super().__init__(uri)
@@ -1403,7 +1403,7 @@ class Show(Container):
     _to_str_attrs = [TOTAL_EPISODES]
     _contains = Episode
     _preloaded = 50
-    url = SHOW_URL
+    _url = SHOW_URL
     
     def __init__(self, uri: str):
         super().__init__(uri)
@@ -1422,14 +1422,14 @@ class TopTrack(Track):
 
 
 class Chapter(DLContent):
-    url = CHAPTER_URL
+    _url = CHAPTER_URL
 
 
 class Audiobook(Container):
     _show_pbar = Zotify.CONFIG.get_show_album_pbar()
     _contains = Chapter
     _preloaded = 50
-    url = AUDIOBOOK_URL
+    _url = AUDIOBOOK_URL
     
     def __init__(self, uri: str):
         super().__init__(uri)
@@ -1668,7 +1668,7 @@ class VerifyLibrary(Query):
                 paths_per_track[uri].append(filepath)
                 track_ids.add(uri)
         
-        return paths_per_track, [self.fetch_uris_metadata(list(track_ids), Track)]
+        return paths_per_track, [self.fetch_uris_metadata(track_ids, Track)]
     
     def verify_metadata(self, path: PurePath, track: Track) -> None:
         """Overwrite metadata on file at path with fetched metadata if necessary"""
@@ -1701,22 +1701,22 @@ class VerifyLibrary(Query):
 
 class UserItem(Query):
     _contains = User
-    interactive = True
-    inner_stripper = None
-    outer_stripper = None
-    url = USER_URL
+    _interactive = True
+    _inner_stripper = None
+    _outer_stripper = None
+    _url = USER_URL
     
     def __init__(self, timestamp: str):
         super().__init__(timestamp)
         self.name = self.clsn + "s"
     
     def fetch_user_items(self) -> list[dict]:
-        with Loader(f"Fetching {self.name}...", disabled=self.interactive):
-            user_item_resps = Zotify.invoke_url_nextable(f"{self.url}?{MARKET_APPEND}", stripper=self.outer_stripper)
+        with Loader(f"Fetching {self.name}...", disabled=self._interactive):
+            user_item_resps = Zotify.invoke_url_nextable(f"{self._url}?{MARKET_APPEND}", stripper=self._outer_stripper)
         return user_item_resps
     
     def display_select_user_items(self, user_item_resps: list[dict]) -> list[dict]:
-        display_list = [[i+1, str(resp.get(self.inner_stripper, resp)[NAME])] for i, resp in enumerate(user_item_resps)]
+        display_list = [[i+1, str(resp.get(self._inner_stripper, resp)[NAME])] for i, resp in enumerate(user_item_resps)]
         Printer.table(self.uppers, ('ID', 'Name'), [[0, f"ALL {self.uppers}"]] + display_list)
         selected_item_resps: list[None | dict] = select([None] + user_item_resps, first_ID=0)
         
@@ -1729,12 +1729,12 @@ class UserItem(Query):
         self.reset()
         user_item_resps = self.fetch_user_items()
         if not user_item_resps: return
-        if self.interactive:
+        if self._interactive:
             user_item_resps = self.display_select_user_items(user_item_resps)
-        if self.inner_stripper and self._contains in {Track, Album}:
+        if self._inner_stripper and self._contains in {Track, Album}:
             for resp in user_item_resps:
-                resp[self.inner_stripper][ADDED_AT] = resp.get(ADDED_AT)
-            user_item_resps = [resp[self.inner_stripper] for resp in user_item_resps]
+                resp[self._inner_stripper][ADDED_AT] = resp.get(ADDED_AT)
+            user_item_resps = [resp[self._inner_stripper] for resp in user_item_resps]
         if self._contains is Playlist:
             user_item_resps = self.fetch_uris_metadata([resp[URI] for resp in user_item_resps], Playlist)
         self.parse_query_metadata([user_item_resps], [self._contains])
@@ -1744,9 +1744,9 @@ class UserItem(Query):
 
 class LikedSong(UserItem):
     _contains = Track
-    interactive = False
-    inner_stripper = TRACK
-    url = USER_SAVED_TRACKS_URL
+    _interactive = False
+    _inner_stripper = TRACK
+    _url = USER_SAVED_TRACKS_URL
     
     # use static portion of OUTPUT_LIKED_SONGS
     def dynamic_path_root(self) -> PurePath:
@@ -1794,16 +1794,16 @@ class LikedSong(UserItem):
 
 class SavedAlbum(UserItem):
     _contains = Album
-    inner_stripper = ALBUM
-    url = USER_SAVED_ALBUMS_URL
+    _inner_stripper = ALBUM
+    _url = USER_SAVED_ALBUMS_URL
 
 
 class UserPlaylist(UserItem):
     _contains = Playlist
-    url = USER_PLAYLISTS_URL
+    _url = USER_PLAYLISTS_URL
 
 
 class FollowedArtist(UserItem):
     _contains = Artist
-    outer_stripper = ARTISTS
-    url = USER_FOLLOWED_ARTISTS_URL
+    _outer_stripper = ARTISTS
+    _url = USER_FOLLOWED_ARTISTS_URL

@@ -1,0 +1,104 @@
+name: Bug Report
+title: "[Bug Report] <title>"
+description: To Request Bug Investigation and Fixes
+type: bug
+labels: ["bug"]
+projects: ["Googolplexed0/zotify"]
+assignees:
+  - Googolplexed0
+
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Zotify Version
+      placeholder: ex. v0.17.0
+    validations:
+      required: true
+  
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows 10
+        - Windows 11
+        - MacOS
+        - Linux (Stable)
+        - Linux (Rolling Release)
+        - Docker
+        - Podman
+        - Something Else (Include in Bug Description)
+      multiple: true
+    validations:
+      required: true
+  
+  - type: dropdown
+    id: python
+    attributes:
+      label: Python Version
+      options:
+        - Python 3.10
+        - Python 3.11
+        - Python 3.12
+        - Python 3.13
+        - Python 3.14
+        - Python 3.15+
+        - Something Else (Include in Bug Description)
+      multiple: false
+    validations:
+      required: true
+  
+  - type: textarea
+    id: command
+    attributes:
+      label: Bug-Triggering Command
+      description: The command that caused the bug/error/crash, including relevant url arguments
+      value: "zotify "
+      render: shell
+    validations:
+      required: true
+  
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug/error/crash is
+      placeholder: ex. What you wanted, what you expected to happen, what actually happened instead
+    validations:
+      required: true
+  
+  - type: upload
+    id: debug_config
+    attributes:
+      label: Upload config_DEBUG.json
+      description: Please upload the config_DEBUG.json file produced with the `--debug` flag set
+    validations:
+      required: true
+      accept: .json
+  
+  - type: upload
+    id: debug_log
+    attributes:
+      label: Upload DEBUG.log
+      description: Please upload the DEBUG.log file produced with the `--debug` flag set
+    validations:
+      required: true
+      accept: .log
+  
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Relevant Error Traceback
+      description: If not fully captured by the DEBUG.log, copy and paste any relevant console output or error traceback (this will be automatically formatted into code)
+      render: shell
+    validations:
+      required: false
+  
+  - type: upload
+    id: screenshots
+    attributes:
+      label: Upload Screenshots
+      description: If applicable, add screenshots to help explain your problem
+    validations:
+      required: false
