@@ -838,8 +838,12 @@ class Zotify:
                     raise json.decoder.JSONDecodeError()
             except json.decoder.JSONDecodeError:
                 fallback_code = resp.status_code if resp.status_code != 200 else "Unknown"
-                if fallback_code == 403:    fallback_message = "Too Many Requests, Rate Limit Exceeded"
-                else:                       fallback_message = "Received an empty response"
+                if fallback_code == 403 or fallback_code == 429:
+                    fallback_message = "Too Many Requests, Rate Limit Exceeded"
+                    if resp.headers[RETRY_AFTER]:
+                        fallback_message += f". Timed out for {resp.headers[RETRY_AFTER]} seconds."
+                else:
+                    fallback_message = "Received an empty response"
                 responsejson = {ERROR: {STATUS: fallback_code,  MESSAGE: fallback_message}}
             if resp.ok and resp.status_code == 200 and not responsejson.get(ERROR):
                 return responsejson
