@@ -828,6 +828,7 @@ class Zotify:
         while tryCount <= cls.CONFIG.get_retry_attempts():
             resp = requests.get(url, headers=headers, params=params)
             cls.TOTAL_API_CALLS += 1
+            retry_delay = 5
             if resp.status_code == 403 and not expectFail:
                 Printer.hashtaged(PrintChannel.WARNING, f'API ERROR\n' +
                                                         f'ATTEMPTING TO ACCESS FORBIDDEN ENDPOINT')
@@ -842,6 +843,7 @@ class Zotify:
                     fallback_message = "Too Many Requests, Rate Limit Exceeded"
                     if resp.headers[RETRY_AFTER]:
                         fallback_message += f". Timed out for {resp.headers[RETRY_AFTER]} seconds."
+                        retry_delay = int(resp.headers[RETRY_AFTER]) + 5
                 else:
                     fallback_message = "Received an empty response"
                 responsejson = {ERROR: {STATUS: fallback_code,  MESSAGE: fallback_message}}
@@ -856,7 +858,7 @@ class Zotify:
             tryCount += 1
             if tryCount > cls.CONFIG.get_retry_attempts():
                 break
-            sleep(5 if not expectFail else 1)
+            sleep(retry_delay if not expectFail else 1)
         
         if not expectFail:
             Printer.hashtaged(PrintChannel.API_ERROR, f'RETRY LIMIT EXCEDED\n' +
