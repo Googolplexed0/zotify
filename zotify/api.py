@@ -197,11 +197,12 @@ class Content(HierarchicalNode):
                     if not uri:  uri = f":local:{type_attr_and_ind.lower()}:{name}:::"
                     item[URI] = uri
                 
-                def unknown_user(owner_username: str | None) -> dict | None:
-                    if not owner_username: return None
-                    return { URI : f":{USER}:{owner_username}",
+                def unknown_user(username: str | None) -> dict | None:
+                    if not username: return None
+                    display_name = Zotify.get_user_display_name(username)
+                    return { URI : f":{USER}:{username}",
                              TYPE: USER,
-                             DISPLAY_NAME: owner_username   }
+                             DISPLAY_NAME: display_name   }
                 
                 activity_period             : list[dict]        = resp.get(ACTIVITY_PERIOD)
                 if activity_period:
@@ -1305,7 +1306,7 @@ class User(Container):
     _contains = Playlist
     def __init__(self, uri: str):
         super().__init__(uri)
-        self.display_name   : str   = None # will be id if not permit_client_api()
+        self.display_name   : str   = None
         self.external_urls  : dict  = None
 
 
