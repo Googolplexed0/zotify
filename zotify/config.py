@@ -632,8 +632,12 @@ class Config:
 
 
 class Zotify:
-    # STATICS
+    # STATIC
     VERSION                                             = version("zotify")
+    LEGACY_API_ENDOINTS     : bool                      = True
+    FORCE_LIBRE_METADATA    : bool                      = True
+    
+    # STATIC AFTER BOOT
     CONFIG                  : Config                    = Config()
     CRED_FILE               : PurePath                  = None
     OAUTH                   : OAuth                     = None
@@ -643,12 +647,12 @@ class Zotify:
     DOWNLOAD_QUALITY        : FormatOnlyAudioQuality    = None
     DOWNLOAD_BITRATE        : str                       = None
     
-    # DYNAMICS
-    TOTAL_API_CALLS         : int   = None
-    DATETIME_LAUNCH         : str   = None
-    LEGACY_API_ENDOINTS     : bool  = True
-    FORCE_LIBRE_METADATA    : bool  = False
-    FORCE_STREAM_API_CALLS  : bool  = False
+    # DYNAMIC PER SESSION
+    FORCE_STREAM_API_CALLS  : bool                      = False
+    
+    # DYNAMIC PER QUERY
+    TOTAL_API_CALLS         : int                       = None
+    DATETIME_LAUNCH         : str                       = None
     
     @classmethod
     def start(cls) -> None:
@@ -960,6 +964,15 @@ class Zotify:
                                                   'AN UNEXPECTED ERROR OCCURED - CHECK LOGS FOR DETAILS')
             Printer.traceback(e)
         return None
+    
+    @classmethod
+    def get_user_profile(cls, username: str) -> dict:
+        try:
+            return cls.SESSION.api().get_user_profile(username)
+        except Exception as e:
+            Printer.debug(f"Failed to fetch user profile for {username}")
+            Printer.traceback(e)
+            return {}
     
     @classmethod
     def end(cls) -> None:
