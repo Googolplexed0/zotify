@@ -141,8 +141,8 @@ def bulk_regex_urls(urls: str | list[str]) -> list[list[str]]:
     base_uri = r'%s[:/]([0-9a-zA-Z]{22})'
     
     matched_uris = []
-    from zotify.api import ITEM_FETCH
-    for req_type in ITEM_FETCH:
+    from zotify.api import ITEM_BULK_FETCH
+    for req_type in ITEM_BULK_FETCH:
         ids_by_type = re.findall(base_uri % req_type.type_attr, urls)
         matched_uris.append([f"{req_type.type_attr}:{s}" for s in ids_by_type])
     return matched_uris

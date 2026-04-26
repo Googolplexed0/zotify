@@ -136,7 +136,7 @@ class Content(HierarchicalNode):
             with Loader(f"Fetching bulk {loader_text} information...", disabled=hide_loader):
                 fetch_url = f"{ContClass._url}?{MARKET_APPEND}&{BULK_APPEND}"
                 ids = [uri.split(":")[-1] for uri in uris]
-                resps = Zotify.invoke_url_bulk(fetch_url, ids, ContClass.lowers, ITEM_FETCH[ContClass])
+                resps = Zotify.invoke_url_bulk(fetch_url, ids, ContClass.lowers, ITEM_BULK_FETCH[ContClass])
             if resps: return resps
             Printer.hashtaged(PrintChannel.WARNING, 'API BULK ENDPOINTS NOT ACCESSIBLE FOR THIS CLIENT_ID\n' +
                                                     'THIS WILL ALSO INHIBIT PLAYLIST ITEM FETCHING\n' +
@@ -1375,7 +1375,7 @@ class Artist(Container):
     _to_db_attrs = [GENRES]
     _toptrackmode: bool = False # Zotify.get_artist_fetch_top_tracks(), not implemented
     _contains = Album if not _toptrackmode else TopTrack
-    _fetch_q = 20 if not _toptrackmode else 100
+    _fetch_q = (20 if Zotify.CONFIG.permit_legacy_api() else 10) if not _toptrackmode else 100
     _nextable = not _toptrackmode
     _url = ARTIST_URL
     
@@ -1437,8 +1437,8 @@ class Audiobook(Container):
 # end not implemented
 
 
-# sets Query fetch order and quantity by type
-ITEM_FETCH: dict[type[DLContent] | type[Container], int] = {
+# sets Query fetch order and bulk quantity by type
+ITEM_BULK_FETCH: dict[type[DLContent] | type[Container], int] = {
     Playlist:   0,
     Artist:    50,
     Album:     20,
@@ -1505,11 +1505,11 @@ class Query(Container):
     
     def fetch_query_metadata(self) -> list[list[dict]]:
         item_resps_by_type: list[list[dict]] = []
-        for uris, cont_type in zip(self.parsed_request, ITEM_FETCH):
+        for uris, cont_type in zip(self.parsed_request, ITEM_BULK_FETCH):
             item_resps_by_type.append(self.fetch_uris_metadata(uris, cont_type))
         return item_resps_by_type
     
-    def parse_query_metadata(self, item_resps_by_type: list[list[dict]], item_types: list[type[Content]] = ITEM_FETCH) -> None:
+    def parse_query_metadata(self, item_resps_by_type: list[list[dict]], item_types: list[type[Content]] = ITEM_BULK_FETCH) -> None:
         """ Writes list[list[Content]] to self.requested_objs """
         for item_resps, item_type in zip(item_resps_by_type, item_types):
             self.requested_objs.append(self.parse_uris_metadata(item_resps, item_type))
@@ -1545,7 +1545,7 @@ class Query(Container):
                     album.parse_uris_metadata(track_resps, Track, loader_text=loader_text)
     
     def create_m3u8_playlists(self) -> None:
-        for obj_list, cont_type in zip(self.requested_objs, ITEM_FETCH):
+        for obj_list, cont_type in zip(self.requested_objs, ITEM_BULK_FETCH):
             if not any(obj_list): continue
             
             if issubclass(cont_type, DLContent): 
