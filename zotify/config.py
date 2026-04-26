@@ -632,8 +632,12 @@ class Config:
 
 
 class Zotify:
-    # STATICS
+    # STATIC
     VERSION                                             = version("zotify")
+    LEGACY_API_ENDOINTS     : bool                      = True
+    FORCE_LIBRE_METADATA    : bool                      = True
+    
+    # STATIC AFTER BOOT
     CONFIG                  : Config                    = Config()
     CRED_FILE               : PurePath                  = None
     OAUTH                   : OAuth                     = None
@@ -643,13 +647,12 @@ class Zotify:
     DOWNLOAD_QUALITY        : FormatOnlyAudioQuality    = None
     DOWNLOAD_BITRATE        : str                       = None
     
-    # DYNAMICS
-    TOTAL_API_CALLS         : int             = None
-    DATETIME_LAUNCH         : str             = None
-    LEGACY_API_ENDOINTS     : bool            = True
-    FORCE_LIBRE_METADATA    : bool            = False
-    FORCE_STREAM_API_CALLS  : bool            = False
-    USER_DISPLAY_NAME_MAP   : dict[str, str]  = None
+    # DYNAMIC PER SESSION
+    FORCE_STREAM_API_CALLS  : bool                      = False
+    
+    # DYNAMIC PER QUERY
+    TOTAL_API_CALLS         : int                       = None
+    DATETIME_LAUNCH         : str                       = None
     
     @classmethod
     def start(cls) -> None:
@@ -657,7 +660,6 @@ class Zotify:
             Printer.debug(f"Total API Calls: {cls.TOTAL_API_CALLS}")
         cls.DATETIME_LAUNCH = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         cls.TOTAL_API_CALLS = 0
-        cls.USER_DISPLAY_NAME_MAP = {}
     
     @classmethod
     def login(cls, args):
@@ -786,20 +788,6 @@ class Zotify:
     @staticmethod
     def hex_id_from_file_id(file_id: str) -> str:
         return hexlify(b64decode(file_id.encode())).decode()
-
-    @staticmethod
-    def get_user_display_name(username: str) -> str:
-        try:
-            display_name = Zotify.USER_DISPLAY_NAME_MAP.get(username)
-            if not display_name:
-                user_profile = Zotify.SESSION.api().get_user_profile(username, 0, 0)
-                display_name = user_profile[NAME]
-                Zotify.USER_DISPLAY_NAME_MAP[username] = display_name
-            return display_name
-        except Exception as e:
-            Printer.debug(f"Failed to fetch display name for {username}")
-            Printer.traceback(e)
-            return {}
     
     @staticmethod
     def to_libre_content(ContClass: type, uri: str) -> metadata.Id | None:
@@ -976,6 +964,15 @@ class Zotify:
                                                   'AN UNEXPECTED ERROR OCCURED - CHECK LOGS FOR DETAILS')
             Printer.traceback(e)
         return None
+    
+    @classmethod
+    def get_user_profile(cls, username: str) -> dict:
+        try:
+            return cls.SESSION.api().get_user_profile(username)
+        except Exception as e:
+            Printer.debug(f"Failed to fetch user profile for {username}")
+            Printer.traceback(e)
+            return {}
     
     @classmethod
     def end(cls) -> None:

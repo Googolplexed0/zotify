@@ -197,12 +197,11 @@ class Content(HierarchicalNode):
                     if not uri:  uri = f":local:{type_attr_and_ind.lower()}:{name}:::"
                     item[URI] = uri
                 
-                def unknown_user(username: str | None) -> dict | None:
+                def ensure_user_resp(username: str | None) -> dict | None:
                     if not username: return None
-                    display_name = Zotify.get_user_display_name(username)
-                    return { URI : f":{USER}:{username}",
-                             TYPE: USER,
-                             DISPLAY_NAME: display_name   }
+                    return {URI         : f":{USER}:{username}",
+                            TYPE        : USER,
+                            DISPLAY_NAME: User.fetch_display_name(username)}
                 
                 activity_period             : list[dict]        = resp.get(ACTIVITY_PERIOD)
                 if activity_period:
@@ -274,7 +273,7 @@ class Content(HierarchicalNode):
                             if attr is None: continue
                             ensure_uri(item, TRACK + str(i+1))
                             item[ADDED_AT] = timestamp_utc(attr.get(TIMESTAMP))
-                            item[ADDED_BY] = unknown_user(attr.get(ADDED_BY))
+                            item[ADDED_BY] = ensure_user_resp(attr.get(ADDED_BY))
                             item[ITEM_ID] = attr.get(ITEM_ID)
                         self.tracks_or_eps = obj.parse_relatives(items, (Track, Episode))
                         self.needs_recursion = True
@@ -329,7 +328,7 @@ class Content(HierarchicalNode):
                 
                 owner_username              : str               = resp.get(OWNER_USERNAME)
                 if owner_username:
-                    resp[OWNER]                                 = unknown_user(owner_username)
+                    resp[OWNER]                                 = ensure_user_resp(owner_username)
                 
                 owner                       : dict              = resp.get(OWNER)
                 if owner:
@@ -1304,10 +1303,21 @@ class Playlist(Container):
 
 class User(Container):
     _contains = Playlist
+    _display_name_map = {}
+    
     def __init__(self, uri: str):
         super().__init__(uri)
         self.display_name   : str   = None
         self.external_urls  : dict  = None
+    
+    @classmethod
+    def fetch_display_name(cls, username: str) -> str:
+        display_name = cls._display_name_map.get(username)
+        if display_name: return display_name
+        
+        user_profile = Zotify.get_user_profile(username)
+        cls._display_name_map[username] = user_profile.get(NAME, username)
+        return cls._display_name_map[username]
 
 
 class Album(Container):
