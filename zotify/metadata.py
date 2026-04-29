@@ -401,7 +401,6 @@ class SongArchive:
         """ Attempt to match a legacy archive's filename to a full filepath """
         
         rewrite_legacy = False
-        from zotify.api import Track
         for i, entry in enumerate(entries):
             entry_items = entry.strip().split('\t')
             filename_or_path = PurePath(entry_items[-1])
@@ -455,10 +454,8 @@ class SongArchive:
         with open(self.filepath, mode, encoding='utf-8') as file:
             file.write(entry)
     
-    def add_obj(self, obj, item_path: PurePath) -> None:
+    def add_obj(self, obj: Track | Episode, item_path: PurePath) -> None:
         if self.disabled: return
-        from zotify.api import Track, Episode
-        obj: Track | Episode = obj
         author_name = obj.artists[0].name if isinstance(obj, Track) else obj.show.publisher
         item_name = obj.name if isinstance(obj, Track) else str(obj)
         self.add_entry(obj.id, "", author_name, item_name, item_path, self.mode)
