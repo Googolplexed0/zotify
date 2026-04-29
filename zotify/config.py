@@ -108,6 +108,12 @@ CONFIG_VALUES = {
     STRICT_LIBRARY_VERIFY:      { 'default': 'True',                    'type': bool,   'arg': ('--strict-library-verify'                ,) },
     ALBUM_ART_JPG_FILE:         { 'default': 'False',                   'type': bool,   'arg': ('--album-art-jpg-file'                   ,) },
     
+    # ZMD Options
+    IMPORT_ZMD:                 { 'default': 'False',                   'type': bool,   'arg': ('--import-zmd'                           ,) },
+    IMPORT_ZMD_LOCATION:        { 'default': './.zmd',                  'type': str,    'arg': ('--import-zmd-location'                  ,) },
+    EXPORT_ZMD:                 { 'default': 'False',                   'type': bool,   'arg': ('--export-zmd'                           ,) },
+    EXPORT_ZMD_LOCATION:        { 'default': './.zmd',                  'type': str,    'arg': ('--export-zmd-location'                  ,) },
+    
     # API Options
     API_CLIENT_ID:              { 'default': '',                        'type': str,    'arg': ('--client-id'                            ,) },
     API_CLIENT_LEGACY:          { 'default': 'True',                    'type': bool,   'arg': ('--client-legacy'                        ,) },
@@ -224,7 +230,7 @@ class Config:
         
         # Check update_archive
         if cls.debug() or args.update_archive or args.verify_library:
-            from zotify.utils import SongArchive
+            from zotify.metadata import SongArchive
             SongArchive.UPDATE_ARCHIVE = True
     
     @classmethod
@@ -557,6 +563,39 @@ class Config:
     def get_album_art_jpg_file(cls) -> bool:
         return cls.get(ALBUM_ART_JPG_FILE)
     
+    # ZMD Options
+    @classmethod
+    def get_import_zmd(cls) -> bool:
+        return cls.get(IMPORT_ZMD)
+    
+    @classmethod
+    def get_zmd_imports(cls) -> PurePath:
+        if cls.get(IMPORT_ZMD_LOCATION) == '':
+            return cls.get_root_path()
+        else:
+            zmd_path = cls.get(IMPORT_ZMD_LOCATION)
+            if zmd_path[0] == ".":
+                zmd_path = cls.get_root_path() / PurePath(zmd_path).relative_to(".")
+            zmd_path = PurePath(Path(zmd_path).expanduser())
+        
+        return zmd_path
+    
+    @classmethod
+    def get_export_zmd(cls) -> bool:
+        return cls.get(EXPORT_ZMD)
+    
+    @classmethod
+    def get_zmd_export(cls) -> PurePath:
+        if cls.get(EXPORT_ZMD_LOCATION) == '':
+            return cls.get_root_path()
+        else:
+            zmd_path = cls.get(EXPORT_ZMD_LOCATION)
+            if zmd_path[0] == ".":
+                zmd_path = cls.get_root_path() / PurePath(zmd_path).relative_to(".")
+            zmd_path = PurePath(Path(zmd_path).expanduser())
+        
+        return zmd_path
+    
     # API Options
     @classmethod
     def get_api_client_id(cls) -> str:
@@ -790,17 +829,17 @@ class Zotify:
         return hexlify(b64decode(file_id.encode())).decode()
     
     @staticmethod
-    def to_libre_content(ContClass: type, uri: str) -> metadata.Id | None:
+    def to_libre_content(ContClass: type, id: str) -> metadata.Id | None:
         try:
             libre_content_type: metadata.Id = getattr(metadata, ContClass.clsn + "Id")
-            return libre_content_type.from_base62(uri.split(":")[-1])
+            return libre_content_type.from_base62(id)
         except:
             return
     
     @classmethod
     def invoke_libre_md(cls, ContClass: type, uri: str) -> dict[str, str | int | dict]:
         try:
-            content_id = cls.to_libre_content(ContClass, uri)
+            content_id = cls.to_libre_content(ContClass, uri.split(":")[-1])
             if ContClass.clsn == "Playlist":
                 proto = cls.SESSION.api().get_playlist(content_id)
             else:
@@ -915,10 +954,10 @@ class Zotify:
     def get_content_stream(cls, content, use_qual_pref: bool = True) -> Streamer | None:
         from zotify.api import DLContent
         if not isinstance(content, DLContent): return
-        content_id = cls.to_libre_content(content.__class__, content.uri)
+        content_id = cls.to_libre_content(content.__class__, content.id)
         if not content_id: return
         qual = cls.DOWNLOAD_QUALITY if use_qual_pref else cls.parse_dl_quality()[1]
-        Printer.logger(f'Fetching stream for {content.uri} at quality {qual.preferred.name}')
+        Printer.logger(f'Fetching stream for {content.type_attr}:{content.id} at quality {qual.preferred.name}')
         try:
             if not content.file_ids or cls.FORCE_STREAM_API_CALLS:
                 risky_method = False

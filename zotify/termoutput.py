@@ -490,13 +490,13 @@ class Interface:
         
         from zotify.api import DLContent
         obj: DLContent = Interface.CURRENT_BRANCH[-1]
-        dl_prog = len({c for c in Interface.ALL_DLCONTENT if c.downloaded})
+        dl_prog = len({c for c in Interface.ALL_DLCONTENT if c._downloaded})
         dashboard = f"Query Tree: {Interface.CURRENT_BRANCH}\n" +\
                     f"\n" +\
                     f"Current DLContent: {obj.clsn}\n" +\
                     f"{Interface.parse_obj_db(obj)}\n" +\
                     f"\n" +\
-                    f"Status: {obj.dl_status}\n" +\
+                    f"Status: {obj._dl_status}\n" +\
                     f"Total Query Progress: {dl_prog}/{len(Interface.ALL_DLCONTENT)}\n" +\
                     f"\n" +\
                     f"Last Download Time: {Interface.LAST_DL_TIME}\n" +\
