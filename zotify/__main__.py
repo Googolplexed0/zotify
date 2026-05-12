@@ -42,7 +42,7 @@ def main():
                         action='store_true',
                         dest='persist',
                         help='Perform multiple queries with a single persistent Session')
-    parser.add_argument('-T', '--test',
+    parser.add_argument('-T', '--test', '--dry-run',
                         action='store_true',
                         dest='test',
                         help='Run a Query as a test, making no downloads')
