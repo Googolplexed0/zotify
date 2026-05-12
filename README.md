@@ -87,8 +87,8 @@ If an artist's URL is given, all albums by the specified artist will be download
 |-------------------------------------|----------------------------------------------------------------------------------------------------------------|
 | `-h`, `--help`                      | See this message                                                                                               |
 | `-V`, `--version`                   | Show the version of Zotify                                                                                     |
-| `-P`,`--persist`                    | Perform multiple Queries on the same Session, requiring only one account login                                 |
-| `-T`,`--test`, `--dry-run`          | Perform a "dry run" of a Query, downloading metadata without downloading/modifying any music files             |
+| `-P`, `--persist`                   | Perform multiple Queries on the same Session, requiring only one account login                                 |
+| `-T`, `--test`, `--dry-run`         | Perform a "dry run" of a Query, downloading metadata without downloading/modifying any music files             |
 | `--update-config`                   | Updates the `config.json` file while keeping all current settings unchanged                                    |
 | `--update-archive`                  | Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged          |
 | `--debug`                           | Enable debug mode, printing extra information and creating a `config_DEBUG.json` file                          |
