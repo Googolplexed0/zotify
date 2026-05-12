@@ -86,8 +86,9 @@ If an artist's URL is given, all albums by the specified artist will be download
 | Command Line Config Flag (no value) | Function                                                                                                       |
 |-------------------------------------|----------------------------------------------------------------------------------------------------------------|
 | `-h`, `--help`                      | See this message                                                                                               |
-| `--version`                         | Show the version of Zotify                                                                                     |
-| `--persist`                         | Perform multiple Queries on the same Session, requiring only one account login                                 |
+| `-V`, `--version`                   | Show the version of Zotify                                                                                     |
+| `-P`,`--persist`                    | Perform multiple Queries on the same Session, requiring only one account login                                 |
+| `-T`,`--test`                       | Perform a "dry run" of a Query, downloading metadata without downloading/modifying any music files             |
 | `--update-config`                   | Updates the `config.json` file while keeping all current settings unchanged                                    |
 | `--update-archive`                  | Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged          |
 | `--debug`                           | Enable debug mode, printing extra information and creating a `config_DEBUG.json` file                          |
@@ -120,6 +121,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | Main Options                 | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
 | `ROOT_PATH`                  | `-rp`, `--root-path`                | Directory where music is saved (replaces `.` in other path configs)          | `~/Music/Zotify Music`    |
+| `ROOT_PODCAST_PATH`          | `-rpp`, `--root-podcast-path`       | Directory where podcasts are saved                                           | `~/Music/Zotify Podcasts` |
 | `SAVE_CREDENTIALS`           | `--save-credentials`                | Whether login credentials should be saved                                    | True                      |
 | `CREDENTIALS_LOCATION`       | `--creds`, `--credentials-location` | Directory/Filepath to store/load a Zotify `credentials.json` file | See [Path Option Parser](#path-option-parser) |
 
@@ -130,7 +132,6 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `OUTPUT_ALBUM`               | `-oa`, `--output-album`             | Output file pattern for albums                    | See [Output Format Examples](#example-output-values) |
 | `OUTPUT_PLAYLIST_EXT`        | `-oe`, `--output-ext-playlist`      | Output file pattern for playlists                 | See [Output Format Examples](#example-output-values) |
 | `OUTPUT_LIKED_SONGS`         | `-ol`, `--output-liked-songs`       | Output file pattern for user's Liked Songs        | See [Output Format Examples](#example-output-values) |
-| `ROOT_PODCAST_PATH`          | `-rpp`, `--root-podcast-path`       | Directory where podcasts are saved                                           | `~/Music/Zotify Podcasts` |
 | `SPLIT_ALBUM_DISCS`          | `--split-album-discs`               | Saves each disc of an album into its own subfolder                           | False                     |
 | `MAX_FILENAME_LENGTH`        | `--max-filename-length`             | Maximum character length of filenames, truncated to fit, 0 meaning no limit  | 0                         |
 
@@ -198,6 +199,13 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `SEARCH_QUERY_SIZE`          | `--search-query-size`               | Number of items to fetch per category when performing a search                           | 10            |
 | `STRICT_LIBRARY_VERIFY`      | `--strict-library-verify`           | Whether unreliable tags should be forced to match when verifying local library           | True          |
 | `ALBUM_ART_JPG_FILE`         | `--album-art-jpg-file`              | Save album art as a separate .jpg file                                                   | False         |
+
+| ZMD Options                  | Command Line Config Flag            | Description                                                                     | Default Value          |
+|------------------------------|-------------------------------------|---------------------------------------------------------------------------------|------------------------|
+| `IMPORT_ZMD`                 | `--zmd-import`                      | Whether to import ZMD files, using previously cached metadata                   | False                  |
+| `IMPORT_ZMD_LOCATION`        | `--zmd-import-location`             | Source for ZMD, either an individual .zmd file (default) or a directory         | `""`                   |
+| `EXPORT_ZMD`                 | `--zmd-export`                      | Whether to export ZMD files, caching metadata                                   | False                  |
+| `EXPORT_ZMD_LOCATION`        | `--zmd-export-location`             | Destination for ZMD, updating an individual .zmd file (default) or a directory  | `""`                   |
 
 | API Options                  | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
@@ -397,7 +405,7 @@ If you see this, don't worry! Recent API changes have introduced rate limits, wh
 
 </summary>
 
-Only one user has ever reported an account getting suspended after using Zotify, and this only occurred after ***several days** of non-stop usage*.
+Only two users have ever reported an account getting suspended after using Zotify, and this only occurred after ***several days** of non-stop usage*.
 
 Zotify is recommended for use with a burner account, in reasonable batches of content, for reasonable periods of time.
 

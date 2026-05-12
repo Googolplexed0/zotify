@@ -7,15 +7,13 @@ It's like youtube-dl, but for that other music platform.
 
 import argparse
 
-from zotify.app import client
-from zotify.config import Zotify, CONFIG_VALUES, DEPRECIATED_CONFIGS
-from zotify.termoutput import Printer
+from zotify.config import Zotify, Printer, CONFIG_VALUES, DEPRECIATED_CONFIGS, ARG, TYPE, HELP
 
 
 class DepreciatedAction(argparse.Action):
     def __init__(self, option_strings, dest, **kwargs):
-        if "help" in kwargs:
-            kwargs["help"] = "[DEPRECATED] " + kwargs["help"]
+        if HELP in kwargs:
+            kwargs[HELP] = "[DEPRECATED] " + kwargs[HELP]
         super().__init__(option_strings, dest, **kwargs)
     
     def __call__(self, parser, namespace, values, option_string=None):
@@ -23,8 +21,9 @@ class DepreciatedAction(argparse.Action):
         setattr(namespace, self.dest, values)
 
 
-DEPRECIATED_FLAGS = (
-    {"flags":    ('-d', '--download',),     "type":    str,     "help":    'Use `--file` (`-f`) instead'},
+DEPRECIATED_ARGS = (
+    {ARG:    ('-d', '--download',),     TYPE:    str,     HELP:    'Use `--file` (`-f`) instead' },
+    {ARG:    ('-ns', '--no-splash',),   TYPE:    str,     HELP:    'Use `PRINT_SPLASH` instead'  },
 )
 
 
@@ -35,14 +34,18 @@ def main():
     parser.register('action', 'depreciated_ignore_warn', DepreciatedAction)
     
     # no args
-    parser.add_argument('--version',
+    parser.add_argument('-V', '--version',
                         action='version',
                         version=f'Zotify {Zotify.VERSION}',
                         help='Show the version of Zotify')
-    parser.add_argument('--persist',
+    parser.add_argument('-P', '--persist',
                         action='store_true',
                         dest='persist',
                         help='Perform multiple queries with a single persistent Session')
+    parser.add_argument('-T', '--test',
+                        action='store_true',
+                        dest='test',
+                        help='Run a Query as a test, making no downloads')
     parser.add_argument('--update-config',
                         action='store_true',
                         dest='update_config',
@@ -55,10 +58,10 @@ def main():
                         action='store_true',
                         dest='debug',
                         help='Enable debug mode, prints extra information and creates a `config_DEBUG.json` file')
-    parser.add_argument('-ns', '--no-splash',
-                        action='store_true',
-                        dest='no_splash',
-                        help='Suppress the splash screen when loading')
+    # parser.add_argument('-ns', '--no-splash',
+    #                     action='store_true',
+    #                     dest='no_splash',
+    #                     help='Suppress the splash screen when loading')
     
     # with args
     parser.add_argument('-c', '--config', '--config-location',
@@ -113,21 +116,21 @@ def main():
                        help='Check metadata for all tracks in ROOT_PATH or listed in SONG_ARCHIVE, updating the metadata if necessary. This will not download any new tracks, but may take a very, very long time.')
     modes = group._group_actions.copy()
     
-    for flag in DEPRECIATED_FLAGS: 
-        group.add_argument(*flag["flags"],
-                           type=flag["type"],
-                           help=flag["help"],
+    for arg in DEPRECIATED_ARGS: 
+        group.add_argument(*arg[ARG],
+                           type=arg[TYPE],
+                           help=arg[HELP],
                            action='depreciated_ignore_warn')
     
     for key in DEPRECIATED_CONFIGS:
-        parser.add_argument(*DEPRECIATED_CONFIGS[key]['arg'],
+        parser.add_argument(*DEPRECIATED_CONFIGS[key][ARG],
                             type=str,
                             action='depreciated_ignore_warn',
                             help=f'Delete the `{key}` flag from the commandline call'
                             )
     
     for key in CONFIG_VALUES:
-        parser.add_argument(*CONFIG_VALUES[key]['arg'],
+        parser.add_argument(*CONFIG_VALUES[key][ARG],
                             type=str, #type conversion occurs in config.parse_arg_value()
                             dest=key.lower(),
                             default=None,
@@ -135,6 +138,7 @@ def main():
     
     args = parser.parse_args()
     Zotify.boot(args)
+    from zotify.app import client
     client(args, modes)
 
 

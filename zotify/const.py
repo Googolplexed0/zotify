@@ -1,20 +1,40 @@
-# Metadata musictag keys
-ALBUMARTIST = 'albumartist'
-ARTWORK = 'artwork'
-DISCNUMBER = 'discnumber'
-TOTALDISCS = 'totaldiscs'
-TOTALTRACKS = 'totaltracks'
+# music_tag custom keys
 TRACKID = 'trackid'
-TRACKNUMBER = 'tracknumber'
-TRACKTITLE = 'tracktitle'
 MP3_CUSTOM_TAG_PREFIX = 'TXXX:'
 M4A_CUSTOM_TAG_PREFIX = '----:com.apple.iTunes:'
+
+# music_tag read only
+'#bitrate'
+'#codec'
+'#length'
+'#channels'
+'#bitspersample'
+'#samplerate'
+
+# music_tag keys
+TRACKTITLE = 'tracktitle'
+# ARTIST = 'artist'
+# ALBUM = 'album'
+ALBUMARTIST = 'albumartist'
+COMPOSER = 'composer'
+TRACKNUMBER = 'tracknumber'
+TOTALTRACKS = 'totaltracks'
+DISCNUMBER = 'discnumber'
+TOTALDISCS = 'totaldiscs'
+# GENRE = 'genre'
+# YEAR = 'year'
+# COMPILATION = 'compilation'
+# LYRICS = 'lyrics'
+# ISRC = 'isrc'
+COMMENT = 'comment'
+ARTWORK = 'artwork'
 
 # Both
 ALBUM = 'album'
 ARTIST = 'artist'
 COMPILATION = 'compilation'
 GENRE = 'genre'
+ISRC = 'isrc'
 LYRICS = 'lyrics'
 YEAR = 'year'
 
@@ -76,7 +96,6 @@ INCLUDE_EXTERNAL = 'include_external'
 IS_EXTERNALLY_HOSTED = 'is_externally_hosted'
 IS_LOCAL = 'is_local'
 IS_PLAYABLE = 'is_playable'
-ISRC = 'isrc'
 ITEM = 'item'
 ITEMS = 'items'
 ITEM_ID = 'item_id'
@@ -210,6 +229,9 @@ ZMD_LINK = "ZMD_LINK"
 ZMD_VERSION = "ZMD_VERSION"
 
 # Config Keys
+HELP = 'HELP'
+ARG = 'ARG'
+DEFAULT = 'DEFAULT'
 MANDATORY = 'MANDATORY'
 DEBUG = 'DEBUG'
 ROOT_PATH = 'ROOT_PATH'
@@ -290,3 +312,4 @@ IMPORT_ZMD = 'IMPORT_ZMD'
 IMPORT_ZMD_LOCATION = 'IMPORT_ZMD_LOCATION'
 EXPORT_ZMD = 'EXPORT_ZMD'
 EXPORT_ZMD_LOCATION = 'EXPORT_ZMD_LOCATION'
+TEST_MODE = 'TEST_MODE'

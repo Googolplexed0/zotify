@@ -1,10 +1,6 @@
 from argparse import Namespace, Action
-from pathlib import Path
 
-from zotify.config import Zotify
-from zotify.const import *
-from zotify.termoutput import Printer, PrintChannel
-from zotify.utils import bulk_regex_urls, clamp, select
+from zotify.api import *
 
 
 def filter_search_query(search_query: str, item_types: tuple[str, ...]) -> dict[str, str | int]:
@@ -109,12 +105,10 @@ def fetch_search_display(search_query: str) -> list[str]:
 
 def search_and_select(search: str = ""):
     """ Perform search Queries and allow user to select results """
-    from zotify.api import Query
-    
     while not search or search == ' ':
         search = Printer.get_input('Enter search: ')
     
-    if any(bulk_regex_urls(search)):
+    if any(Query.bulk_regex_urls(search)):
         Printer.hashtaged(PrintChannel.WARNING, 'URL DETECTED IN SEARCH, TREATING SEARCH AS URL REQUEST')
         Query(Zotify.DATETIME_LAUNCH).request(search).execute()
         return
@@ -131,15 +125,13 @@ def search_and_select(search: str = ""):
 
 def perform_query(args: Namespace) -> None:
     """ Perform Query according to type """
-    from zotify.api import Query, LikedSong, UserPlaylist, FollowedArtist, SavedAlbum, VerifyLibrary
-    
     try:
         if args.urls or args.file_of_urls:
             urls = ""
             if args.urls:
                 urls: str = args.urls
             elif args.file_of_urls:
-                if Path(args.file_of_urls).exists():
+                if file_has_content(args.file_of_urls):
                     with open(args.file_of_urls, 'r', encoding='utf-8') as file:
                         urls = " ".join([line.strip() for line in file.readlines()])
                 else:

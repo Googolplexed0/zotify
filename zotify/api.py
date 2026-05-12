@@ -1,11 +1,11 @@
 from __future__ import annotations
-import music_tag
+import ffmpy
 import requests
+import subprocess
+from time import time, sleep
 from uuid import uuid4
 
 from zotify.config import Zotify, Streamer
-from zotify.const import *
-from zotify.termoutput import PrintChannel, Printer, Loader, Interface
 from zotify.utils import *
 
 
@@ -76,14 +76,14 @@ class Content(HierarchicalNode):
         return hash(self.uri)
     
     def __str__(self):
-        default = fix_filename(f"({self.type_attr}){self.id}")
+        default = self.fix_filename(f"({self.type_attr}){self.id}")
         vals = []
         for attr in self._to_str_attrs:
             val = getattr(self, attr, None)
             if isinstance(val, list):       val = val[0] if isinstance(val[0], Content) else ", ".join(str(v) for v in val)
             if isinstance(val, Content):    val = getattr(val, NAME, None)
             if val:                         vals.append(str(val))
-        return fix_filename(" - ".join(vals)) if vals else default
+        return self.fix_filename(" - ".join(vals)) if vals else default
     
     def full_metadata(self) -> bool:
         return bool(self.name)
@@ -101,6 +101,17 @@ class Content(HierarchicalNode):
                                                      f'{self.clsn}_Name: {self.name} - {self.clsn}_ID: {self.id}' +
                                                     (f'\nRegex Groups: {regex_match.groupdict()}' if regex_match.groups() else ""))
         return regex_match
+    
+    @staticmethod
+    def fix_filename(filename: str) -> str:
+        # Replace invalid characters on Linux/Windows/MacOS with underscores
+        # Trailing spaces & periods are ignored on Windows
+        # see https://stackoverflow.com/a/31976060/819417
+        filename = re.sub(r'[/\\:|<>"?*\0-\x1f]|^(AUX|COM[1-9]|CON|LPT[1-9]|NUL|PRN)(?![^.])|^\s|[\s.]$', "_", str(filename), flags=re.IGNORECASE)
+        maxlen = Zotify.CONFIG.get_max_filename_length()
+        if maxlen and len(filename) > maxlen:
+            filename = filename[:maxlen]
+        return filename
     
     @classmethod
     def rel_path(cls, p: PurePath | ParentStack) -> PurePath:
@@ -284,6 +295,17 @@ class DLContent(Content):
             Interface.refresh()
         return Loader(str_status + "...")
     
+    @staticmethod
+    def wait_between_downloads(skip_wait: bool = False) -> None:
+        waittime = Zotify.CONFIG.get_bulk_wait_time()
+        if waittime <= 0:
+            pass
+        elif skip_wait:
+            sleep(min(0.5, waittime))
+        elif waittime > 5:
+            Printer.hashtaged(PrintChannel.DOWNLOADS, f'PAUSED: WAITING FOR {waittime} SECONDS BETWEEN DOWNLOADS')
+            sleep(waittime)
+    
     # placeholder func, overwrite in each child class
     def fill_output_template(self, parent_stack: ParentStack, output_template: str = ""):
         pass
@@ -296,6 +318,12 @@ class DLContent(Content):
                                                     f'ERROR: {str(e)}\n' + 
                                                     f'FALLING BACK TO DEFAULT OUTPUT PATH')
             return self._path_root / f"{self.id}.{self._ext}"
+    
+    @staticmethod
+    def create_download_directory(dir_path: str | PurePath):
+        Path(dir_path).mkdir(parents=True, exist_ok=True)
+        if Zotify.CONFIG.get_no_dir_archives(): return
+        Path(dir_path).joinpath('.song_ids').touch() # add hidden file with song ids
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
         from zotify.metadata import SongArchive
@@ -350,33 +378,52 @@ class DLContent(Content):
         try:
             with open(temppath, 'wb') as file:
                 no_responses = 0
-                time_start = time.time()
+                time_start = time()
                 t_per_byte = (self.duration_ms / 1000. / stream.size * Zotify.CONFIG.get_dl_rate_limter()) if self.duration_ms else 0
                 while no_responses < 5:
                     bytes_r = file.write(stream.stream().read(Zotify.CONFIG.get_chunk_size()))
                     if bytes_r:
                         pbar.update(bytes_r)
-                        time.sleep(bytes_r * t_per_byte)
+                        sleep(bytes_r * t_per_byte)
                     else:
                         no_responses += 1
-                        time.sleep(0.05)
+                        sleep(0.05)
                 # if Zotify.CONFIG.get_download_real_time():
-                    #     elapsed_real = time.time() - time_start
+                    #     elapsed_real = time() - time_start
                     #     elapsed_want = (pbar.n / stream.size) * (self.duration_ms/1000)
                     # if elapsed_want > elapsed_real:
-                    #     time.sleep(elapsed_want - elapsed_real)
+                    #     sleep(elapsed_want - elapsed_real)
         finally:
             pbar.close(); pbar.clear()
         
-        return fmt_duration(time.time() - time_start)
+        return fmt_duration(time() - time_start)
+    
+    @staticmethod
+    def run_ffm(in_path: PurePath, in_cmd: list[str] | None, out_path: PurePath | None = None, out_cmd: list[str] | None = None) -> str:
+        FFclass = ffmpy.FFprobe
+        ff_config = {
+            "global_options": ['-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'],
+            "inputs": {in_path: in_cmd}
+        }
+        if out_path: 
+            FFclass = ffmpy.FFmpeg
+            ff_config["global_options"].append('-y')
+            ff_config["outputs"] = {out_path: out_cmd}
+        
+        stdout, stderr = FFclass(**ff_config).run(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        loggable_output = ("STDOUT:\n" + (stdout.decode().replace('\r\n', '\n') if stdout else ""),
+                            "STDERR:\n" + (stderr.decode().replace('\r\n', '\n') if stderr else ""))
+        Printer.logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
+        if out_path and file_has_content(in_path): Path(in_path).unlink()
+        return stdout.decode().strip()
     
     def get_audio_duration(self, path: PurePath) -> float:
-        stdout = run_ffm(path, ["-show_entries", "format=duration"])
+        stdout = self.run_ffm(path, ["-show_entries", "format=duration"])
         duration = re.search(r'[\D]=([\d\.]*)', stdout).groups()[0]
         return float(duration) # in seconds
     
     def get_audio_codec(self, path: PurePath) -> str:
-        stdout = run_ffm(path, ["-show_entries", "stream=codec_name"])
+        stdout = self.run_ffm(path, ["-show_entries", "stream=codec_name"])
         return stdout.split("=")[1].split("\r")[0].split("\n")[0]
     
     def convert_audio_format(self, temppath: PurePath, path: PurePath) -> str | None:
@@ -392,10 +439,10 @@ class DLContent(Content):
                        f'Desired Codec: {self._codec.upper()}\n' +
                        f'Expected Log Level: {Zotify.CONFIG.get_ffmpeg_log_level().upper()}', PrintChannel.DEBUG)
         
-        time_ffmpeg_start = time.time()
+        time_ffmpeg_start = time()
         try:
-            run_ffm(temppath, None, path, output_params + Zotify.CONFIG.get_custom_ffmpeg_args())
-            return fmt_duration(time.time() - time_ffmpeg_start)
+            self.run_ffm(temppath, None, path, output_params + Zotify.CONFIG.get_custom_ffmpeg_args())
+            return fmt_duration(time() - time_ffmpeg_start)
         except ffmpy.FFExecutableNotFoundError:
             Printer.hashtaged(PrintChannel.WARNING, 'FFMPEG NOT FOUND\n' +
                                                    f'SKIPPING CONVERSION TO {self._codec.upper()}')
@@ -405,8 +452,8 @@ class DLContent(Content):
                 Printer.hashtaged(PrintChannel.WARNING, str(e) + '\n' + 'CUSTOM FFMPEG ARGUMENTS FAILED')
         
         try:
-            run_ffm(temppath, None, path, output_params)
-            return fmt_duration(time.time() - time_ffmpeg_start)
+            self.run_ffm(temppath, None, path, output_params)
+            return fmt_duration(time() - time_ffmpeg_start)
         except Exception as e:
             Printer.hashtaged(PrintChannel.WARNING, str(e) + '\n' + f'SKIPPING CONVERSION TO {self._codec.upper()}')
             return
@@ -424,7 +471,7 @@ class DLContent(Content):
             Printer.hashtaged(PrintChannel.WARNING, f'ATTEMPT TO CLONE {self.clsn.upper()} "{self}" FAILED\n' + 
                                                      'FILE NOT YET DOWNLOADED, THIS SHOULD NOT HAPPEN')
         for filepath in self._real_filepaths.values():
-            if not Path(filepath).exists(): continue
+            if not file_has_content(filepath): continue
             pathlike_move_safe(filepath, clone_path, copy=True)
             self.mark_downloaded(parent_stack, clone_path)
             return True
@@ -443,7 +490,33 @@ class DLContent(Content):
         return True
 
 
-class Track(DLContent):
+class HasArtists:
+    def __init__(self):
+        self.artists        : list[Artist]          = None
+    
+    def artist_names(self, FORCE_STR: bool = False) -> None | str | list[str]:
+        if not self.artists:        return None
+        artist_names = [a.name for a in self.artists]
+        delim = Zotify.CONFIG.get_artist_delimiter()
+        if not delim and FORCE_STR: return ", ".join(artist_names)
+        elif not delim:             return artist_names
+        else:                       return delim.join(artist_names)
+
+
+class HasGenres:
+    def __init__(self):
+        self.genres         : list[str]             = None # only fetched if config set
+    
+    def genre_names(self, FORCE_STR: bool = False) -> None | str | list[str]:
+        if not self.genres:                         return None
+        delim = Zotify.CONFIG.get_genre_delimiter()
+        if not Zotify.CONFIG.get_all_genres():      return self.genres[0]
+        elif not delim and FORCE_STR:               return ", ".join(self.genres)
+        elif not delim:                             return self.genres
+        else:                                       return delim.join(self.genres)
+
+
+class Track(DLContent, HasArtists, HasGenres):
     _regex_flag = Zotify.CONFIG.get_regex_track()
     _to_str_attrs = [ARTISTS, NAME]
     _to_db_attrs = [TRACK_NUMBER, ARTISTS, ALBUM]
@@ -460,15 +533,11 @@ class Track(DLContent):
         self.upc            : str                   = None # Universal Product Code (Type-A)
         self.album          : Album                 = None
         self.artists        : list[Artist]          = None
+        self.genres         : list[str]             = None # only fetched if config set
+        self.lyrics         : list[str]             = None # only fetched if config set
         
-        # only fetched if config set
-        self.genres         : list[str]             = None
-        self.lyrics         : list[str]             = None
-        
-        # only set by Playlist API or UserItem API
-        self.added_at       : dict[Container, str]  = {}
-        # only set by Playlist API
-        self.added_by       : dict[Playlist, User]  = {}
+        self.added_at       : dict[Container, str]  = {}   # only set by Playlist API or UserItem API
+        self.added_by       : dict[Playlist, User]  = {}   # only set by Playlist API
     
     def fill_output_template(self, parent_stack: ParentStack, output_template: str = "") -> PurePath:
         parent: Container = parent_stack[-2]
@@ -493,9 +562,8 @@ class Track(DLContent):
         update_repl(self.upc,           "{upc}")
         
         if self.artists:
-            artists_names = conv_artist_format(self.artists, FORCE_NO_LIST=True)
-            update_repl(self.artists[0].name,   "{artist}", "{track_artist}", "{song_artist}", "{main_artist}", "{primary_artist}")
-            update_repl(artists_names,          "{artists}", "{track_artists}", "{song_artists}")
+            update_repl(self.artists[0].name,               "{artist}", "{track_artist}", "{song_artist}", "{main_artist}", "{primary_artist}")
+            update_repl(self.artist_names(FORCE_STR=True),  "{artists}", "{track_artists}", "{song_artists}")
         
         if self.album:
             update_repl(self.album.id,              "{album_id}")
@@ -503,9 +571,8 @@ class Track(DLContent):
             update_repl(self.album.release_date,    "{date}", "{release_date}")
             update_repl(self.album.year,            "{year}", "{release_year}")
             if self.album.artists:
-                album_artists_names = conv_artist_format(self.album.artists, FORCE_NO_LIST=True)
-                update_repl(self.album.artists[0].name, "{album_artist}")
-                update_repl(album_artists_names,        "{album_artists}")
+                update_repl(self.album.artists[0].name,                 "{album_artist}")
+                update_repl(self.album.artist_names(FORCE_STR=True),    "{album_artists}")
         
         if Zotify.CONFIG.get_disc_track_totals():
             update_repl(self.album.total_tracks,    "{total_tracks}")
@@ -518,7 +585,7 @@ class Track(DLContent):
             update_repl(playlist_number,    "{playlist_number}", "{playlist_num}")
         
         for replstr, md_val in repl_dict.items():
-            output_template = output_template.replace(replstr, fix_filename(md_val))
+            output_template = output_template.replace(replstr, self.fix_filename(md_val))
         
         return Zotify.CONFIG.get_root_path() / f"{output_template}.{self._ext}"
     
@@ -577,7 +644,7 @@ class Track(DLContent):
             with open(lyricdir / f"{lrc_filename}.lrc", 'w', encoding='utf-8') as file:
                 if Zotify.CONFIG.get_lyrics_header():
                     lrc_header = [f"[ti: {self.name}]\n",
-                                  f"[ar: {conv_artist_format(self.artists, FORCE_NO_LIST=True)}]\n",
+                                  f"[ar: {self.artist_names(FORCE_STR=True)}]\n",
                                   f"[al: {self.album.name}]\n",
                                   f"[length: {self.duration_ms // 60000}:{(self.duration_ms % 60000) // 1000}]\n",
                                   f"[by: Zotify v{Zotify.VERSION}]\n",
@@ -585,82 +652,14 @@ class Track(DLContent):
                     file.writelines(lrc_header)
                 file.writelines(self.lyrics)
     
-    def write_audio_tags(self, filepath: PurePath, parent_stack: ParentStack | None = None) -> None:
-        file_tags: music_tag.AudioFile = music_tag.load_file(filepath)
-        img = None # expect jpeg
-        
-        def set_tag_safe(FILETAG, tag_value):
-            if not tag_value: return
-            try: file_tags[FILETAG] = tag_value
-            except Exception as e:
-                Printer.hashtaged(PrintChannel.WARNING, f'FAILED TO SET TAG {FILETAG} TO "{tag_value}" FOR "{self.rel_path()}"\n' +
-                                                        f'ERROR: {str(e)}')
-        
-        def custom_tag(tag: str, val: str):
-            def custom_mp3_tag(tag: str, val: str):
-                from mutagen.id3 import TXXX
-                file_tags.mfile.tags.add(TXXX(encoding=3, desc=tag.upper(), text=[val]))
-            def custom_m4a_tag(tag: str, val: str):
-                from music_tag.mp4 import freeform_set
-                atomic_tag = M4A_CUSTOM_TAG_PREFIX + tag
-                freeform_set(file_tags, atomic_tag, type('tag', (object,), {'values': [val]})())
-            def custom_ogg_tag(tag: str, val: str):
-                from music_tag.file import TAG_MAP_ENTRY
-                file_tags.tag_map[tag] = TAG_MAP_ENTRY(getter=tag, setter=tag, type=type(val))
-                set_tag_safe(tag, val)
-            if self._ext == "mp3":   custom_mp3_tag(tag, val)
-            elif self._ext == "m4a": custom_m4a_tag(tag, val)
-            else:                    custom_ogg_tag(tag, val)
-        
-        # Reliable Tags
-        set_tag_safe(       ARTIST,         conv_artist_format(self.artists))
-        set_tag_safe(       GENRE,          conv_genre_format(self.genres))
-        set_tag_safe(       TRACKTITLE,     self.name)
-        set_tag_safe(       DISCNUMBER,     self.disc_number)
-        set_tag_safe(       TRACKNUMBER,    self.track_number)
-        if self.album:
-            set_tag_safe(   ALBUM,          self.album.name)
-            set_tag_safe(   ALBUMARTIST,    conv_artist_format(self.album.artists))
-            set_tag_safe(   YEAR,           self.album.year)
-            img = requests.get(self.album.image_url).content if self.album.image_url else None
-            set_tag_safe(   ARTWORK,        img)
-        
-        # Unreliable Tags
-        custom_tag(         TRACKID,        self.id)
-        custom_tag(         URI,            self.uri)
-        custom_tag(         EAN,            self.ean)
-        custom_tag(         ISRC,           self.isrc)
-        custom_tag(         UPC,            self.upc)
-        
-        if self.album and Zotify.CONFIG.get_disc_track_totals():
-            set_tag_safe(TOTALTRACKS,       self.album.total_tracks)
-            set_tag_safe(TOTALDISCS,        self.album.total_discs)
-        
-        if self.album and self.album.compilation:
-            set_tag_safe(COMPILATION,       self.album.compilation)
-        
-        if self.lyrics and Zotify.CONFIG.get_lyrics_to_metadata():
-            set_tag_safe(LYRICS,            "".join(self.lyrics))
-        
+    def write_audio_tags(self, filepath: PurePath) -> None:
+        from zotify.metadata import Tagger
+        tags = Tagger(filepath).write_tags(self)
         if self._ext == "mp3" and not Zotify.CONFIG.get_disc_track_totals() and self.disc_number and self.track_number:
             # music_tag python library writes DISCNUMBER and TRACKNUMBER as X/Y instead of X for mp3
             # this method bypasses all internal formatting, probably not resilient against arbitrary inputs
-            file_tags.set_raw("mp3", "TPOS", str(self.disc_number))
-            file_tags.set_raw("mp3", "TRCK", str(self.track_number))
-        
-        file_tags.save()
-        
-        # save track image art to file
-        if not Zotify.CONFIG.get_album_art_jpg_file() or img is None or not parent_stack:
-            return
-        jpg_album_cover_path = filepath.with_name('cover.jpg')
-        jpg_single_path = filepath.with_suffix('.jpg')
-        Printer.logger(f"Album Art Detected: {Path(jpg_album_cover_path).exists()}\n" +
-                       f"Single Art Detected: {Path(jpg_single_path).exists()}", PrintChannel.DEBUG)
-        if Path(jpg_album_cover_path).exists() or Path(jpg_single_path).exists():
-            return
-        jpg_path = jpg_album_cover_path if len(parent_stack) > 1 and isinstance(parent_stack[-2], Album) else jpg_single_path
-        with open(jpg_path, 'wb') as f: f.write(img)
+            tags._write_tag_raw("mp3", "TPOS", str(self.disc_number))
+            tags._write_tag_raw("mp3", "TRCK", str(self.track_number))
     
     def download(self, parent_stack: ParentStack) -> None:
         if not Zotify.CONFIG.get_optimized_dl():
@@ -686,7 +685,7 @@ class Track(DLContent):
             path = check_path_dupes(self.output_path(parent_stack))
             if path != self.output_path(parent_stack): # path exists but id isn't archived OR skipping disabled
                 Printer.debug('Path Duplicate Not Being Skipped:\n' +
-                              'ID not Archived' if Zotify.CONFIG.get_skip_existing() else 'Skipping Disabled')
+                             ('ID not Archived' if Zotify.CONFIG.get_skip_existing() else 'Skipping Disabled'))
             temppath = path.with_suffix(".tmp")
             if Zotify.CONFIG.get_temp_download_dir():
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
@@ -704,13 +703,15 @@ class Track(DLContent):
             self.fetch_lyrics(parent_stack)
         
         with self.set_dl_status("Converting File"):
-            create_download_directory(path.parent)
+            self.create_download_directory(path.parent)
             time_elapsed_ffmpeg = self.convert_audio_format(temppath, path) # temppath -> path here
             if time_elapsed_ffmpeg is None:
                 path = pathlike_move_safe(temppath, path.with_suffix(".ogg"))
             self.mark_downloaded(parent_stack, path)
         
-        try: self.write_audio_tags(path, parent_stack)
+        try: 
+            self.write_audio_tags(path)
+            if self.album: self.album.save_album_art_to_file(path, parent_stack)
         except NotImplementedError as e:
             if not "Mutagen type" in e.args[0]: raise
             err_codec = e.args[0].removeprefix("Mutagen type ").removesuffix(" not implemented")
@@ -724,113 +725,7 @@ class Track(DLContent):
         Interface.dl_complete(self, path, time_elapsed_dl, time_elapsed_ffmpeg)
         
         if Zotify.CONFIG.get_optimized_dl(): self.clone_to_all()
-        wait_between_downloads()
-    
-    @staticmethod
-    def read_audio_tags(filepath: PurePath) -> tuple[tuple, dict]:
-        tags = music_tag.load_file(filepath)
-        
-        artists = conv_artist_format(tags[ARTIST].values)
-        genres = conv_genre_format(tags[GENRE].values)
-        track_name = tags[TRACKTITLE].val
-        album_name = tags[ALBUM].val
-        album_artist = conv_artist_format(tags[ALBUMARTIST].values)
-        release_year = tags[YEAR].val
-        disc_number = tags[DISCNUMBER].val
-        track_number = tags[TRACKNUMBER].val
-        
-        unreliable_tags = [TOTALTRACKS, TOTALDISCS, COMPILATION, LYRICS]
-        custom_tags = [TRACKID, URI]
-        if filepath.suffix.lower() == ".mp3":
-            formatted_custom_tags = [MP3_CUSTOM_TAG_PREFIX + tag.upper() for tag in custom_tags]
-        elif filepath.suffix.lower() == ".m4a":
-            formatted_custom_tags = [M4A_CUSTOM_TAG_PREFIX + tag for tag in custom_tags]
-        else:
-            formatted_custom_tags = custom_tags.copy()
-        taglabels = unreliable_tags + formatted_custom_tags
-        
-        tag_dict = dict(tags.mfile.tags)
-        # Printer.debug(tags.mfile.tags.__dict__)
-        def fetch_unreliable_tag(utag: str):
-            val = None
-            try:
-                fetch_method = "legit"
-                val = tags[utag].val
-            except:
-                fetch_method = "hacky"
-                if utag in tag_dict: val = tag_dict[utag]
-            
-            if val is None:                         pass
-            elif utag == LYRICS:                    val = [line + "\n" for line in val.splitlines()] if val else None
-            elif utag == COMPILATION:               val = bool(val)
-            elif MP3_CUSTOM_TAG_PREFIX in utag:     val = val.text[0]     if len(val.text) == 1 else val.text
-            elif M4A_CUSTOM_TAG_PREFIX in utag:     val = val[0].decode() if len(val) == 1      else [v.decode() for v in val]
-            else:
-                val = val[0] if isinstance(val, (list, tuple)) and len(val) == 1 else val
-                val = val if val else None
-            Printer.logger(f"{fetch_method} {utag} {val}", PrintChannel.DEBUG)
-            return val
-        
-        utag_vals = {}
-        for taglabel, utag in zip(taglabels, unreliable_tags + custom_tags):
-            utag_vals[utag] = fetch_unreliable_tag(taglabel)
-        
-        return (artists, genres, track_name, album_name, album_artist, release_year, disc_number, track_number), \
-                utag_vals
-    
-    def compare_metadata(self, filepath: PurePath):
-        """ Compares metadata in self (just fetched) against metadata on file\n
-            returns Truthy value if discrepancy is found """
-        
-        reliable_tags = (
-            conv_artist_format(self.artists), conv_genre_format(self.genres), self.name, self.album.name, 
-            conv_artist_format(self.album.artists), self.album.year, int(self.disc_number), int(self.track_number)
-            )
-        unreliable_tags = {
-            TOTALTRACKS: int(self.album.total_tracks) if Zotify.CONFIG.get_disc_track_totals() else None,
-            TOTALDISCS: int(self.album.total_discs) if Zotify.CONFIG.get_disc_track_totals() else None,
-            COMPILATION: self.album.compilation,
-            LYRICS: self.lyrics,
-            TRACKID: self.id,
-            URI: self.uri
-            }
-        reliable_tags_onfile, unreliable_tags_onfile = self.read_audio_tags(filepath)
-        
-        mismatches = []
-        # Definite tags must match
-        if len(reliable_tags) != len(reliable_tags_onfile):
-            if not Zotify.CONFIG.debug():
-                return True
-        
-        for i in range(len(reliable_tags)):
-            if isinstance(reliable_tags[i], list) and isinstance(reliable_tags_onfile[i], list):
-                if sorted(reliable_tags[i]) != sorted(reliable_tags_onfile[i]):
-                    mismatches.append( (reliable_tags[i], reliable_tags_onfile[i]) )
-            else:
-                if str(reliable_tags[i]) != str(reliable_tags_onfile[i]):
-                    mismatches.append( (reliable_tags[i], reliable_tags_onfile[i]) )
-        
-        if mismatches:
-            return mismatches
-        
-        # If more unreliable tags are received from API than found on file, assume the file is outdated
-        if sum([bool(tag) for tag in unreliable_tags]) > sum([bool(tag) for tag in unreliable_tags_onfile]):
-            if not Zotify.CONFIG.get_strict_library_verify() and not Zotify.CONFIG.debug():
-                return True
-        
-        # stickler check for unreliable tags
-        for tag in unreliable_tags:
-            if tag not in unreliable_tags_onfile:
-                mismatches.append({tag: (unreliable_tags[tag], None)})
-                continue
-            t1 = unreliable_tags[tag]; t2 = unreliable_tags_onfile[tag]
-            if isinstance(t1, list) and isinstance(t2, list):
-                # do not sort lyrics, since order matters
-                if t1 != t2: mismatches.append({tag: (t1, t2)})
-            else:
-                if str(t1) != str(t2): mismatches.append({tag: (t1, t2)})
-        
-        return mismatches
+        self.wait_between_downloads()
 
 
 class Episode(DLContent):
@@ -853,12 +748,11 @@ class Episode(DLContent):
         self.release_date           : str       = None
         self.show                   : Show      = None
         
-        # only set by Playlist API
-        self.added_at       : dict[Playlist, str]   = {}
-        self.added_by       : dict[Playlist, User]  = {}
+        self.added_at       : dict[Playlist, str]   = {} # only set by Playlist API
+        self.added_by       : dict[Playlist, User]  = {} # only set by Playlist API
     
     def fill_output_template(self, parent_stack: list[Container], output_template: str = "") -> PurePath:
-        return self._path_root / fix_filename(self.show.name) / f"{self}.{self._ext}"
+        return self._path_root / self.fix_filename(self.show.name) / f"{self}.{self._ext}"
     
     def fetch_partner_url(self) -> str | None:
         resp = Zotify.invoke_url(PARTNER_URL + self.id + '"}&extensions=' + PERSISTED_QUERY, force_login5=True)
@@ -875,7 +769,7 @@ class Episode(DLContent):
         return self.partner_url
     
     def download_directly(self, path: PurePath) -> str:
-        time_start = time.time()
+        time_start = time()
         
         r = requests.get(self.partner_url, stream=True, allow_redirects=True)
         if r.status_code != 200:
@@ -888,7 +782,7 @@ class Episode(DLContent):
         with Printer.pbar_stream(r.raw, desc=desc, total=file_size) as f_stream:
             pathlike_move_safe(f_stream, path)
         
-        time_dl_end = time.time()
+        time_dl_end = time()
         return fmt_duration(time_dl_end - time_start)
     
     def download(self, parent_stack: ParentStack):
@@ -906,7 +800,7 @@ class Episode(DLContent):
             path = check_path_dupes(self.output_path(parent_stack))
             if path != self.output_path(parent_stack): # path exists but id isn't archived OR skipping disabled
                 Printer.debug('Path Duplicate Not Being Skipped:\n' +
-                              'ID not Archived' if Zotify.CONFIG.get_skip_existing() else 'Skipping Disabled')
+                             ('ID not Archived' if Zotify.CONFIG.get_skip_existing() else 'Skipping Disabled'))
             temppath = path.with_suffix(".tmp")
             if Zotify.CONFIG.get_temp_download_dir():
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
@@ -947,7 +841,7 @@ class Episode(DLContent):
             path = path.with_suffix(ext)
         
         with self.set_dl_status("Converting File"):
-            create_download_directory(path.parent)
+            self.create_download_directory(path.parent)
             time_elapsed_ffmpeg = self.convert_audio_format(temppath, path)
             if time_elapsed_ffmpeg is None:
                 path = pathlike_move_safe(temppath, path.with_suffix(ext))
@@ -956,7 +850,7 @@ class Episode(DLContent):
         Interface.dl_complete(self, path, time_elapsed_dl, time_elapsed_ffmpeg)
         
         if Zotify.CONFIG.get_optimized_dl(): self.clone_to_all()
-        wait_between_downloads()
+        self.wait_between_downloads()
 
 
 class Container(Content):
@@ -1082,7 +976,7 @@ class User(Container):
         return cls._display_name_map[username]
 
 
-class Album(Container):
+class Album(Container, HasArtists):
     _regex_flag = Zotify.CONFIG.get_regex_album()
     _show_pbar = Zotify.CONFIG.get_show_album_pbar()
     _to_str_attrs = [ARTISTS, NAME]
@@ -1108,10 +1002,8 @@ class Album(Container):
         self.artists        : list[Artist]          = None
         self.tracks         : list[Track]           = self._main_items
         
-        # only set by Artist Albums API
-        self.album_group    : dict[Container, str]  = {}
-        # only set by UserItem API
-        self.added_at       : dict[Container, str]  = {}
+        self.album_group    : dict[Container, str]  = {}   # only set by Artist Albums API
+        self.added_at       : dict[Container, str]  = {}   # only set by UserItem API
     
     def full_metadata(self) -> bool:
         return bool(self.tracks)
@@ -1143,9 +1035,24 @@ class Album(Container):
             return True
         
         return False
+    
+    def save_album_art_to_file(self, filepath: PurePath, parent_stack: ParentStack):
+        if not Zotify.CONFIG.get_album_art_jpg_file() or self.image_url is None:
+            return
+        image_bytes = requests.get(self.image_url).content # expect jpeg
+        if not image_bytes:
+            return
+        album_path = filepath.with_name('cover.jpg');   a_exists = file_has_content(album_path)
+        single_path = filepath.with_suffix('.jpg');     s_exists = file_has_content(single_path)
+        Printer.logger(f"Album Art Detected: {a_exists}\n" +
+                       f"Single Art Detected: {s_exists}", PrintChannel.DEBUG)
+        if a_exists or s_exists:
+            return
+        jpg_path = album_path if len(parent_stack) > 1 and isinstance(parent_stack[-2], Album) else single_path
+        with open(jpg_path, 'wb') as f: f.write(image_bytes)
 
 
-class Artist(Container):
+class Artist(Container, HasGenres):
     _show_pbar = Zotify.CONFIG.get_show_artist_pbar()
     _to_str_attrs = [NAME, FOLLOWERS, GENRES]
     _to_db_attrs = [GENRES]
@@ -1277,8 +1184,19 @@ class Query(Container):
         self.requested_objs  : list[list[DLContent | Container | None]]               = []
         self._main_items     : list[DLContent | Container | None] | list[ParentStack] = []
     
+    @staticmethod
+    def bulk_regex_urls(urls: str | list[str]) -> list[list[str]]:
+        urls = strlist_compressor(urls) if isinstance(urls, list) else urls
+        base_uri = r'%s[:/]([0-9a-zA-Z]{22})'
+        
+        matched_uris = []
+        for req_type in ITEM_BULK_FETCH:
+            ids_by_type = re.findall(base_uri % req_type.type_attr, urls)
+            matched_uris.append([f"{req_type.type_attr}:{s}" for s in ids_by_type])
+        return matched_uris
+    
     def request(self, requested_urls: str) -> Query:
-        self.parsed_request = bulk_regex_urls(requested_urls)
+        self.parsed_request = self.bulk_regex_urls(requested_urls)
         n_urls = len(set.union(*[set(l) for l in self.parsed_request]))
         [c for c in self.parsed_request if any(c)]
         Printer.debug(f'Requested URL String: {requested_urls}\n' + 
@@ -1404,7 +1322,10 @@ class Query(Container):
                 downloadables = sorted(downloadables, key=lambda c: getattr(getattr(c, ALBUM, Album("")), URI))
             self._main_items = downloadables
         
-        if Zotify.CONFIG.get_standard_interface():
+        if Zotify.CONFIG.test_mode(): # TODO should test mode skip M3U8?
+            Printer.hashtaged(PrintChannel.MANDATORY, 'SKIPPING DOWNLOADS, PER TEST MODE')
+            return
+        elif Zotify.CONFIG.get_standard_interface():
             Interface.ALL_DLCONTENT = {n for n in self.ALL_NODES if isinstance(n, DLContent)}
             Interface.refresh()
         
@@ -1475,14 +1396,16 @@ class VerifyLibrary(Query):
     
     def verify_metadata(self, path: PurePath, track: Track) -> None:
         """Overwrite metadata on file at path with fetched metadata if necessary"""
-        mismatches = track.compare_metadata(path)
-        if not mismatches:
+        from zotify.metadata import Tagger
+        if not Tagger(path).matches_metadata(track):
             Printer.hashtaged(PrintChannel.DOWNLOADS, f'VERIFIED:  METADATA FOR "{track.rel_path(path)}"\n' +
                                                        '(NO UPDATES REQUIRED)')
             return
-        
+        elif Zotify.CONFIG.test_mode():
+            Printer.hashtaged(PrintChannel.MANDATORY, f'METADATA FOR "{track.rel_path(path)}" REQUIRES UPDATE\n'
+                                                       'SKIPPING UPDATE, PER TEST MODE')
+            return
         try:
-            Printer.debug(f'Metadata Mismatches:', mismatches)
             track.write_audio_tags(path)
             Printer.hashtaged(PrintChannel.DOWNLOADS, f'VERIFIED:  METADATA FOR "{track.rel_path(path)}"\n' +
                                                        '(UPDATED TAGS TO MATCH CURRENT API METADATA)')
@@ -1539,6 +1462,7 @@ class UserItem(Query):
             user_item_resps = [resp[self._inner_stripper] for resp in user_item_resps]
         if self._contains is Playlist:
             user_item_resps = self.fetch_uris_metadata([resp[URI] for resp in user_item_resps], Playlist)
+        # self.handle_zmd_prefetch() # TODO test if this functions as expected
         self.parse_query_metadata([user_item_resps], [self._contains])
         self.conditional_metadata()
         self.download()
@@ -1574,7 +1498,7 @@ class LikedSong(UserItem):
         m3u8.path = archive_dir / f"{self.name}.m3u8"
         
         append_strs = []
-        if archive_mode and Path(m3u8.path).exists():
+        if archive_mode and file_has_content(m3u8.path):
             raw_liked_archive = M3U8.fetch_songs(m3u8.path)
             for i, liked_archive_path in enumerate(raw_liked_archive[1::3]):
                 sync_point = M3U8.find_sync_point(filepaths, liked_archive_path[:-1])

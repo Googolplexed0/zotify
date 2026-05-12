@@ -1,5 +1,9 @@
 import json
 from base64 import b64encode, b64decode
+from music_tag import AudioFile, load_file
+from music_tag.file import TAG_MAP_ENTRY, MetadataItem
+from music_tag.mp4 import freeform_set
+from mutagen.id3 import TXXX
 
 from zotify.api import *
 
@@ -264,6 +268,7 @@ class MetadataIO:
     EXPORT_QUERY: bool = True
     BYTES_HEADER = "</bytes/>"
     SET_ATTRS = {"parents", "children"}
+    SKIP_ATTRS = {"ALL_NODES", URI}
     PARSING: dict[str, int | str | dict] = None
     ZMD_V1 = {ZMD_VERSION: 1,
               ZMD_LINK: "<{__class__}@{uri}>",
@@ -299,12 +304,12 @@ class MetadataIO:
         
         derefed = {}
         for k, v in obj.items():
-            if k[0] == "_" or k in {"ALL_NODES", URI} or v is None: continue
-            elif k == ID and obj.get(URI) and v == obj.get(URI, "").split(":")[-1]: continue
-            elif k in cls.SET_ATTRS: derefed[k] = [cls._deref(n) for n in v]
-            elif isinstance(v, bytes): derefed[k] = cls.BYTES_HEADER + b64encode(v).decode('ascii')
-            elif isinstance(v, (Content, list, dict)): derefed[k] = cls._deref(v)
-            else: derefed[k] = v
+            if k[0] == "_" or k in cls.SKIP_ATTRS or not v:         continue
+            elif k == ID and v == obj.get(URI, "").split(":")[-1]:  continue
+            elif k in cls.SET_ATTRS:                                derefed[k] = [cls._deref(n) for n in v]
+            elif isinstance(v, bytes):                              derefed[k] = cls.BYTES_HEADER + b64encode(v).decode('ascii')
+            elif isinstance(v, (Content, list, dict)):              derefed[k] = cls._deref(v)
+            else:                                                   derefed[k] = v
         return derefed
     
     @classmethod
@@ -317,9 +322,9 @@ class MetadataIO:
         
         rerefed = {}
         for k, v in obj.items():
-            if k in cls.SET_ATTRS: rerefed[k] = set(cls._reref(v, dests))
-            if isinstance(v, (str, list, dict)): rerefed[k] = cls._reref(v, dests)
-            else: rerefed[k] = v
+            if k in cls.SET_ATTRS:                  rerefed[k] = set(cls._reref(v, dests))
+            if isinstance(v, (str, list, dict)):    rerefed[k] = cls._reref(v, dests)
+            else:                                   rerefed[k] = v
         return rerefed
     
     @classmethod
@@ -345,60 +350,192 @@ class MetadataIO:
         cls.PARSING = None
     
     @classmethod
-    def from_zmd(cls, *zmds: PurePath | dict):
-        if not zmds:
-            import_path = Zotify.CONFIG.get_zmd_imports()
-            if not Path(import_path).exists(): 
-                return []
-            elif Path(import_path).is_dir():
-                zmds = Path(import_path).rglob("*.zmd")
-            else:
-                zmds = (import_path,)
+    def from_zmd(cls):
+        import_path = Zotify.CONFIG.get_zmd_import_location()
+        if not Path(import_path).exists():  return
+        elif Path(import_path).is_dir():    zmd_files = Path(import_path).rglob("*.zmd")
+        else:                               zmd_files = (import_path,)
         
-        for zmd in zmds:
-            if isinstance(zmd, PurePath):
-                with open(zmd) as f:
-                    zmd: dict = json.load(f)
-            cls._instantiate_zmd(zmd) # to ALL_NODES
+        zmds = []
+        for zmdf in zmd_files:
+            if not file_has_content(zmdf): continue
+            with open(zmdf) as f:
+                zmds.append(json.load(f))
+        if not zmds: return
+        
+        with Loader(f"Importing ZMD file(s)"):
+            for zmd in zmds: cls._instantiate_zmd(zmd) # to ALL_NODES
     
     @classmethod
     def to_zmd(cls, timestamp: str, cont: set[Content]):
-        zmd_path = Zotify.CONFIG.get_zmd_export()
-        if not zmd_path.suffix:
-            zmd_path = zmd_path / (timestamp + ".zmd")
-        Path(zmd_path.parent).mkdir(parents=True, exist_ok=True)
+        zmd_dir_or_file = Zotify.CONFIG.get_zmd_export_location()
+        zmd_path = ensure_is_file(Path(zmd_dir_or_file), timestamp + ".zmd")
         
         cls.PARSING = cls.LATEST_ZMD
         zmd = {**cls.PARSING}
-        if Path(zmd_path).exists():
+        if file_has_content(zmd_path):
             with open(zmd_path) as f:
                 zmd.update(json.load(f))
             cls._set_zmd_version(zmd)
         
         if cls.EXPORT_QUERY:
-            qs = {c for c in cont if isinstance(c, Query)}
+            qs = {c for c in cont if isinstance(c, Query) and any(c.requested_objs)}
             zmd[ZMD_ENTRIES].update({cls._to_link(q): {"requested_objs": cls._deref(q.requested_objs)} for q in qs})
         entries = {cls._to_link(c): cls._deref(c.__dict__) for c in cont if not isinstance(c, Query)}
         zmd[ZMD_ENTRIES].update(entries)
         cls.PARSING = None
         
-        with open(zmd_path.with_suffix(".zmd"), "w") as f:
+        with open(zmd_path, "w") as f:
             json.dump(zmd, f, indent=4)
 
 
+class Tagger:
+    def __init__(self, path: PurePath):
+        self.path = path
+        self.file_tags: AudioFile = load_file(path)
+    
+    @classmethod
+    def _content_to_tags(cls, obj: Content | None) -> tuple[dict[str], dict[str], dict[str]]:
+        reliable_tags, optional_tags, custom_tags = {}, {}, {}
+        if isinstance(obj, Track):
+            reliable_tags = {
+                TRACKTITLE:     obj.name,
+                DISCNUMBER:     obj.disc_number,
+                TRACKNUMBER:    obj.track_number,
+                ARTIST:         obj.artist_names(),
+                GENRE:          obj.genre_names(),
+                ISRC:           obj.isrc,
+            }
+            optional_tags = {
+                LYRICS:         "".join(obj.lyrics) if Zotify.CONFIG.get_lyrics_to_metadata() and obj.lyrics else None
+            }
+            custom_tags = { 
+                TRACKID:        obj.id,
+                URI:            obj.uri,
+                EAN:            obj.ean,
+                UPC:            obj.upc,
+            }
+            rt, ot, ct = cls._content_to_tags(obj.album)
+            for k, v in rt.items():
+                if k in {ALBUM, ALBUMARTIST, YEAR, ARTWORK}: reliable_tags.update({k: v})
+                elif k == COMPILATION and v: reliable_tags.update({k: v})
+            for k, v in ot.items():
+                if k in {TOTALTRACKS, TOTALDISCS}: optional_tags.update({k: v})
+        elif isinstance(obj, Album):
+            reliable_tags = {
+                ALBUM:          obj.name,
+                ALBUMARTIST:    obj.artist_names(),
+                COMPILATION:    obj.compilation,
+                YEAR:           obj.year,
+                ARTWORK:        requests.get(obj.image_url).content if obj.image_url else None, # expect jpeg
+            }
+            optional_tags = {
+                TOTALTRACKS:    obj.total_tracks if Zotify.CONFIG.get_disc_track_totals() else None,
+                TOTALDISCS:     obj.total_discs if Zotify.CONFIG.get_disc_track_totals() else None,
+            }
+            custom_tags = {
+                LABEL:          obj.label,
+                DATE:           obj.release_date
+            }
+        return reliable_tags, optional_tags, custom_tags
+    
+    def _write_tag_raw(self, norm_key, key, md_val, appendable):
+        self.file_tags.set_raw(norm_key, key, md_val, appendable)
+        self.file_tags.save()
+    
+    def _custom_mp3_tag(self, tag: str, md_val):
+        vallist = md_val if isinstance(md_val, list) else [md_val]
+        self.file_tags.mfile.tags.add(TXXX(encoding=3, desc=tag.upper(), text=vallist))
+    
+    def _custom_m4a_tag(self, tag: str, md_val):
+        atomic_tag = M4A_CUSTOM_TAG_PREFIX + tag
+        vallist = md_val if isinstance(md_val, list) else [md_val]
+        freeform_set(self.file_tags, atomic_tag, type('tag', (object,), {'values': vallist})())
+    
+    def _custom_ogg_tag(self, tag: str, md_val):
+        self.file_tags.tag_map[tag] = TAG_MAP_ENTRY(getter=tag, setter=tag, type=type(md_val))
+        self.file_tags[tag] = md_val
+    
+    def _set_custom(self, tag: str, md_val):
+        if self.path.suffix.lower() == ".mp3":      self._custom_mp3_tag(tag, md_val)
+        elif self.path.suffix.lower() == ".m4a":    self._custom_m4a_tag(tag, md_val)
+        else:                                       self._custom_ogg_tag(tag, md_val)
+    
+    def write_tags(self, obj: Content):
+        reliable_tags, optional_tags, custom_tags = self._content_to_tags(obj)
+        for tag, md_val in reliable_tags.items():
+            if md_val is None: continue
+            self.file_tags[tag] = md_val
+        for tag, md_val in optional_tags.items():
+            if md_val is None: continue
+            self.file_tags[tag] = md_val
+        for tag, md_val in custom_tags.items():
+            if md_val is None: continue
+            self._set_custom(tag, md_val)
+        self.file_tags.save()
+        return self
+    
+    def _get_raw(self, tag) -> list | None:
+        tag_obj = self.file_tags.mfile.tags.get(tag)
+        if not tag_obj:                     return None
+        elif MP3_CUSTOM_TAG_PREFIX in tag:  return tag_obj.text
+        elif M4A_CUSTOM_TAG_PREFIX in tag:  return [v.decode() for v in tag_obj]
+        else:                               return tag_obj
+    
+    def _match_tag_group(self, tag_group: dict[str]) -> dict[str]:
+        mismatches = {}
+        for tag, md_val in tag_group.items():
+            try:    mditem = self.file_tags.get(tag)
+            except: mditem = self._get_raw(tag)
+            if not mditem:
+                mismatches[tag] = False if md_val is None else f' Missing from File, Metadata: "{md_val}"'
+                continue
+            if not isinstance(mditem, MetadataItem):    on_file = mditem if isinstance(md_val, list) else mditem[0]
+            elif isinstance(md_val, list):              on_file = mditem.values
+            elif isinstance(md_val, bytes):             on_file = mditem.val.data
+            else:                                       on_file = mditem.val
+            match = (md_val is None and not bool(on_file)) or str(on_file) == str(md_val)
+            mismatches[tag] = False if match else f' on File: "{on_file}", in Metadata: "{md_val}"'
+        return mismatches
+    
+    def matches_metadata(self, obj: Content) -> bool:
+        reliable_tags, optional_tags, custom_tags = self._content_to_tags(obj)
+        
+        reliable_misses = False
+        for k, v in self._match_tag_group(reliable_tags).items():
+            if v: Printer.hashtaged(PrintChannel.DEBUG, k.upper() + v); reliable_misses = True
+        
+        strict_misses = reliable_misses
+        for k, v in self._match_tag_group(optional_tags).items():
+            if v: Printer.hashtaged(PrintChannel.DEBUG, k.upper() + v); strict_misses = True
+        
+        custom_keys = [k for k in custom_tags]
+        if self.path.suffix.lower() == ".mp3":
+            custom_tags = {MP3_CUSTOM_TAG_PREFIX + k.upper(): v for k, v in custom_tags.items()}
+        elif self.path.suffix.lower() == ".m4a":
+            custom_tags = {M4A_CUSTOM_TAG_PREFIX + k: v for k, v in custom_tags.items()}
+        for k, v in zip(custom_keys, self._match_tag_group(custom_tags).values()):
+            if v: Printer.hashtaged(PrintChannel.DEBUG, k.upper() + v); strict_misses = True
+        
+        return strict_misses if Zotify.CONFIG.get_strict_library_verify() else reliable_misses
+
+
 class SongArchive:
-    """ Entry: id, date, author, name, filepath (only filename if from legacy archive) """
-    UPDATE_ARCHIVE: bool = False
+    """ Entry: id, date, author, name, path (only filename if from legacy archive) """
+    UPDATE_ARCHIVE: bool = Zotify.CONFIG.get_update_archive()
     
     def __init__(self, dir_path: PurePath | None = None):
         self._global = dir_path is None
-        self.filepath = Zotify.CONFIG.get_song_archive_location() if dir_path is None else dir_path / '.song_ids'
-        self.mode = 'a' if Path(self.filepath).exists() else 'w'
-        self.disabled = not Path(self.filepath).exists() or \
-                        (Zotify.CONFIG.get_no_song_archive() if self._global else Zotify.CONFIG.get_no_dir_archives())
+        self.path = Zotify.CONFIG.get_song_archive_location() if dir_path is None else dir_path / '.song_ids'
+        self.mode = 'a' if file_has_content(self.path) else 'w' # should always exist from Content.create_download_directory()
+        self.disabled = Zotify.CONFIG.get_no_song_archive() if self._global else Zotify.CONFIG.get_no_dir_archives()
     
     def upgrade_legacy_archive(self, entries: list[str]) -> None:
-        """ Attempt to match a legacy archive's filename to a full filepath """
+        """ Attempt to match a legacy archive's filename to a full path """
+        
+        def find_artist_names(artists: list[str] | str) -> list[str]:
+            if Zotify.CONFIG.get_artist_delimiter() == "": return artists
+            return artists.split(Zotify.CONFIG.get_artist_delimiter())
         
         rewrite_legacy = False
         for i, entry in enumerate(entries):
@@ -413,7 +550,7 @@ class SongArchive:
             for glob_path in Path(Zotify.CONFIG.get_root_path()).glob('**/' + str(filename_or_path)):
                 reliable_tags, unreliable_tags = Track.read_audio_tags(PurePath(glob_path))
                 if ("trackid" in unreliable_tags and unreliable_tags["trackid"] == entry_items[0]
-                or  unconv_artist_format(reliable_tags[0])[0] == entry_items[2]
+                or  find_artist_names(reliable_tags[0])[0] == entry_items[2]
                 or  reliable_tags[2] == entry_items[3]):
                     path_entry = PurePath(glob_path)
                     break
@@ -421,16 +558,16 @@ class SongArchive:
             entries[i] = entry_items[:-1] + [path_entry]
         
         if rewrite_legacy:
-            Path(self.filepath).unlink()
+            Path(self.path).unlink()
             mode = 'w'
             for entry in entries:
                 self.add_entry(*entry, mode)
                 mode = 'a'
     
     def read_entries(self) -> list[str]:
-        if self.disabled:   return []
-        
-        with open(self.filepath, 'r', encoding='utf-8') as f:
+        if self.disabled or not file_has_content(self.path):
+            return []
+        with open(self.path, 'r', encoding='utf-8') as f:
             entries = f.readlines()
         if self._global and SongArchive.UPDATE_ARCHIVE:
             SongArchive.UPDATE_ARCHIVE = False
@@ -451,7 +588,7 @@ class SongArchive:
         if not timestamp:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         entry = f'{item_id}\t{timestamp}\t{author_name}\t{item_name}\t{item_path}\n'
-        with open(self.filepath, mode, encoding='utf-8') as file:
+        with open(self.path, mode, encoding='utf-8') as file:
             file.write(entry)
     
     def add_obj(self, obj: Track | Episode, item_path: PurePath) -> None:
@@ -473,7 +610,7 @@ class M3U8:
     def fill_output_template(self, parent_cont: Container | Query):
         output_template = Zotify.CONFIG.get_m3u8_filename()
         if not output_template or isinstance(parent_cont, Query):
-            return fix_filename(f"{parent_cont.id}_{self.cont_type.lowers}")
+            return Content.fix_filename(f"{parent_cont.id}_{self.cont_type.lowers}")
         
         repl_dict: dict[str, str] = {}
         def update_repl(md_val, *replstrs: str):
@@ -490,7 +627,7 @@ class M3U8:
             update_repl(parent_cont.snapshot_id,        "{snapshot_id}")
         
         for replstr, md_val in repl_dict.items():
-            output_template = output_template.replace(replstr, fix_filename(md_val)) 
+            output_template = output_template.replace(replstr, Content.fix_filename(md_val)) 
         
         return output_template
     
@@ -500,28 +637,28 @@ class M3U8:
     
     @staticmethod
     def fetch_songs(m3u8_path: PurePath) -> list[str]:
-        if not Path(m3u8_path).exists(): return []
-        
+        if not file_has_content(m3u8_path):
+            return []
         with open(m3u8_path, 'r', encoding='utf-8') as file:
             linesraw = file.readlines()[2:]
-            # songsgrouped = [] # group by song and filepath
+            # songsgrouped = [] # group by song and path
             # for i in range(len(linesraw)//3):
             #     songsgrouped.append(linesraw[3*i:3*i+3])
         return linesraw
     
     @staticmethod
-    def find_sync_point(filepaths: list[PurePath | None], m3u8_entry_path: str) -> int | None:
-        for i, filepath in enumerate(filepaths):
-            Printer.logger(f"{filepath} == {m3u8_entry_path}")
-            if str(filepath) == m3u8_entry_path:
+    def find_sync_point(paths: list[PurePath | None], m3u8_entry_path: str) -> int | None:
+        for i, path in enumerate(paths):
+            Printer.logger(f"{path} == {m3u8_entry_path}")
+            if str(path) == m3u8_entry_path:
                 return i
-            elif str(filepath) in m3u8_entry_path:
+            elif str(path) in m3u8_entry_path:
                 Printer.hashtaged(PrintChannel.WARNING, 'TRACK FILEPATH WITHIN LIKED SONG M3U8 ENTRY\n' +
                                                         'M3U8 MAY NOT PLAY/LINK TO FILES CORRECTLY\n' +
                                                         'POSSIBLY FROM NON-UPDATED SONG ARCHIVE FILE\n' +
                                                         "(CONSIDER RUNNING --update-archive)")
                 return i
-            elif m3u8_entry_path in str(filepath):
+            elif m3u8_entry_path in str(path):
                 Printer.hashtaged(PrintChannel.WARNING, 'LIKED SONG M3U8 ENTRY WITHIN TRACK FILEPATH\n' +
                                                         'M3U8 MAY NOT PLAY/LINK TO FILES CORRECTLY\n' +
                                                         'POSSIBLY FROM M3U8 USING RELATIVE PATHS\n' +
@@ -550,7 +687,7 @@ class M3U8:
                                                   f'SAVED TO: {self.cont_type.rel_path(self.path)}')
     
     def append(self, append_strs: list[str]):
-        if self.path is None or not Path(self.path).exists() or not append_strs:
+        if self.path is None or not file_has_content(self.path) or not append_strs:
             return
         with open(self.path, 'a', encoding='utf-8') as file:
             file.writelines(append_strs)
