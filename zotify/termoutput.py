@@ -5,7 +5,7 @@ from functools import partial
 from itertools import cycle
 from mutagen import FileType
 from os import get_terminal_size, system
-from platform import system
+from platform import system as platform_system
 from pprint import pformat
 from re import split, escape
 from tabulate import tabulate
@@ -239,7 +239,7 @@ class Printer:
     @staticmethod
     def clear() -> None:
         """ Clear the console window """
-        if system() == WINDOWS_SYSTEM:
+        if platform_system() == WINDOWS_SYSTEM:
             system('cls')
         else:
             system('clear')
