@@ -7,7 +7,7 @@ from zotify.termoutput import Printer, PrintChannel
 from zotify.utils import bulk_regex_urls, clamp, select
 
 
-def filter_search_query(search_query: str, item_types: tuple[str]) -> dict[str, str | int]:
+def filter_search_query(search_query: str, item_types: tuple[str, ...]) -> dict[str, str | int]:
     max_items = 1000
     default_size = clamp(1, Zotify.CONFIG.get_search_query_size(), max_items)
     search_filters: dict[str, list[set | str]] = {

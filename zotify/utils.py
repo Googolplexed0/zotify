@@ -258,7 +258,7 @@ def run_ffm(in_path: PurePath, in_cmd: list[str] | None, out_path: PurePath | No
 
 
 # Time Utils
-def fmt_duration(duration: float | int, unit_conv: tuple[int] = (60, 60), connectors: tuple[str] = (":", ":"), smallest_unit: str = "s", ALWAYS_ALL_UNITS: bool = False) -> str:
+def fmt_duration(duration: float | int, unit_conv: tuple[int, int] = (60, 60), connectors: tuple[str, str] = (":", ":"), smallest_unit: str = "s", ALWAYS_ALL_UNITS: bool = False) -> str:
     """ Formats a duration to a time string, defaulting to seconds -> hh:mm:ss format """
     duration_secs = int(duration // 1)
     duration_mins = duration_secs // unit_conv[1]

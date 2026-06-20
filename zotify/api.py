@@ -118,6 +118,8 @@ class Content(HierarchicalNode):
             resp = Zotify.invoke_libre_md(cls, uri)
             if cls is Track and resp.get(DURATION):
                 resp[DURATION_MS] = resp.pop(DURATION)
+                if resp[ALBUM]:
+                    resp[ALBUM][ALBUM_TYPE] = str.lower(resp[ALBUM].pop(TYPE))
             elif cls is Album and resp.get(TYPE):
                 resp[ALBUM_TYPE] = str.lower(resp.pop(TYPE))
             elif cls is Playlist and resp.get(ATTRIBUTES):
@@ -430,7 +432,7 @@ class Content(HierarchicalNode):
             elif not self.hasMetadata or getattr(self, k, None) is None:
                 setattr(self, k, v)
     
-    def parse_relatives(self, resps: list[dict[str, str] | None], RelativeClasses: type[Content] | tuple[type[Content]],
+    def parse_relatives(self, resps: list[dict[str, str] | None], RelativeClasses: type[Content] | tuple[type[Content], ...],
                         make_parent: bool = False) -> list[Content | Container | None]:
         RelativeClasses = RelativeClasses if isinstance(RelativeClasses, tuple) else (RelativeClasses,)
         type_selector = tuple(cls.type_attr for cls in RelativeClasses)
@@ -447,7 +449,17 @@ class Content(HierarchicalNode):
                     if resp: Printer.json_dump(PrintChannel.WARNING, resp)
                 new_relatives.append(None)
                 continue
-            RelativeClass: type[Content | Container] = RelativeClasses[type_selector.index(resp[TYPE])]
+            elif len(RelativeClasses) > 1 and resp[TYPE] not in type_selector:
+                with Printer.pause_loader():
+                    Printer.hashtaged(PrintChannel.WARNING, f'UNMAPPED CONTENT TYPE {resp[TYPE]}\n' +
+                                                            f'EXPECTED RELATIVE TYPES: {[c.clsn for c in RelativeClasses]}')
+                    if resp: Printer.json_dump(PrintChannel.WARNING, resp)
+                new_relatives.append(None)
+                continue
+            elif len(RelativeClasses) > 1:  
+                RelativeClass: type[Content | Container] = RelativeClasses[type_selector.index(resp[TYPE])]
+            else:
+                RelativeClass: type[Content | Container] = RelativeClasses[0]
             new_relative = self.make_or_link_relative(resp[URI].split(":", 1)[-1], RelativeClass, make_parent)
             new_relative.parse_metadata(self, resp)
             new_relatives.append(new_relative)
@@ -475,7 +487,7 @@ class Content(HierarchicalNode):
                 recurs_children: list[Container] = []
                 for recurs_obj in recurs_objs:
                     recurs_children.extend(recurs_obj._main_items)
-                contains: tuple[type[Content]] = recurs_objs[0]._contains
+                contains: tuple[type[Content], ...] = recurs_objs[0]._contains
                 for recurse_type in contains if isinstance(contains, tuple) else (contains,):
                     recurse_uris = [item.uri for item in recurs_children if isinstance(item, recurse_type)]
                     recurs_item_resps = self.fetch_uris_metadata(recurse_uris, recurse_type, hide_loader=True)

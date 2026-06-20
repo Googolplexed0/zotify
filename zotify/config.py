@@ -635,7 +635,7 @@ class Zotify:
     # STATIC
     VERSION                                             = version("zotify")
     LEGACY_API_ENDOINTS     : bool                      = True
-    FORCE_LIBRE_METADATA    : bool                      = True
+    FORCE_LIBRE_METADATA    : bool                      = False
     
     # STATIC AFTER BOOT
     CONFIG                  : Config                    = Config()
@@ -798,7 +798,7 @@ class Zotify:
             return
     
     @classmethod
-    def invoke_libre_md(cls, ContClass: type, uri: str) -> dict:
+    def invoke_libre_md(cls, ContClass: type, uri: str) -> dict[str, str | int | dict]:
         try:
             content_id = cls.to_libre_content(ContClass, uri)
             if ContClass.clsn == "Playlist":
@@ -814,7 +814,7 @@ class Zotify:
             return {}
     
     @classmethod
-    def invoke_url(cls, url: str, params: dict | None = None, expectFail: bool = False, force_login5: bool = False) -> dict:
+    def invoke_url(cls, url: str, params: dict | None = None, expectFail: bool = False, force_login5: bool = False) -> dict[str, str | int | dict]:
         def choose_token() -> str:
             if cls.OAUTH and not force_login5:
                 return cls.OAUTH.token()
@@ -896,7 +896,7 @@ class Zotify:
         return handle_next(resp, stripper) if resp else []
     
     @classmethod
-    def invoke_url_bulk(cls, url: str, bulk_items: list[str], stripper: str, limit: int = 50) -> list[dict]:
+    def invoke_url_bulk(cls, url: str, bulk_items: list[str], stripper: str, limit: int = 50) -> list[dict[str, str | int | dict]]:
         items = []
         while len(bulk_items):
             items_batch = '%2c'.join(bulk_items[:limit])

@@ -231,7 +231,7 @@ class Printer:
         )
     
     @staticmethod
-    def table(title: str, headers: tuple[str], tabular_data: list) -> None:
+    def table(title: str, headers: tuple[str, ...], tabular_data: list) -> None:
         Printer.hashtaged(PrintChannel.MANDATORY, title)
         Printer.new_print(PrintChannel.MANDATORY, tabulate(tabular_data, headers=headers, tablefmt='pretty'))
     
