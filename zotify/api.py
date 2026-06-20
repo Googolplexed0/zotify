@@ -589,7 +589,7 @@ class DLContent(Content):
             with open(temppath, 'wb') as file:
                 no_responses = 0
                 time_start = time.time()
-                t_per_byte = self.duration_ms / 1000. / stream.size * Zotify.CONFIG.get_dl_rate_limter()
+                t_per_byte = (self.duration_ms / 1000. / stream.size * Zotify.CONFIG.get_dl_rate_limter()) if self.duration_ms else 0
                 while no_responses < 5:
                     bytes_r = file.write(stream.stream().read(Zotify.CONFIG.get_chunk_size()))
                     if bytes_r:
