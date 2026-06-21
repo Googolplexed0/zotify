@@ -56,18 +56,6 @@
 
 </details>
 
-<details><summary><strong>Updating</strong></summary>
-
-*Update in accordance with your install method*
-
-**If Executable (pipx):**
-`pipx install -f git+https://github.com/Googolplexed0/zotify.git`
-
-**If Module:**
-`python -m pip install --force-reinstall git+https://github.com/Googolplexed0/zotify.git`
-
-</details>
-
 ### Advanced Installation Instructions
 
 See [INSTALLATION](INSTALLATION.md) for a more detailed and opinionated installation walkthrough.
@@ -139,7 +127,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
 | `OPTIMIZED_DOWNLOADING`      | `--optimized-downloading`           | Whether to sort download order by item duration to reduce API ratelimiting               | True          |
 | `DOWNLOAD_RATE_LIMITER`      | `-dlr`, `--download-rate-limiter`   | Slowdown multiplier based on the item's REAL_TIME_PLAY duration, 0 meaning disabled      | 0.0           |
-| `BULK_WAIT_TIME`             | `--bulk-wait-time`                  | The wait time between track downloads, in seconds                                        | 1.0           |
+| `BULK_WAIT_TIME`             | `--bulk-wait-time`                  | Wait time between track downloads, in seconds                                            | 1.0           |
 | `TEMP_DOWNLOAD_DIR`          | `-td`, `--temp-download-dir`        | Directory where tracks are temporarily downloaded first, `""` meaning disabled           | `""`          |
 
 | Album/Artist Options         | Command Line Config Flag            | Description                                                                              | Default Value |
@@ -212,8 +200,10 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `API_CLIENT_ID`              | `--client-id`                       | Client ID for a Developer App to route metadata API requests through         | `""`                      |
 | `API_CLIENT_LEGACY`          | `--client-legacy`                   | Whether the Developer App can access legacy endpoints\*\*                    | True                      |
 | `RETRY_ATTEMPTS`             | `--retry-attempts`                  | Number of times to retry failed API requests                                 | 1                         |
+| `RETRY_DELAY`                | `--retry-delay`                     | Wait time between API retry attempts, in seconds                             | 5.0                       |
 | `CHUNK_SIZE`                 | `--chunk-size`                      | Chunk size for downloading                                                   | 20000                     |
-| `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests (port is handled internally)   | 127.0.0.1                 |
+| `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests                                | 127.0.0.1                 |
+| `REDIRECT_PORT`              | `--redirect-port`                   | Destination port at `REDIRECT_ADDRESS` to receive OAuth login requests       | 4381                      |
 
 | Terminal & Logging Options   | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|

@@ -121,10 +121,7 @@ class Content(HierarchicalNode):
                 raise ValueError("ParentStack must end with DLContent to get relative path")
             dlc: DLContent = p[-1]
             p = check_path_dupes(dlc.output_path(p))
-        try:
-            return p.relative_to(cls._path_root)
-        except ValueError: # not relative, return absolute
-            return p
+        return try_rel_path(p, cls._path_root)
     
     @classmethod
     def fetch_metadata(cls, uri: str, args: list[str] = []) -> dict[str]:
@@ -370,7 +367,17 @@ class DLContent(Content):
         
         return False
     
-    def fetch_content_stream(self, stream: Streamer, temppath: PurePath, parent_stack: ParentStack) -> str:
+    def fetch_stream(self):
+        stream_retry = 0
+        while not (stream := Zotify.get_content_stream(self)):
+            if stream_retry >= Zotify.CONFIG.get_retry_attempts(): break
+            stream_retry += 1; sleep(Zotify.CONFIG.get_retry_delay())
+        if stream is None:
+            Printer.hashtaged(PrintChannel.ERROR, f'SKIPPING {self.clsn.upper()} - FAILED TO GET CONTENT STREAM\n' +
+                                                  f'{self.clsn}_ID: {self.id}')
+        return stream
+    
+    def fetch_stream_content(self, stream: Streamer, temppath: PurePath, parent_stack: ParentStack) -> str:
         disable = Zotify.CONFIG.get_standard_interface() or not Zotify.CONFIG.get_show_download_pbar()
         pbar = Printer.pbar(desc=str(self), total=stream.size, unit='B', unit_scale=True,
                             unit_divisor=1024, disable=disable, pbar_stack=parent_stack.PBARS)
@@ -693,14 +700,9 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
             if Zotify.CONFIG.get_temp_download_dir():
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
         
-        stream = Zotify.get_content_stream(self)
-        if stream is None:
-            Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING TRACK - FAILED TO GET CONTENT STREAM\n' +
-                                                 f'Track_ID: {self.id}')
-            return
-        
+        if (stream := self.fetch_stream()) is None: return
         self.set_dl_status("Downloading Stream")
-        time_elapsed_dl = self.fetch_content_stream(stream, temppath, parent_stack)
+        time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
         
         if not Zotify.CONFIG.get_always_check_lyrics():
             self.fetch_lyrics(parent_stack)
@@ -780,6 +782,7 @@ class Episode(DLContent, IsAddable):
         
         path = Path(path).expanduser().resolve()
         with Printer.pbar_stream(r.raw, desc=desc, total=file_size) as f_stream:
+            self.set_dl_status("Downloading Stream")
             pathlike_move_safe(f_stream, path)
         
         time_dl_end = time()
@@ -805,14 +808,10 @@ class Episode(DLContent, IsAddable):
             if Zotify.CONFIG.get_temp_download_dir():
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
         
-        self.set_dl_status("Downloading Stream")
         if not self.fetch_partner_url():
-            stream = Zotify.get_content_stream(self)
-            if stream is None:
-                Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING EPISODE - FAILED TO GET CONTENT STREAM\n' +
-                                                     f'Episode_ID: {self.id}')
-                return
-            time_elapsed_dl = self.fetch_content_stream(stream, temppath, parent_stack)
+            if (stream := self.fetch_stream()) is None: return
+            self.set_dl_status("Downloading Stream")
+            time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
         else:
             try:
                 time_elapsed_dl = self.download_directly(temppath)
@@ -1233,7 +1232,7 @@ class Query(Container):
     def conditional_metadata(self):
         alltracks = {t for t in self.ALL_NODES if isinstance(t, Track) and not t.is_local}
         
-        artists = set().union(*(set(track.artists) for track in alltracks))
+        artists = set().union(*(set(track.artists) for track in alltracks if track.artists))
         artist_uris: dict[str, Artist] = {a.uri: a for a in artists if not a.is_local and not a._hasMetadata
                                           and not "".join(a.name.lower().split()) == "variousartists"}
         if Zotify.CONFIG.get_save_genres() and artist_uris:

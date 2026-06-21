@@ -118,8 +118,10 @@ CONFIG_VALUES = {
     API_CLIENT_ID:              { DEFAULT: '',                        TYPE: str,    ARG: ('--client-id'                            ,) },
     API_CLIENT_LEGACY:          { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--client-legacy'                        ,) },
     RETRY_ATTEMPTS:             { DEFAULT: '1',                       TYPE: int,    ARG: ('--retry-attempts'                       ,) },
+    RETRY_DELAY:                { DEFAULT: '5.0',                     TYPE: float,  ARG: ('--retry-delay'                          ,) },
     CHUNK_SIZE:                 { DEFAULT: '20000',                   TYPE: int,    ARG: ('--chunk-size'                           ,) },
     REDIRECT_ADDRESS:           { DEFAULT: '127.0.0.1',               TYPE: str,    ARG: ('--redirect-address'                     ,) },
+    REDIRECT_PORT:              { DEFAULT: '4381',                    TYPE: int,    ARG: ('--redirect-port'                        ,) },
     
     # Terminal & Logging Options
     PRINT_SPLASH:               { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--print-splash'                         ,) },
@@ -590,15 +592,20 @@ class Config:
         return cls.get(RETRY_ATTEMPTS)
     
     @classmethod
+    def get_retry_delay(cls) -> float:
+        return cls.get(RETRY_DELAY)
+    
+    @classmethod
     def get_chunk_size(cls) -> int:
         return cls.get(CHUNK_SIZE)
     
     @classmethod
-    def get_oauth_address(cls) -> tuple[str, str]:
-        redirect_address = cls.get(REDIRECT_ADDRESS)
-        if redirect_address:
-            return redirect_address
-        return '127.0.0.1'
+    def get_oauth_address(cls) -> str:
+        return cls.get(REDIRECT_ADDRESS)
+    
+    @classmethod
+    def get_oauth_port(cls) -> int:
+        return cls.get(REDIRECT_PORT)
     
     # Terminal & Logging Options
     @classmethod
@@ -723,20 +730,18 @@ class Zotify:
                 Printer.hashtaged(PrintChannel.MANDATORY, f"Login via commandline args failed! Falling back to interactive login")
         
         # interactive OAuth login
-        port = 4381
-        redirect_url = f"http://{cls.CONFIG.get_oauth_address()}:{port}/login"
+        redirect_url = f"http://{cls.CONFIG.get_oauth_address()}:{cls.CONFIG.get_oauth_port()}/login"
         def oauth_print(url):
             Printer.new_print(PrintChannel.MANDATORY, f"Click on the following link to login:\n{url}")
         
         client_id = cls.CONFIG.get_api_client_id()
         if not client_id: client_id = MercuryRequests.keymaster_client_id
-        oauth = OAuth(client_id, redirect_url, oauth_print).set_scopes(SCOPES).set_listen_all(True)
-        session_builder.login_credentials = oauth.flow()
+        cls.OAUTH = OAuth(client_id, redirect_url, oauth_print).set_scopes(SCOPES).set_listen_all(True)
+        session_builder.login_credentials = cls.OAUTH.flow()
         if cls.CONFIG.get_save_credentials():
             cls.CRED_FILE = cred_path
             if client_id != MercuryRequests.keymaster_client_id:
-                cls.OAUTH = oauth
-                oauth.save_creds(cls.CRED_FILE)
+                cls.OAUTH.save_creds(cls.CRED_FILE)
             else:
                 session_builder.conf.store_credentials = True
                 session_builder.conf.stored_credentials_file = str(cls.CRED_FILE)
@@ -779,14 +784,15 @@ class Zotify:
                             filemode="x", filename=cls.LOGFILE)
         
         with Loader("Logging in...", PrintChannel.MANDATORY):
-            login_try = 0
-            while login_try <= cls.CONFIG.get_retry_attempts():
-                login_try += 1
+            login_retry = 0
+            while not cls.SESSION:
                 try: cls.login(args)
                 except Exception as e:
                     Printer.hashtaged(PrintChannel.WARNING, f'LOGIN FAILED ({e.args[0]})\n' + 
-                                                             'TRYING AGAIN AFTER SMALL WAIT')
-                    sleep(3)
+                                                            f'TRYING AGAIN AFTER A SMALL DELAY')
+                if cls.SESSION or login_retry >= Zotify.CONFIG.get_retry_attempts(): break
+                if cls.OAUTH: cls.OAUTH.close()
+                login_retry += 1; sleep(Zotify.CONFIG.get_retry_delay())
         if not cls.SESSION:
             Printer.hashtaged(PrintChannel.MANDATORY, 'ALL LOGIN ATTEMPTS UNSUCCESSFUL\n'+ 
                                                       'NO SESSION CREATED, EXITING')
@@ -836,7 +842,7 @@ class Zotify:
     @classmethod
     def invoke_url(cls, url: str, params: dict | None = None, expectFail: bool = False, force_login5: bool = False) -> dict[str, str | int | dict]:
         def choose_token() -> str:
-            if cls.OAUTH and not force_login5:
+            if cls.CONFIG.get_api_client_id() and not force_login5:
                 return cls.OAUTH.token()
             return cls.SESSION.tokens().get_token(*SCOPES).access_token
         
@@ -848,11 +854,11 @@ class Zotify:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0'
         }
         
-        tryCount = 0
-        while tryCount <= cls.CONFIG.get_retry_attempts():
+        api_retry = 0
+        while api_retry <= cls.CONFIG.get_retry_attempts():
             resp = requests.get(url, headers=headers, params=params)
             cls.TOTAL_API_CALLS += 1
-            retry_delay = 5
+            retry_delay = cls.CONFIG.get_retry_delay()
             if resp.status_code == 403 and not expectFail:
                 Printer.hashtaged(PrintChannel.WARNING, f'API ERROR\n' +
                                                         f'ATTEMPTING TO ACCESS FORBIDDEN ENDPOINT')
@@ -867,21 +873,20 @@ class Zotify:
                 if fallback_code in {403, 429}:
                     fallback_message = "Too Many Requests, Rate Limit Exceeded"
                     if resp.headers.get(RETRY_AFTER):
-                        fallback_message += f". Timed out for {resp.headers[RETRY_AFTER]} seconds."
-                        retry_delay += int(resp.headers[RETRY_AFTER])
+                        timeout = float(resp.headers[RETRY_AFTER])
+                        fallback_message += f". Timed out for {timeout} seconds."
+                        if retry_delay < timeout: retry_delay = timeout
                 responsejson = {ERROR: {STATUS: fallback_code,  MESSAGE: fallback_message}}
             if resp.ok and resp.status_code == 200 and not responsejson.get(ERROR):
                 return responsejson
             elif not expectFail:
-                retry_text = f"(RETRY {tryCount}) " if tryCount else ""
+                retry_text = f"(RETRY {api_retry}) " if api_retry else ""
                 Printer.hashtaged(PrintChannel.WARNING, f'API ERROR {retry_text}- RETRYING\n' +
                                                         f'Status {responsejson.get(ERROR, {}).get(STATUS, "Unknown")}:  '+
                                                         f'{responsejson.get(ERROR, {}).get(MESSAGE, "No message provided")}')
             
-            tryCount += 1
-            if tryCount > cls.CONFIG.get_retry_attempts():
-                break
-            sleep(retry_delay if not expectFail else 1)
+            if api_retry >= Zotify.CONFIG.get_retry_attempts(): break
+            api_retry += 1; sleep(retry_delay if not expectFail else 1)
         
         if not expectFail:
             Printer.hashtaged(PrintChannel.API_ERROR, f'RETRY LIMIT EXCEDED\n' +
@@ -1009,6 +1014,8 @@ class Zotify:
         
         for dir in (Path(cls.CONFIG.get_root_path()), Path(cls.CONFIG.get_root_podcast_path())):
             for tempfile in dir.glob("*.tmp"):
-                    tempfile.unlink()
+                tempfile.unlink()
+        
+        if cls.OAUTH: cls.OAUTH.close()
         
         print("\n")

@@ -37,6 +37,12 @@ def pathlike_move_safe(src: PurePath | bytes, dst: PurePath, copy: bool = False)
     return dst
 
 
+def try_rel_path(path: PurePath | None, start: PurePath) -> PurePath | None:
+    if not path: return None
+    try: return path.relative_to(start)
+    except ValueError: return path
+
+
 def check_path_dupes(path: PurePath) -> PurePath:
     if not (Path(path).is_file() and Path(path).stat().st_size):
         return path

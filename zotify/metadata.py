@@ -671,7 +671,7 @@ class M3U8:
                                                      'NO CONTENT WITH VALID FILEPATHS FOUND')
             return
         elif Zotify.CONFIG.get_m3u8_relative_paths():
-            cont_paths = [os.path.relpath(p, self.path.parent) if p else None for p in cont_paths]
+            cont_paths = [try_rel_path(p, self.path.parent) for p in cont_paths]
         
         missing_name = f"{self.cont_type.clsn}"
         if isinstance(self.cont_type, Container): missing_name += f" {self.cont_type._contains}"
