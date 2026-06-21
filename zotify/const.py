@@ -194,6 +194,7 @@ SCOPES = [
 # System Constants
 LINUX_SYSTEM = 'Linux'
 WINDOWS_SYSTEM = 'Windows'
+MACOS_SYSTEM = 'Darwin'
 
 # FFMPEG
 CODEC_MAP_TRACK = {

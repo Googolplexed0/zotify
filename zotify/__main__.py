@@ -138,6 +138,8 @@ def main():
     
     args = parser.parse_args()
     Zotify.boot(args)
+    if not Zotify.SESSION: return
+    
     from zotify.app import client
     client(args, modes)
 

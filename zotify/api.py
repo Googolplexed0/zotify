@@ -28,6 +28,7 @@ class HierarchicalNode(metaclass=DynamicClassNameAttrs):
         self.parents:           set[HierarchicalNode] = set()
         self.children:          set[HierarchicalNode] = set()
         self.ALL_NODES[self] = self
+        super().__init__() # handle add-on classes
     
     @classmethod
     def get_if_exists(cls, node_comparable) -> HierarchicalNode | None:
@@ -65,7 +66,7 @@ class Content(HierarchicalNode):
         self._downloaded = False
         self._hasMetadata = False
         
-        self.name = ""
+        self.name = None
     
     def __eq__(self, other) -> bool:
         if isinstance(other, Content): return self.uri == other.uri
@@ -76,14 +77,14 @@ class Content(HierarchicalNode):
         return hash(self.uri)
     
     def __str__(self):
-        default = self.fix_filename(f"({self.type_attr}){self.id}")
+        default = f"({self.type_attr}){self.id}"
         vals = []
         for attr in self._to_str_attrs:
             val = getattr(self, attr, None)
             if isinstance(val, list):       val = val[0] if isinstance(val[0], Content) else ", ".join(str(v) for v in val)
             if isinstance(val, Content):    val = getattr(val, NAME, None)
             if val:                         vals.append(str(val))
-        return self.fix_filename(" - ".join(vals)) if vals else default
+        return " - ".join(vals) if vals else default
     
     def full_metadata(self) -> bool:
         return bool(self.name)
@@ -284,10 +285,9 @@ class DLContent(Content):
         self._clone_to: set[ParentStack] = set()
         
         self.duration_ms    : int                   = None
+        self.file_ids       : list[dict[str, str]]  = None
         self.gid            : str                   = None
         self.is_playable    : bool                  = None
-        
-        self.file_ids       : list[dict[str, str]]  = None
     
     def set_dl_status(self, str_status) -> Loader:
         self._dl_status = str_status
@@ -493,6 +493,7 @@ class DLContent(Content):
 class HasArtists:
     def __init__(self):
         self.artists        : list[Artist]          = None
+        super().__init__()
     
     def artist_names(self, FORCE_STR: bool = False) -> None | str | list[str]:
         if not self.artists:        return None
@@ -501,22 +502,30 @@ class HasArtists:
         if not delim and FORCE_STR: return ", ".join(artist_names)
         elif not delim:             return artist_names
         else:                       return delim.join(artist_names)
-
-
-class HasGenres:
+class HasGenres: # only fetched if config set
     def __init__(self):
-        self.genres         : list[str]             = None # only fetched if config set
+        self.genres         : list[str]             = None
+        super().__init__()
     
-    def genre_names(self, FORCE_STR: bool = False) -> None | str | list[str]:
-        if not self.genres:                         return None
+    def genre_names(self, FORCE_STR: bool = False) ->  None | str | list[str]:
+        if not self.genres:        return None
         delim = Zotify.CONFIG.get_genre_delimiter()
         if not Zotify.CONFIG.get_all_genres():      return self.genres[0]
         elif not delim and FORCE_STR:               return ", ".join(self.genres)
         elif not delim:                             return self.genres
         else:                                       return delim.join(self.genres)
+class IsAddable: # set by Playlist API
+    def __init__(self):
+        self.added_at       : dict[Playlist, str]   = {}
+        self.added_by       : dict[Playlist, User]  = {}
+        super().__init__()
+class IsFavoritable: # set by UserItem API
+    def __init__(self):
+        self.added_at       : dict[UserItem, str]   = {}
+        super().__init__()
 
 
-class Track(DLContent, HasArtists, HasGenres):
+class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
     _regex_flag = Zotify.CONFIG.get_regex_track()
     _to_str_attrs = [ARTISTS, NAME]
     _to_db_attrs = [TRACK_NUMBER, ARTISTS, ALBUM]
@@ -526,18 +535,13 @@ class Track(DLContent, HasArtists, HasGenres):
     
     def __init__(self, uri: str) -> None:
         super().__init__(uri)
+        self.album          : Album                 = None
         self.disc_number    : int                   = None
         self.ean            : str                   = None # European Article Number
         self.isrc           : str                   = None # International Standard Recording Code
+        self.lyrics         : list[str]             = None # only fetched if config set
         self.track_number   : str                   = None
         self.upc            : str                   = None # Universal Product Code (Type-A)
-        self.album          : Album                 = None
-        self.artists        : list[Artist]          = None
-        self.genres         : list[str]             = None # only fetched if config set
-        self.lyrics         : list[str]             = None # only fetched if config set
-        
-        self.added_at       : dict[Container, str]  = {}   # only set by Playlist API or UserItem API
-        self.added_by       : dict[Playlist, User]  = {}   # only set by Playlist API
     
     def fill_output_template(self, parent_stack: ParentStack, output_template: str = "") -> PurePath:
         parent: Container = parent_stack[-2]
@@ -573,10 +577,9 @@ class Track(DLContent, HasArtists, HasGenres):
             if self.album.artists:
                 update_repl(self.album.artists[0].name,                 "{album_artist}")
                 update_repl(self.album.artist_names(FORCE_STR=True),    "{album_artists}")
-        
-        if Zotify.CONFIG.get_disc_track_totals():
-            update_repl(self.album.total_tracks,    "{total_tracks}")
-            update_repl(self.album.total_discs,     "{total_discs}")
+            if Zotify.CONFIG.get_disc_track_totals():
+                update_repl(self.album.total_tracks,    "{total_tracks}")
+                update_repl(self.album.total_discs,     "{total_discs}")
         
         if isinstance(parent, Playlist):
             playlist_number = str(parent.tracks_or_eps.index(self) + 1).zfill(2)
@@ -728,7 +731,7 @@ class Track(DLContent, HasArtists, HasGenres):
         self.wait_between_downloads()
 
 
-class Episode(DLContent):
+class Episode(DLContent, IsAddable):
     _path_root: PurePath = Zotify.CONFIG.get_root_podcast_path()
     _regex_flag = Zotify.CONFIG.get_regex_episode()
     _to_str_attrs = [SHOW, NAME]
@@ -747,12 +750,9 @@ class Episode(DLContent):
         self.publish_time           : str       = None
         self.release_date           : str       = None
         self.show                   : Show      = None
-        
-        self.added_at       : dict[Playlist, str]   = {} # only set by Playlist API
-        self.added_by       : dict[Playlist, User]  = {} # only set by Playlist API
     
     def fill_output_template(self, parent_stack: list[Container], output_template: str = "") -> PurePath:
-        return self._path_root / self.fix_filename(self.show.name) / f"{self}.{self._ext}"
+        return self._path_root / self.fix_filename(self.show.name) / (self.fix_filename(str(self)) + f".{self._ext}")
     
     def fetch_partner_url(self) -> str | None:
         resp = Zotify.invoke_url(PARTNER_URL + self.id + '"}&extensions=' + PERSISTED_QUERY, force_login5=True)
@@ -928,18 +928,18 @@ class Playlist(Container):
     
     def __init__(self, uri: str):
         super().__init__(uri)
+        self.tracks_or_eps      : list[Track | Episode]     = self._main_items
+        
         self.collaborative      : bool                      = None
         self.description        : str                       = None
         self.deleted_by_owner   : bool                      = None
         self.length             : int                       = None
         self.image_url          : str                       = None
+        self.owner              : User                      = None
         self.public             : bool                      = None
         self.revision           : str                       = None
         self.snapshot_id        : str                       = None
         self.timestamp          : str                       = None
-        
-        self.owner              : User                      = None
-        self.tracks_or_eps      : list[Track | Episode]     = self._main_items
     
     def unwrap(self, playlist_items: list[dict[str, dict]]) -> list[dict | None]:
         tracks_eps_empty: list[dict] = [item.get(ITEM) for item in playlist_items]
@@ -976,7 +976,7 @@ class User(Container):
         return cls._display_name_map[username]
 
 
-class Album(Container, HasArtists):
+class Album(Container, HasArtists, IsFavoritable):
     _regex_flag = Zotify.CONFIG.get_regex_album()
     _show_pbar = Zotify.CONFIG.get_show_album_pbar()
     _to_str_attrs = [ARTISTS, NAME]
@@ -987,6 +987,9 @@ class Album(Container, HasArtists):
     
     def __init__(self, uri: str):
         super().__init__(uri)
+        self.tracks         : list[Track]           = self._main_items
+        self.album_group    : dict[Container, str]  = {}   # only set by Artist Albums API
+        
         self.album_type     : str                   = None
         self.compilation    : bool                  = None
         self.duration_ms    : int                   = None
@@ -999,11 +1002,6 @@ class Album(Container, HasArtists):
         self.total_tracks   : str                   = None
         self.upc            : str                   = None # Universal Product Code (Type-A)
         self.year           : str                   = None
-        self.artists        : list[Artist]          = None
-        self.tracks         : list[Track]           = self._main_items
-        
-        self.album_group    : dict[Container, str]  = {}   # only set by Artist Albums API
-        self.added_at       : dict[Container, str]  = {}   # only set by UserItem API
     
     def full_metadata(self) -> bool:
         return bool(self.tracks)
@@ -1067,16 +1065,17 @@ class Artist(Container, HasGenres):
         self._needs_expansion = True
         self._needs_recursion = True
         
+        self.all_albums     : list[Album]       = self._main_items if not self._toptrackmode else None
+        self.top_tracks     : list[TopTrack]    = self._main_items if self._toptrackmode else None
+        
+        self.albums         : list[Album]       = None
+        self.appears_on     : list[Album]       = None
         self.biography      : str               = None
         self.end_year       : str               = None
         self.followers      : int               = None
-        self.start_year     : str               = None
-        self.albums         : list[Album]       = None
-        self.all_albums     : list[Album]       = self._main_items if not self._toptrackmode else None
-        self.appears_on     : list[Album]       = None
         self.genres         : list[str]         = None
         self.singles        : list[Album]       = None
-        self.top_tracks     : list[TopTrack]    = self._main_items if self._toptrackmode else None
+        self.start_year     : str               = None
     
     def full_metadata(self) -> bool:
         return bool(self.genres)
@@ -1093,13 +1092,14 @@ class Show(Container):
     
     def __init__(self, uri: str):
         super().__init__(uri)
+        self.episodes               : list[Episode]     = self._main_items
+        
         self.description            : str               = None
         self.explicit               : bool              = None
         self.is_externally_hosted   : bool              = None
         self.image_url              : str               = None
         self.publisher              : str               = None
         self.total_episodes         : str               = None
-        self.episodes               : list[Episode]     = self._main_items
 
 
 # start not implemented

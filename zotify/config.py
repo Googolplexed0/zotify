@@ -1,6 +1,5 @@
 import json
 import logging
-import sys
 import re
 import requests
 from binascii import hexlify
@@ -16,6 +15,7 @@ from librespot.core import Session, OAuth, MercuryRequests
 from librespot.proto.Authentication_pb2 import AuthenticationType
 from librespot.proto.Metadata_pb2 import AudioFile
 from pathlib import Path, PurePath
+from platform import system as platform_system
 from time import sleep
 from typing import Any, Callable
 
@@ -162,16 +162,19 @@ class Config:
     def _default() -> dict[str, str]:
         return {k: v[DEFAULT] for k, v in CONFIG_VALUES}
     
+    def _default_path() -> Path:
+        system_paths = {
+            WINDOWS_SYSTEM  : Path.home() / 'AppData/Roaming/Zotify',
+            LINUX_SYSTEM    : Path.home() / '.config/zotify',
+            MACOS_SYSTEM    : Path.home() / 'Library/Application Support/Zotify'
+        }
+        return system_paths.get(platform_system(), Path.cwd() / '.zotify')
+    
     @classmethod
     def load(cls, args) -> None:
         config_str = args.config_location
         if not config_str:
-            system_paths = {
-                'win32': Path.home() / 'AppData/Roaming/Zotify',
-                'linux': Path.home() / '.config/zotify',
-                'darwin': Path.home() / 'Library/Application Support/Zotify'
-            }
-            config_dir_or_file = system_paths.get(sys.platform, Path.cwd() / '.zotify')
+            config_dir_or_file = cls._default_path()
         else:
             config_dir_or_file = Path(config_str).expanduser()
         config_path = ensure_is_file(config_dir_or_file, 'config.json')
@@ -281,12 +284,7 @@ class Config:
     def get_credentials_location(cls) -> PurePath:
         cred_str: str = cls.get(CREDENTIALS_LOCATION)
         if not cred_str:
-            system_paths = {
-                'win32': Path.home() / 'AppData/Roaming/Zotify',
-                'linux': Path.home() / '.local/share/zotify',
-                'darwin': Path.home() / 'Library/Application Support/Zotify'
-            }
-            cred_dir_or_file = system_paths.get(sys.platform, Path.cwd() / '.zotify')
+            cred_dir_or_file = cls._default_path()
         elif cred_str[0] == ".":
             cred_dir_or_file = Path(cls.get_root_path()) / Path(cred_str).expanduser().relative_to(".")
         else:
@@ -415,12 +413,7 @@ class Config:
     def get_song_archive_location(cls) -> PurePath:
         archive_str: str = cls.get(SONG_ARCHIVE_LOCATION)
         if not archive_str:
-            system_paths = {
-                'win32': Path.home() / 'AppData/Roaming/Zotify',
-                'linux': Path.home() / '.local/share/zotify',
-                'darwin': Path.home() / 'Library/Application Support/Zotify'
-            }
-            archive_dir_or_file = system_paths.get(sys.platform, Path.cwd() / '.zotify')
+            archive_dir_or_file = cls._default_path()
         elif archive_str[0] == ".":
             archive_dir_or_file = Path(cls.get_root_path()) / Path(archive_str).expanduser().relative_to(".")
         else:
@@ -790,10 +783,14 @@ class Zotify:
             while login_try <= cls.CONFIG.get_retry_attempts():
                 login_try += 1
                 try: cls.login(args)
-                except ConnectionError as e:
+                except Exception as e:
                     Printer.hashtaged(PrintChannel.WARNING, f'LOGIN FAILED ({e.args[0]})\n' + 
                                                              'TRYING AGAIN AFTER SMALL WAIT')
                     sleep(3)
+        if not cls.SESSION:
+            Printer.hashtaged(PrintChannel.MANDATORY, 'ALL LOGIN ATTEMPTS UNSUCCESSFUL\n'+ 
+                                                      'NO SESSION CREATED, EXITING')
+            return
         cls.LOGGER = logging.getLogger("zotify.debug")
         
         prem, quality, bitrate = cls.parse_dl_quality(cls.CONFIG.get_download_qual_pref())
@@ -965,12 +962,18 @@ class Zotify:
                                                    f'PREFERED AUDIO QUALITY {preference} NOT AVAILABLE - FALLING BACK TO AUTO')
             return cls.get_content_stream(content, use_qual_pref=False)
         except RuntimeError as e:
-            if 'Failed fetching audio key!' not in e.args[0]: raise
-            gid, fileid = e.args[0].split('! ')[1].split(', ')
-            Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +
+            error_arg = e.args[0]
+            if isinstance(error_arg, str) and 'Failed fetching audio key!' in error_arg:
+                gid, fileid = error_arg.split('! ')[1].split(', ')
+                Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +
                                                   'MAY BE CAUSED BY RATE LIMITS - CONSIDER INCREASING `BULK_WAIT_TIME`\n' +
                                                  f'GID: {gid[5:]} - File_ID: {fileid[8:]}')
-            Printer.logger("\n".join(e.args), PrintChannel.ERROR)
+                Printer.logger("\n".join(e.args), PrintChannel.ERROR)
+            elif isinstance(error_arg, int):
+                Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +
+                                                     f'(ASSUMED HTTP) RUNTIME ERROR - STATUS CODE {error_arg}')
+                Printer.logger("\n".join(e.args), PrintChannel.ERROR)
+            else: raise
         except ConnectionError as e:
             if "Status code " not in e.args[0]: raise
             status_code = e.args[0].split("Status code ")[1]

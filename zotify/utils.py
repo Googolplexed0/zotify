@@ -1,10 +1,9 @@
-import os
 import re
 from datetime import datetime, timezone
 from fractions import Fraction
+from os.path import commonpath
 from pathlib import Path, PurePath
 from shutil import move, copyfile, copyfileobj
-from typing import Literal
 
 from zotify.termoutput import *
 
@@ -50,15 +49,14 @@ def get_common_dir(allpaths: set[PurePath]) -> PurePath:
     if len({p.name for p in allpaths}) == 1:
         # only one path or only multiples of one path
         return allpaths.pop().parent
-    return PurePath(os.path.commonpath(allpaths))
+    return PurePath(commonpath(allpaths))
 
 
 def walk_directory_for_tracks(root_path: PurePath):
     Path(root_path).mkdir(parents=True, exist_ok=True)
-    for dirpath, dirnames, filenames in os.walk(Path(root_path)):
-        for filename in filenames:
-            if filename.endswith(tuple(EXT_MAP.values())):
-                yield PurePath(dirpath) / filename
+    for filepath in Path(root_path).rglob("*"):
+        if filepath.is_file() and filepath.suffix and filepath.suffix[1:] in EXT_MAP.values():
+            yield PurePath(filepath)
 
 
 # Input Processing Utils
