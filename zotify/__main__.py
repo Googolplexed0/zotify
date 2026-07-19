@@ -6,10 +6,12 @@ It's like youtube-dl, but for that other music platform.
 """
 
 import argparse
+import sys
 
 from zotify.app import client
 from zotify.config import Zotify, CONFIG_VALUES, DEPRECIATED_CONFIGS
-from zotify.termoutput import Printer
+from zotify.termoutput import Printer, PrintChannel
+from zotify.exceptions import LoginError, RateLimitError, ConnectionDropError
 
 
 class DepreciatedAction(argparse.Action):
@@ -134,8 +136,20 @@ def main():
                             )
     
     args = parser.parse_args()
-    Zotify.boot(args)
-    client(args, modes)
+    try:
+        Zotify.boot(args)
+        client(args, modes)
+    except LoginError:
+        sys.exit(133)
+    except RateLimitError:
+        sys.exit(102)
+    except ConnectionDropError:
+        sys.exit(101)
+    
+    if Zotify.DOWNLOAD_ERRORS:
+        for err in Zotify.DOWNLOAD_ERRORS:
+            Printer.hashtaged(PrintChannel.ERROR, err)
+        sys.exit(100)
 
 
 if __name__ == '__main__':

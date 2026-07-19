@@ -945,6 +945,7 @@ class Track(DLContent):
         if stream is None:
             Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING TRACK - FAILED TO GET CONTENT STREAM\n' +
                                                  f'Track_ID: {self.id}')
+            Zotify.DOWNLOAD_ERRORS.append(f"Track {self.id}: Failed to get content stream")
             return
         
         self.set_dl_status("Downloading Stream")
@@ -970,6 +971,7 @@ class Track(DLContent):
         except Exception as e:
             Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO WRITE METADATA\n')
             Printer.traceback(e)
+            Zotify.DOWNLOAD_ERRORS.append(f"Track {self.id}: Failed to write metadata ({e})")
         
         Interface.dl_complete(self, path, time_elapsed_dl, time_elapsed_ffmpeg)
         
@@ -1167,6 +1169,7 @@ class Episode(DLContent):
             if stream is None:
                 Printer.hashtaged(PrintChannel.ERROR, 'SKIPPING EPISODE - FAILED TO GET CONTENT STREAM\n' +
                                                      f'Episode_ID: {self.id}')
+                Zotify.DOWNLOAD_ERRORS.append(f"Episode {self.id}: Failed to get content stream")
                 return
             time_elapsed_dl = self.fetch_content_stream(stream, temppath, parent_stack)
         else:
@@ -1175,6 +1178,7 @@ class Episode(DLContent):
             except Exception as e:
                 Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO DOWNLOAD EPISODE DIRECTLY')
                 Printer.traceback(e)
+                Zotify.DOWNLOAD_ERRORS.append(f"Episode {self.id}: Failed to download directly ({e})")
                 return
         
         try:

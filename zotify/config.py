@@ -1,6 +1,7 @@
 import json
 import logging
 import sys
+import queue
 import re
 import requests
 from binascii import hexlify
@@ -21,6 +22,7 @@ from typing import Any, Callable
 
 from zotify.const import *
 from zotify.termoutput import Printer, PrintChannel, Loader
+from zotify.exceptions import LoginError, RateLimitError, ConnectionDropError
 
 Streamer = CdnManager.Streamer
 
@@ -653,6 +655,7 @@ class Zotify:
     # DYNAMIC PER QUERY
     TOTAL_API_CALLS         : int                       = None
     DATETIME_LAUNCH         : str                       = None
+    DOWNLOAD_ERRORS         : list[str]                 = []
     
     @classmethod
     def start(cls) -> None:
@@ -660,6 +663,7 @@ class Zotify:
             Printer.debug(f"Total API Calls: {cls.TOTAL_API_CALLS}")
         cls.DATETIME_LAUNCH = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         cls.TOTAL_API_CALLS = 0
+        cls.DOWNLOAD_ERRORS = []
     
     @classmethod
     def login(cls, args):
@@ -766,11 +770,17 @@ class Zotify:
             login_try = 0
             while login_try <= cls.CONFIG.get_retry_attempts():
                 login_try += 1
-                try: cls.login(args)
+                try: 
+                    cls.login(args)
+                    break
                 except ConnectionError as e:
+                    pause = 3 ** login_try
                     Printer.hashtaged(PrintChannel.WARNING, f'LOGIN FAILED ({e.args[0]})\n' + 
-                                                             'TRYING AGAIN AFTER SMALL WAIT')
-                    sleep(3)
+                                                             f'TRYING AGAIN AFTER {pause}s WAIT')
+                    sleep(pause)
+            else:
+                Printer.hashtaged(PrintChannel.ERROR, 'MAX LOGIN RETRIES REACHED. EXITING.')
+                raise LoginError("Max login retries reached")
         cls.LOGGER = logging.getLogger("zotify.debug")
         
         prem, quality, bitrate = cls.parse_dl_quality(cls.CONFIG.get_download_qual_pref())
@@ -861,7 +871,7 @@ class Zotify:
             tryCount += 1
             if tryCount > cls.CONFIG.get_retry_attempts():
                 break
-            sleep(retry_delay if not expectFail else 1)
+            sleep((retry_delay * tryCount) if not expectFail else 1)
         
         if not expectFail:
             Printer.hashtaged(PrintChannel.API_ERROR, f'RETRY LIMIT EXCEDED\n' +
@@ -950,12 +960,26 @@ class Zotify:
                                                   'MAY BE CAUSED BY RATE LIMITS - CONSIDER INCREASING `BULK_WAIT_TIME`\n' +
                                                  f'GID: {gid[5:]} - File_ID: {fileid[8:]}')
             Printer.logger("\n".join(e.args), PrintChannel.ERROR)
+            raise RateLimitError("Rate limited when fetching audio key")
         except ConnectionError as e:
             if "Status code " not in e.args[0]: raise
             status_code = e.args[0].split("Status code ")[1]
             Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO FILE\n' +
                                                  f'CONNECTION ERROR WHEN FETCHING CONTENT STREAM - STATUS CODE {status_code}')
             Printer.logger("\n".join(e.args), PrintChannel.ERROR)
+            if status_code.strip() == "429":
+                raise RateLimitError("Rate limited (status code 429)")
+            raise ConnectionDropError(f"Connection error: status code {status_code}")
+        except OSError as e:
+            Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO STREAM\n' +
+                                                  'NETWORK CONNECTION LOST - SPOTIFY TERMINATED SESSION')
+            Printer.traceback(e)
+            raise ConnectionDropError("Spotify terminated session")
+        except queue.Empty as e:
+            Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO STREAM\n' +
+                                                  'NETWORK CONNECTION LOST - QUEUE TIMEOUT WAITING FOR RESPONSE')
+            Printer.traceback(e)
+            raise ConnectionDropError("Spotify terminated session (Queue Empty Timeout)")
         except Exception as e:
             if risky_method:
                 cls.FORCE_STREAM_API_CALLS = True
