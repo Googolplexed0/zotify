@@ -46,99 +46,100 @@ CONFIG_VALUES = {
     OUTPUT_LIKED_SONGS:         { DEFAULT: 'Liked Songs/{artist}_{song_name}',
                                   TYPE: str,
                                   ARG: ('-ol', '--output-liked-songs' ,) },
-    SPLIT_ALBUM_DISCS:          { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--split-album-discs'                    ,) },
-    MAX_FILENAME_LENGTH:        { DEFAULT: '0',                       TYPE: int,    ARG: ('--max-filename-length'                  ,) },
+    SPLIT_ALBUM_DISCS:          { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--split-album-discs'                       ,) },
+    MAX_FILENAME_LENGTH:        { DEFAULT: '0',                       TYPE: int,    ARG: ('--max-filename-length'                     ,) },
     
     # Download Options
-    OPTIMIZED_DOWNLOADING:      { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--optimized-downloading'                ,) },
-    DOWNLOAD_RATE_LIMITER:      { DEFAULT: '0.0',                     TYPE: float,  ARG: ('-dlr', '--download-rate-limiter'        ,) },
-    BULK_WAIT_TIME:             { DEFAULT: '1.0',                     TYPE: float,  ARG: ('--bulk-wait-time'                       ,) },
-    TEMP_DOWNLOAD_DIR:          { DEFAULT: '',                        TYPE: str,    ARG: ('-td', '--temp-download-dir'             ,) },
+    OPTIMIZED_DOWNLOADING:      { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--optimized-downloading'                   ,) },
+    DOWNLOAD_RATE_LIMITER:      { DEFAULT: '0.0',                     TYPE: float,  ARG: ('-dlr', '--download-rate-limiter'           ,) },
+    BULK_WAIT_TIME:             { DEFAULT: '1.0',                     TYPE: float,  ARG: ('--bulk-wait-time'                          ,) },
+    TEMP_DOWNLOAD_DIR:          { DEFAULT: '',                        TYPE: str,    ARG: ('-td', '--temp-download-dir'                ,) },
     
     # Album/Artist Options
-    DOWNLOAD_PARENT_ALBUM:      { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--download-parent-album'                ,) },
-    NO_COMPILATION_ALBUMS:      { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--no-compilation-albums'                ,) },
-    NO_VARIOUS_ARTISTS:         { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--no-various-artists'                   ,) },
-    NO_ARTIST_APPEARS_ON:       { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--no-artist-appears-on'                 ,) },
-    DISCOG_BY_ALBUM_ARTIST:     { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--discog-by-album-artist'               ,) },
+    DOWNLOAD_PARENT_ALBUM:      { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--download-parent-album'                   ,) },
+    NO_COMPILATION_ALBUMS:      { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--no-compilation-albums'                   ,) },
+    NO_VARIOUS_ARTISTS:         { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--no-various-artists'                      ,) },
+    NO_ARTIST_APPEARS_ON:       { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--no-artist-appears-on'                    ,) },
+    DISCOG_BY_ALBUM_ARTIST:     { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--discog-by-album-artist'                  ,) },
     
     # Regex Options
-    REGEX_ENABLED:              { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--regex-enabled'                        ,) },
-    REGEX_TRACK_SKIP:           { DEFAULT: '',                        TYPE: str,    ARG: ('--regex-track-skip'                     ,) },
-    REGEX_EPISODE_SKIP:         { DEFAULT: '',                        TYPE: str,    ARG: ('--regex-episode-skip'                   ,) },
-    REGEX_ALBUM_SKIP:           { DEFAULT: '',                        TYPE: str,    ARG: ('--regex-album-skip'                     ,) },
+    REGEX_ENABLED:              { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--regex-enabled'                           ,) },
+    REGEX_TRACK_SKIP:           { DEFAULT: '',                        TYPE: str,    ARG: ('--regex-track-skip'                        ,) },
+    REGEX_EPISODE_SKIP:         { DEFAULT: '',                        TYPE: str,    ARG: ('--regex-episode-skip'                      ,) },
+    REGEX_ALBUM_SKIP:           { DEFAULT: '',                        TYPE: str,    ARG: ('--regex-album-skip'                        ,) },
     
     # Encoding Options
-    DOWNLOAD_FORMAT:            { DEFAULT: 'copy',                    TYPE: str,    ARG: ('--codec', '--download-format'           ,) },
-    DOWNLOAD_QUALITY:           { DEFAULT: 'auto',                    TYPE: str,    ARG: ('-q', '--download-quality'               ,) },
-    TRANSCODE_BITRATE:          { DEFAULT: 'auto',                    TYPE: str,    ARG: ('-b', '--bitrate', '--transcode-bitrate' ,) },
-    CUSTOM_FFMEPG_ARGS:         { DEFAULT: '',                        TYPE: str,    ARG: ('--custom-ffmpeg-args'                   ,) },
+    DOWNLOAD_FORMAT:            { DEFAULT: 'copy',                    TYPE: str,    ARG: ('--codec', '--download-format'              ,) },
+    DOWNLOAD_QUALITY:           { DEFAULT: 'auto',                    TYPE: str,    ARG: ('-q', '--download-quality'                  ,) },
+    TRANSCODE_BITRATE:          { DEFAULT: 'auto',                    TYPE: str,    ARG: ('-b', '--bitrate', '--transcode-bitrate'    ,) },
+    CUSTOM_FFMEPG_ARGS:         { DEFAULT: '',                        TYPE: str,    ARG: ('--custom-ffmpeg-args'                      ,) },
     
     # Archive Options
-    SONG_ARCHIVE_LOCATION:      { DEFAULT: '',                        TYPE: str,    ARG: ('--song-archive-location'                ,) },
-    DISABLE_SONG_ARCHIVE:       { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--disable-song-archive'                 ,) },
-    DISABLE_DIRECTORY_ARCHIVES: { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--disable-directory-archives'           ,) },
-    SKIP_EXISTING:              { DEFAULT: 'True',                    TYPE: bool,   ARG: ('-ie', '--skip-existing'                 ,) },
+    SONG_ARCHIVE_LOCATION:      { DEFAULT: '',                        TYPE: str,    ARG: ('--song-archive-location'                   ,) },
+    DISABLE_SONG_ARCHIVE:       { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--disable-song-archive'                    ,) },
+    DISABLE_DIRECTORY_ARCHIVES: { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--disable-directory-archives'              ,) },
+    SKIP_EXISTING:              { DEFAULT: 'True',                    TYPE: bool,   ARG: ('-ie', '--skip-existing'                    ,) },
     SKIP_PREVIOUSLY_DOWNLOADED: { DEFAULT: 'False',                   TYPE: bool,   ARG: ('-ip', '--skip-prev-downloaded', 
-                                                                                                 '--skip-previously-downloaded'    ,) },
+                                                                                                 '--skip-previously-downloaded'       ,) },
     
     # Playlist File Options
-    EXPORT_M3U8:                { DEFAULT: 'False',                   TYPE: bool,   ARG: ('-e, --export-m3u8'                      ,) },
-    M3U8_LOCATION:              { DEFAULT: '',                        TYPE: str,    ARG: ('--m3u8-location'                        ,) },
-    OUTPUT_M3U8:                { DEFAULT: '{name}',                  TYPE: str,    ARG: ('-om', '--output-m3u8'                   ,) },
-    M3U8_REL_PATHS:             { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--m3u8-relative-paths'                  ,) },
-    LIKED_SONGS_ARCHIVE_M3U8:   { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--liked-songs-archive-m3u8'             ,) },
+    EXPORT_M3U8:                { DEFAULT: 'False',                   TYPE: bool,   ARG: ('-e, --export-m3u8'                         ,) },
+    M3U8_LOCATION:              { DEFAULT: '',                        TYPE: str,    ARG: ('--m3u8-location'                           ,) },
+    OUTPUT_M3U8:                { DEFAULT: '{name}',                  TYPE: str,    ARG: ('-om', '--output-m3u8'                      ,) },
+    M3U8_REL_PATHS:             { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--m3u8-relative-paths'                     ,) },
+    LIKED_SONGS_ARCHIVE_M3U8:   { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--liked-songs-archive-m3u8'                ,) },
     
     # Lyrics Options
-    LYRICS_TO_METADATA:         { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--lyrics-to-metadata'                   ,) },
-    LYRICS_TO_FILE:             { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--lyrics-to-file'                       ,) },
-    LYRICS_LOCATION:            { DEFAULT: '',                        TYPE: str,    ARG: ('--lyrics-location'                      ,) },
-    OUTPUT_LYRICS:              { DEFAULT: '{artist}_{song_name}',    TYPE: str,    ARG: ('-oy', '--output-lyrics'                 ,) },
-    ALWAYS_CHECK_LYRICS:        { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--always-check-lyrics'                  ,) },
-    LYRICS_MD_HEADER:           { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--lyrics-md-header'                     ,) },
+    LYRICS_TO_METADATA:         { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--lyrics-to-metadata'                      ,) },
+    LYRICS_TO_FILE:             { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--lyrics-to-file'                          ,) },
+    LYRICS_LOCATION:            { DEFAULT: '',                        TYPE: str,    ARG: ('--lyrics-location'                         ,) },
+    OUTPUT_LYRICS:              { DEFAULT: '{artist}_{song_name}',    TYPE: str,    ARG: ('-oy', '--output-lyrics'                    ,) },
+    ALWAYS_CHECK_LYRICS:        { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--always-check-lyrics'                     ,) },
+    LYRICS_MD_HEADER:           { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--lyrics-md-header'                        ,) },
     
     # Metadata Options
-    LANGUAGE:                   { DEFAULT: 'en',                      TYPE: str,    ARG: ('--language'                             ,) },
-    MD_DISC_TRACK_TOTALS:       { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--md-disc-track-totals'                 ,) },
-    MD_SAVE_GENRES:             { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--md-save-genres'                       ,) },
-    MD_ALLGENRES:               { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--md-allgenres'                         ,) },
-    MD_GENREDELIMITER:          { DEFAULT: ', ',                      TYPE: str,    ARG: ('--md-genredelimiter'                    ,) },
-    MD_ARTISTDELIMITER:         { DEFAULT: ', ',                      TYPE: str,    ARG: ('--md-artistdelimiter'                   ,) },
-    SEARCH_QUERY_SIZE:          { DEFAULT: '10',                      TYPE: int,    ARG: ('--search-query-size'                    ,) },
-    STRICT_LIBRARY_VERIFY:      { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--strict-library-verify'                ,) },
-    ALBUM_ART_JPG_FILE:         { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--album-art-jpg-file'                   ,) },
+    LANGUAGE:                   { DEFAULT: 'en',                      TYPE: str,    ARG: ('--language'                                ,) },
+    MD_DISC_TRACK_TOTALS:       { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--md-disc-track-totals'                    ,) },
+    MD_SAVE_GENRES:             { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--md-save-genres'                          ,) },
+    MD_ALLGENRES:               { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--md-allgenres'                            ,) },
+    MD_GENREDELIMITER:          { DEFAULT: ', ',                      TYPE: str,    ARG: ('--md-genredelimiter'                       ,) },
+    MD_ARTISTDELIMITER:         { DEFAULT: ', ',                      TYPE: str,    ARG: ('--md-artistdelimiter'                      ,) },
+    SEARCH_QUERY_SIZE:          { DEFAULT: '10',                      TYPE: int,    ARG: ('--search-query-size'                       ,) },
+    STRICT_LIBRARY_VERIFY:      { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--strict-library-verify'                   ,) },
+    ALBUM_ART_JPG_FILE:         { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--album-art-jpg-file'                      ,) },
     
     # ZMD Options
-    IMPORT_ZMD:                 { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--import-zmd'                           ,) },
-    IMPORT_ZMD_LOCATION:        { DEFAULT: './.zmd',                  TYPE: str,    ARG: ('--import-zmd-location'                  ,) },
-    EXPORT_ZMD:                 { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--export-zmd'                           ,) },
-    EXPORT_ZMD_LOCATION:        { DEFAULT: './.zmd',                  TYPE: str,    ARG: ('--export-zmd-location'                  ,) },
+    IMPORT_ZMD:                 { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--import-zmd'                              ,) },
+    IMPORT_ZMD_LOCATION:        { DEFAULT: './.zmd',                  TYPE: str,    ARG: ('--import-zmd-location'                     ,) },
+    EXPORT_ZMD:                 { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--export-zmd'                              ,) },
+    EXPORT_ZMD_LOCATION:        { DEFAULT: './.zmd',                  TYPE: str,    ARG: ('--export-zmd-location'                     ,) },
     
     # API Options
-    API_CLIENT_ID:              { DEFAULT: '',                        TYPE: str,    ARG: ('--client-id'                            ,) },
-    API_CLIENT_LEGACY:          { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--client-legacy'                        ,) },
-    RETRY_ATTEMPTS:             { DEFAULT: '1',                       TYPE: int,    ARG: ('--retry-attempts'                       ,) },
-    RETRY_DELAY:                { DEFAULT: '5.0',                     TYPE: float,  ARG: ('--retry-delay'                          ,) },
-    CHUNK_SIZE:                 { DEFAULT: '20000',                   TYPE: int,    ARG: ('--chunk-size'                           ,) },
-    REDIRECT_ADDRESS:           { DEFAULT: '127.0.0.1',               TYPE: str,    ARG: ('--redirect-address'                     ,) },
-    REDIRECT_PORT:              { DEFAULT: '4381',                    TYPE: int,    ARG: ('--redirect-port'                        ,) },
+    API_CLIENT_ID:              { DEFAULT: '',                        TYPE: str,    ARG: ('--client-id'                               ,) },
+    API_CREDENTIALS_LOCATION:   { DEFAULT: '',                        TYPE: str,    ARG: ('--api-creds', '--api-credentials-location' ,) },
+    API_CLIENT_LEGACY:          { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--client-legacy'                           ,) },
+    RETRY_ATTEMPTS:             { DEFAULT: '1',                       TYPE: int,    ARG: ('--retry-attempts'                          ,) },
+    RETRY_DELAY:                { DEFAULT: '5.0',                     TYPE: float,  ARG: ('--retry-delay'                             ,) },
+    CHUNK_SIZE:                 { DEFAULT: '20000',                   TYPE: int,    ARG: ('--chunk-size'                              ,) },
+    REDIRECT_ADDRESS:           { DEFAULT: '127.0.0.1',               TYPE: str,    ARG: ('--redirect-address'                        ,) },
+    REDIRECT_PORT:              { DEFAULT: '4381',                    TYPE: int,    ARG: ('--redirect-port'                           ,) },
     
     # Terminal & Logging Options
-    PRINT_SPLASH:               { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--print-splash'                         ,) },
-    PRINT_PROGRESS_INFO:        { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-progress-info'                  ,) },
-    PRINT_SKIPS:                { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-skips'                          ,) },
-    PRINT_DOWNLOADS:            { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-downloads'                      ,) },
-    PRINT_DOWNLOAD_PROGRESS:    { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-download-progress'              ,) },
-    PRINT_URL_PROGRESS:         { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-url-progress'                   ,) },
-    PRINT_ALBUM_PROGRESS:       { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-album-progress'                 ,) },
-    PRINT_ARTIST_PROGRESS:      { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-artist-progress'                ,) },
-    PRINT_PLAYLIST_PROGRESS:    { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-playlist-progress'              ,) },
-    PRINT_WARNINGS:             { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-warnings'                       ,) },
-    PRINT_ERRORS:               { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-errors'                         ,) },
-    PRINT_API_ERRORS:           { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-api-errors'                     ,) },
-    STANDARD_INTERFACE:         { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--standard-interface'                   ,) },
-    FFMPEG_LOG_LEVEL:           { DEFAULT: 'error',                   TYPE: str,    ARG: ('--ffmpeg-log-level'                     ,) },
-}  
+    PRINT_SPLASH:               { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--print-splash'                            ,) },
+    PRINT_PROGRESS_INFO:        { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-progress-info'                     ,) },
+    PRINT_SKIPS:                { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-skips'                             ,) },
+    PRINT_DOWNLOADS:            { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-downloads'                         ,) },
+    PRINT_DOWNLOAD_PROGRESS:    { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-download-progress'                 ,) },
+    PRINT_URL_PROGRESS:         { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-url-progress'                      ,) },
+    PRINT_ALBUM_PROGRESS:       { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-album-progress'                    ,) },
+    PRINT_ARTIST_PROGRESS:      { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-artist-progress'                   ,) },
+    PRINT_PLAYLIST_PROGRESS:    { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-playlist-progress'                 ,) },
+    PRINT_WARNINGS:             { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-warnings'                          ,) },
+    PRINT_ERRORS:               { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-errors'                            ,) },
+    PRINT_API_ERRORS:           { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--print-api-errors'                        ,) },
+    STANDARD_INTERFACE:         { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--standard-interface'                      ,) },
+    FFMPEG_LOG_LEVEL:           { DEFAULT: 'error',                   TYPE: str,    ARG: ('--ffmpeg-log-level'                        ,) },
+}     
 
 
 DEPRECIATED_CONFIGS = {
@@ -164,6 +165,7 @@ class Config:
     def _default() -> dict[str, str]:
         return {k: v[DEFAULT] for k, v in CONFIG_VALUES}
     
+    @staticmethod
     def _default_path() -> Path:
         system_paths = {
             WINDOWS_SYSTEM  : Path.home() / 'AppData/Roaming/Zotify',
@@ -580,6 +582,18 @@ class Config:
         return cls.get(API_CLIENT_ID)
     
     @classmethod
+    def get_api_credentials_location(cls) -> PurePath:
+        cred_str: str = cls.get(API_CREDENTIALS_LOCATION)
+        if not cred_str:
+            cred_dir_or_file = cls._default_path()
+        elif cred_str[0] == ".":
+            cred_dir_or_file = Path(cls.get_root_path()) / Path(cred_str).expanduser().relative_to(".")
+        else:
+            cred_dir_or_file = Path(cred_str).expanduser()
+        credentials = ensure_is_file(cred_dir_or_file, 'api_credentials.json', touch=False)
+        return PurePath(credentials)
+    
+    @classmethod
     def permit_client_api(cls) -> bool:
         return cls.get_api_client_id() and not Zotify.FORCE_LIBRE_METADATA
     
@@ -653,6 +667,149 @@ class Config:
         return level
 
 
+class LogHandler:
+    LOG_PATH    : Path              = None
+    LOGGER      : logging.Logger    = None
+    
+    @classmethod
+    def start_logger(cls, launch: str) -> logging.Logger:
+        logfile = "zotify_" + ("DEBUG_" if Zotify.CONFIG.debug() else "") + f"{launch}.log"
+        cls.LOG_PATH = Path(Zotify.CONFIG.get_root_path() / logfile)
+        Printer.hashtaged(PrintChannel.DEBUG, f"{logfile} logging to {cls.LOG_PATH.resolve().parent}")
+        logging.basicConfig(level=logging.DEBUG if Zotify.CONFIG.debug() else logging.CRITICAL,
+                            filemode="x", filename=cls.LOG_PATH)
+        cls.LOGGER = logging.getLogger("zotify.debug")
+        return cls.LOGGER
+    
+    @classmethod
+    def kill_logger(cls) -> None:
+        logging.shutdown()
+        
+        # delete non-debug logfiles if empty (no critical errors)
+        if not file_has_content(cls.LOG_PATH):
+            Path(cls.LOG_PATH).unlink()
+
+
+class LoginHandler:
+    CRED_TYPES          : set[str]          = {OAuth.OAUTH_PKCE_TOKEN, AuthenticationType.keys()[1]}
+    SESSION_BUILDER     : Session.Builder   = Session.Builder()
+    SESSION_BUILDER.conf.store_credentials  = False # stored_credentials == True by default
+    SESSION             : Session           = None
+    OAUTH               : OAuth             = None
+    
+    @classmethod
+    def get_creds_from_file(cls, cred_path: PurePath) -> dict | None:
+        if not Zotify.CONFIG.get_save_credentials() or not cred_path:
+            return
+        elif not file_has_content(cred_path):
+            raise RuntimeError("Credentials file missing or empty")
+        with open(cred_path, 'r',) as f:
+            creds: dict = json.load(f)
+        if not creds or not isinstance(creds, dict) or not creds.get("type"):
+            raise RuntimeError("Invalid credentials file")
+        elif creds["type"] not in cls.CRED_TYPES:
+            raise RuntimeError(f"Invalid credentials file type: {creds['type']}")
+        return creds
+    
+    @staticmethod
+    def create_oauth(client_id: str) -> OAuth:
+        redirect_url = f"http://{Zotify.CONFIG.get_oauth_address()}:{Zotify.CONFIG.get_oauth_port()}/login"
+        def oauth_print(url):
+            Printer.new_print(PrintChannel.MANDATORY, f"Click on the following link to login:\n{url}")
+        
+        return OAuth(client_id, redirect_url, oauth_print).set_scopes(SCOPES).set_listen_all(True)
+    
+    @staticmethod
+    def get_login5_from_args(args) -> dict | None:
+        if args.username in {None, ""} or args.token in {None, ""}:
+            return
+        elif args.username != b64encode(b64decode(args.username)): # TODO verify this
+            raise RuntimeError("Provided username invalid, not base64 compatible")
+        elif args.token != b64encode(b64decode(args.token)): # TODO verify this
+            raise RuntimeError("Provided token invalid, not base64 compatible")
+        
+        return {"username": args.username,
+                "credentials": args.token,
+                "type": AuthenticationType.keys()[1]}
+    
+    @classmethod
+    def login5_cred_login(cls, login5_creds: dict | None) -> None:
+        if not login5_creds: return
+        b64creds = b64encode(json.dumps(login5_creds, ensure_ascii=True).encode("ascii"))
+        cls.SESSION = cls.SESSION_BUILDER.stored(b64creds).create()
+    
+    @classmethod
+    def oauth_cred_login(cls, oauth_creds: dict | None) -> None:
+        if not oauth_creds: return
+        cls.OAUTH = cls.create_oauth(oauth_creds["client_id"]).ingest_token_response(oauth_creds)
+        cls.OAUTH.refresh_token()
+    
+    @classmethod
+    def oauth_link_login(cls) -> None:
+        cls.OAUTH = cls.create_oauth(Zotify.CONFIG.get_api_client_id())
+        cls.OAUTH.flow()
+    
+    @classmethod
+    def login5_link_login(cls) -> None:
+        cls.SESSION_BUILDER.login_credentials = cls.create_oauth(MercuryRequests.keymaster_client_id).flow()
+        cls.SESSION = cls.SESSION_BUILDER.create()
+    
+    @classmethod
+    def attempt_login(cls, args) -> None:
+        if not cls.SESSION:
+            try: cls.login5_cred_login(cls.get_creds_from_file(Zotify.CONFIG.get_credentials_location()))
+            except Exception as e:
+                Printer.hashtaged(PrintChannel.MANDATORY, f'Login5 via saved credentials failed! {e.args[0]}. Falling back to interactive login')
+        if not cls.SESSION:
+            try: cls.login5_cred_login(cls.get_login5_from_args(args))
+            except Exception as e:
+                Printer.hashtaged(PrintChannel.MANDATORY, f'Login5 via commandline args failed! {e.args[0]}. Falling back to interactive login')
+        if not cls.SESSION:
+            try: cls.login5_link_login()
+            except Exception as e:
+                Printer.hashtaged(PrintChannel.MANDATORY, f'Login5 failed! {e.args[0]}')
+        
+        if not Zotify.CONFIG.get_api_client_id(): return
+        if not cls.OAUTH: 
+            try: cls.oauth_cred_login(cls.get_creds_from_file(Zotify.CONFIG.get_api_credentials_location()))
+            except Exception as e:
+                Printer.hashtaged(PrintChannel.MANDATORY, f'Custom Client API via saved credentials failed! {e.args[0]}. Falling back to interactive login')
+        if not cls.OAUTH: 
+            try: cls.oauth_link_login()
+            except Exception as e:
+                Printer.hashtaged(PrintChannel.MANDATORY, f'Custom Client API failed! {e.args[0]}')
+    
+    @classmethod
+    def login_success(cls) -> bool:
+        return cls.SESSION and (Zotify.CONFIG.get_api_client_id() and cls.OAUTH)
+    
+    @classmethod
+    def save_credentials(cls) -> None:
+        if not Zotify.CONFIG.get_save_credentials():
+            return
+        if cls.SESSION:
+            with open(Zotify.CONFIG.get_credentials_location(), "w") as f:
+                json.dump(cls.SESSION.credentials(), f)
+        if cls.OAUTH:
+            cls.OAUTH.save_creds(Zotify.CONFIG.get_api_credentials_location())
+    
+    @classmethod
+    def login(cls, args) -> Session | None:
+        login_retry = 0
+        while not cls.login_success():
+            cls.attempt_login(args)
+            if cls.login_success() or login_retry >= Zotify.CONFIG.get_retry_attempts():
+                return cls.SESSION
+            Printer.hashtaged(PrintChannel.WARNING, 'LOGIN FAILED, TRYING AGAIN AFTER DELAY')
+            login_retry += 1; sleep(Zotify.CONFIG.get_retry_delay())
+    
+    @classmethod
+    def choose_token(cls, force_login5: bool) -> str:
+        if cls.OAUTH and not force_login5:
+            return cls.OAUTH.token()
+        return cls.SESSION.tokens().get_token(*SCOPES).access_token
+
+
 class Zotify:
     # STATIC
     VERSION                                             = version("zotify")
@@ -660,12 +817,9 @@ class Zotify:
     FORCE_LIBRE_METADATA    : bool                      = False
     
     # STATIC AFTER BOOT
-    CONFIG                  : Config                    = Config()
-    CRED_FILE               : PurePath                  = None
-    OAUTH                   : OAuth                     = None
+    CONFIG                  : Config                    = Config
     SESSION                 : Session                   = None
     LOGGER                  : logging.Logger            = None
-    LOGFILE                 : Path                      = None
     DOWNLOAD_QUALITY        : FormatOnlyAudioQuality    = None
     DOWNLOAD_BITRATE        : str                       = None
     
@@ -677,76 +831,11 @@ class Zotify:
     DATETIME_LAUNCH         : str                       = None
     
     @classmethod
-    def start(cls) -> None:
+    def start_stats(cls) -> None:
         if cls.TOTAL_API_CALLS:
             Printer.debug(f"Total API Calls: {cls.TOTAL_API_CALLS}")
         cls.DATETIME_LAUNCH = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         cls.TOTAL_API_CALLS = 0
-    
-    @classmethod
-    def login(cls, args):
-        """ Authenticates and saves credentials to a file """
-        
-        session_builder = Session.Builder() # stored_credentials == True by default
-        session_builder.conf.store_credentials = False
-        
-        # login via saved credentials
-        cred_path = cls.CONFIG.get_credentials_location()
-        if not cls.CONFIG.get_save_credentials(): pass
-        elif Path(cred_path).is_file() and Path(cred_path).stat().st_size:
-            with open(cred_path, 'r',) as f:
-                creds: dict = json.load(f)
-            try:
-                if not creds or not isinstance(creds, dict) or not creds.get("type"):
-                    raise RuntimeError("Invalid Credentials File")
-                cls.CRED_FILE = cred_path
-                if creds["type"] == OAuth.OAUTH_PKCE_TOKEN:
-                    cls.CONFIG.Values[API_CLIENT_ID] = creds["client_id"]
-                    cls.OAUTH = OAuth(cls.CONFIG.get_api_client_id(), "", None).ingest_token_response(creds)
-                    cls.OAUTH.refresh_token()
-                    cls.OAUTH.save_creds(cls.CRED_FILE)
-                    session_builder.login_credentials = cls.OAUTH.get_credentials()
-                    cls.SESSION = session_builder.create()
-                    return
-                else:
-                    cls.CONFIG.Values[API_CLIENT_ID] = ""
-                    session_builder.stored_file(cls.CRED_FILE)
-                    cls.SESSION = session_builder.create()
-                    return
-            except RuntimeError:
-                Printer.hashtaged(PrintChannel.MANDATORY, f'Login via saved {creds.get("type", "<unknown-type>")} credentials failed! Falling back to interactive login')
-                # Path(cred_path).unlink()
-        
-        # login via commandline args (login5 token only)
-        if args.username not in {None, ""} and args.token not in {None, ""}:
-            try:
-                auth_obj = {"username": args.username,
-                            "credentials": args.token,
-                            "type": AuthenticationType.keys()[1]}
-                auth_as_bytes = b64encode(json.dumps(auth_obj, ensure_ascii=True).encode("ascii"))
-                cls.SESSION = session_builder.stored(auth_as_bytes).create()
-                return
-            except:
-                Printer.hashtaged(PrintChannel.MANDATORY, f"Login via commandline args failed! Falling back to interactive login")
-        
-        # interactive OAuth login
-        redirect_url = f"http://{cls.CONFIG.get_oauth_address()}:{cls.CONFIG.get_oauth_port()}/login"
-        def oauth_print(url):
-            Printer.new_print(PrintChannel.MANDATORY, f"Click on the following link to login:\n{url}")
-        
-        client_id = cls.CONFIG.get_api_client_id()
-        if not client_id: client_id = MercuryRequests.keymaster_client_id
-        cls.OAUTH = OAuth(client_id, redirect_url, oauth_print).set_scopes(SCOPES).set_listen_all(True)
-        session_builder.login_credentials = cls.OAUTH.flow()
-        if cls.CONFIG.get_save_credentials():
-            cls.CRED_FILE = cred_path
-            if client_id != MercuryRequests.keymaster_client_id:
-                cls.OAUTH.save_creds(cls.CRED_FILE)
-            else:
-                session_builder.conf.store_credentials = True
-                session_builder.conf.stored_credentials_file = str(cls.CRED_FILE)
-        cls.SESSION = session_builder.create()
-        return
     
     @classmethod
     def parse_dl_quality(cls, preference: str | None = None) -> tuple[bool, FormatOnlyAudioQuality, str | None]:
@@ -773,37 +862,23 @@ class Zotify:
     @classmethod
     def boot(cls, args):
         Printer.splash()
-        cls.start()
+        cls.start_stats()
         cls.CONFIG.load(args)
-        
-        # Handle sub-library logging
-        cls.LOGFILE = Path(cls.CONFIG.get_root_path() / 
-                         ("zotify_" + ("DEBUG_" if cls.CONFIG.debug() else "") + f"{cls.DATETIME_LAUNCH}.log"))
-        Printer.hashtaged(PrintChannel.DEBUG, f"{cls.LOGFILE.name} logging to {cls.LOGFILE.resolve().parent}")
-        logging.basicConfig(level=logging.DEBUG if cls.CONFIG.debug() else logging.CRITICAL,
-                            filemode="x", filename=cls.LOGFILE)
+        cls.LOGGER = LogHandler.start_logger(cls.DATETIME_LAUNCH)
         
         with Loader("Logging in...", PrintChannel.MANDATORY):
-            login_retry = 0
-            while not cls.SESSION:
-                try: cls.login(args)
-                except Exception as e:
-                    Printer.hashtaged(PrintChannel.WARNING, f'LOGIN FAILED ({e.args[0]})\n' + 
-                                                            f'TRYING AGAIN AFTER A SMALL DELAY')
-                if cls.SESSION or login_retry >= Zotify.CONFIG.get_retry_attempts(): break
-                if cls.OAUTH: cls.OAUTH.close()
-                login_retry += 1; sleep(Zotify.CONFIG.get_retry_delay())
+            cls.SESSION = LoginHandler.login(args)
+            LoginHandler.save_credentials()
         if not cls.SESSION:
             Printer.hashtaged(PrintChannel.MANDATORY, 'ALL LOGIN ATTEMPTS UNSUCCESSFUL\n'+ 
                                                       'NO SESSION CREATED, EXITING')
             return
-        cls.LOGGER = logging.getLogger("zotify.debug")
         
         prem, quality, bitrate = cls.parse_dl_quality(cls.CONFIG.get_download_qual_pref())
         cls.DOWNLOAD_QUALITY = quality
         cls.DOWNLOAD_BITRATE = bitrate
-        Printer.debug(f'{"CLIENT_ID" if cls.OAUTH else ""} Session Initialized Successfully\n' +
-                      f'Using Credentials at {cls.CRED_FILE}\n' +
+        Printer.debug(f'Login5 Session Initialized Successfully\n' +
+                      ('Custom Client API Initialized Successfully\n' if LoginHandler.OAUTH else '') +
                       f'User Subscription Type: {"PREMIUM" if prem else "FREE"}\n' +
                       f'Zotify Version v{cls.VERSION}')
     
@@ -841,13 +916,8 @@ class Zotify:
     
     @classmethod
     def invoke_url(cls, url: str, params: dict | None = None, expectFail: bool = False, force_login5: bool = False) -> dict[str, str | int | dict]:
-        def choose_token() -> str:
-            if cls.CONFIG.get_api_client_id() and not force_login5:
-                return cls.OAUTH.token()
-            return cls.SESSION.tokens().get_token(*SCOPES).access_token
-        
         headers = {
-            'Authorization': f'Bearer {choose_token()}',
+            'Authorization': f'Bearer {LoginHandler.choose_token(force_login5)}',
             'Accept-Language': f'{cls.CONFIG.get_language()}',
             'Accept': 'application/json',
             'app-platform': 'WebPlayer',
@@ -1005,17 +1075,12 @@ class Zotify:
     
     @classmethod
     def end(cls) -> None:
-        cls.start()
-        logging.shutdown()
-        
-        # delete non-debug logfiles if empty (no critical errors)
-        if file_has_content(cls.LOGFILE) is False:
-            cls.LOGFILE.unlink()
+        cls.start_stats()
+        LoginHandler.OAUTH.close()
+        LogHandler.kill_logger()
         
         for dir in (Path(cls.CONFIG.get_root_path()), Path(cls.CONFIG.get_root_podcast_path())):
             for tempfile in dir.glob("*.tmp"):
                 tempfile.unlink()
-        
-        if cls.OAUTH: cls.OAUTH.close()
         
         print("\n")

@@ -216,7 +216,7 @@ def client(args: Namespace, modes: list[Action]) -> None:
         else:
             setattr(args, selected_mode.dest, True)
         
-        Zotify.start()
+        Zotify.start_stats()
         perform_query(args)
     
     Zotify.end()

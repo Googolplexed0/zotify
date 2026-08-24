@@ -195,15 +195,16 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `EXPORT_ZMD`                 | `--zmd-export`                      | Whether to export ZMD files, caching metadata                                   | False                  |
 | `EXPORT_ZMD_LOCATION`        | `--zmd-export-location`             | Destination for ZMD, updating an individual .zmd file (default) or a directory  | `""`                   |
 
-| API Options                  | Command Line Config Flag            | Description                                                                  | Default Value             |
-|------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
-| `API_CLIENT_ID`              | `--client-id`                       | Client ID for a Developer App to route metadata API requests through         | `""`                      |
-| `API_CLIENT_LEGACY`          | `--client-legacy`                   | Whether the Developer App can access legacy endpoints\*\*                    | True                      |
-| `RETRY_ATTEMPTS`             | `--retry-attempts`                  | Number of times to retry failed API requests                                 | 1                         |
-| `RETRY_DELAY`                | `--retry-delay`                     | Wait time between API retry attempts, in seconds                             | 5.0                       |
-| `CHUNK_SIZE`                 | `--chunk-size`                      | Chunk size for downloading                                                   | 20000                     |
-| `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests                                | 127.0.0.1                 |
-| `REDIRECT_PORT`              | `--redirect-port`                   | Destination port at `REDIRECT_ADDRESS` to receive OAuth login requests       | 4381                      |
+| API Options                  | Command Line Config Flag            | Description                                                                   | Default Value            |
+|------------------------------|-------------------------------------|-------------------------------------------------------------------------------|--------------------------|
+| `API_CLIENT_ID`              | `--client-id`                       | Client ID for a Developer App to route metadata API requests through          | `""`                     |
+| `API_CREDENTIALS_LOCATION`   | `--api-creds`, `--api-credentials-location` | Directory/Filepath to store/load a Zotify `api_credentials.json` file | See [Path Option Parser](#path-option-parser) |
+| `API_CLIENT_LEGACY`          | `--client-legacy`                   | Whether the Developer App can access legacy endpoints\*\*                     | True                     |
+| `RETRY_ATTEMPTS`             | `--retry-attempts`                  | Number of times to retry failed API requests                                  | 1                        |
+| `RETRY_DELAY`                | `--retry-delay`                     | Wait time between API retry attempts, in seconds                              | 5.0                      |
+| `CHUNK_SIZE`                 | `--chunk-size`                      | Chunk size for downloading                                                    | 20000                    |
+| `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests                                 | 127.0.0.1                |
+| `REDIRECT_PORT`              | `--redirect-port`                   | Destination port at `REDIRECT_ADDRESS` to receive OAuth login requests        | 4381                     |
 
 | Terminal & Logging Options   | Command Line Config Flag            | Description                                                                              | Default Value |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
@@ -242,7 +243,7 @@ To log out, just remove the configuration file and credentials file. Uninstallin
 
 ## Path Option Parser
 
-All pathing-related options (`CREDENTIALS_LOCATION`, `ROOT_PODCAST_PATH`, `TEMP_DOWNLOAD_DIR`, `SONG_ARCHIVE_LOCATION`, `M3U8_LOCATION`, `LYRICS_LOCATION`) accept absolute paths.
+All pathing-related options (`CREDENTIALS_LOCATION`, `ROOT_PODCAST_PATH`, `TEMP_DOWNLOAD_DIR`, `SONG_ARCHIVE_LOCATION`, `M3U8_LOCATION`, `LYRICS_LOCATION`, `API_CREDENTIALS_LOCATION`) accept absolute paths.
 They will substitute an initial `"."` with `ROOT_PATH` and properly expand both `"~"` & `"~user"` constructs.
 
 The options `CREDENTIALS_LOCATION` and `SONG_ARCHIVE_LOCATION` use the following default locations depending on operating system:
