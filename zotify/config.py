@@ -11,7 +11,7 @@ from google.protobuf.json_format import MessageToDict, ParseDict
 from librespot import metadata
 from librespot.audio import FeederException, CdnManager, CdnFeedHelper
 from librespot.audio.decoders import AudioQuality, SuperAudioFormat, FormatOnlyAudioQuality
-from librespot.core import Session, OAuth, MercuryRequests
+from librespot.core import Session, OAuth, MercuryRequests, ApiClient
 from librespot.proto.Authentication_pb2 import AuthenticationType
 from librespot.proto.Metadata_pb2 import AudioFile
 from pathlib import Path, PurePath
@@ -118,8 +118,10 @@ CONFIG_VALUES = {
     API_CLIENT_ID:              { DEFAULT: '',                        TYPE: str,    ARG: ('--client-id'                               ,) },
     API_CREDENTIALS_LOCATION:   { DEFAULT: '',                        TYPE: str,    ARG: ('--api-creds', '--api-credentials-location' ,) },
     API_CLIENT_LEGACY:          { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--client-legacy'                           ,) },
+    FETCH_DELAY:                { DEFAULT: '0.0',                     TYPE: float,  ARG: ('--fetch-delay'                             ,) },
     RETRY_ATTEMPTS:             { DEFAULT: '1',                       TYPE: int,    ARG: ('--retry-attempts'                          ,) },
     RETRY_DELAY:                { DEFAULT: '5.0',                     TYPE: float,  ARG: ('--retry-delay'                             ,) },
+    ESCALATING_DELAY:           { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--escalating-delay'                        ,) },
     CHUNK_SIZE:                 { DEFAULT: '20000',                   TYPE: int,    ARG: ('--chunk-size'                              ,) },
     REDIRECT_ADDRESS:           { DEFAULT: '127.0.0.1',               TYPE: str,    ARG: ('--redirect-address'                        ,) },
     REDIRECT_PORT:              { DEFAULT: '4381',                    TYPE: int,    ARG: ('--redirect-port'                           ,) },
@@ -163,7 +165,7 @@ class Config:
     
     @staticmethod
     def _default() -> dict[str, str]:
-        return {k: v[DEFAULT] for k, v in CONFIG_VALUES}
+        return {k: v[DEFAULT] for k, v in CONFIG_VALUES.items()}
     
     @staticmethod
     def _default_path() -> Path:
@@ -602,12 +604,23 @@ class Config:
         return cls.permit_client_api() and cls.get(API_CLIENT_LEGACY) and Zotify.LEGACY_API_ENDOINTS
     
     @classmethod
-    def get_retry_attempts(cls) -> int:
-        return cls.get(RETRY_ATTEMPTS)
+    def get_fetch_delay(cls) -> float:
+        return max(cls.get(FETCH_DELAY), 0.0)
     
     @classmethod
-    def get_retry_delay(cls) -> float:
-        return cls.get(RETRY_DELAY)
+    def get_retry_attempts(cls) -> int:
+        return max(cls.get(RETRY_ATTEMPTS), 0)
+    
+    @classmethod
+    def get_retry_delay(cls, retry_attempt_number: int = 0) -> float:
+        base_delay = max(cls.get(RETRY_DELAY), 0.0)
+        if cls.get_escalating_delay():
+            base_delay *= 2 ** retry_attempt_number
+        return 
+    
+    @classmethod
+    def get_escalating_delay(cls) -> bool:
+        return cls.get(ESCALATING_DELAY)
     
     @classmethod
     def get_chunk_size(cls) -> int:
@@ -723,13 +736,13 @@ class LoginHandler:
     def get_login5_from_args(args) -> dict | None:
         if args.username in {None, ""} or args.token in {None, ""}:
             return
-        elif args.username != b64encode(b64decode(args.username)): # TODO verify this
-            raise RuntimeError("Provided username invalid, not base64 compatible")
-        elif args.token != b64encode(b64decode(args.token)): # TODO verify this
-            raise RuntimeError("Provided token invalid, not base64 compatible")
+        elif not str(args.username).isalnum():
+            raise RuntimeError("Provided username invalid, not expected alphanumeric")
+        elif not str(args.token) == b64encode(b64decode(args.token)).decode():
+            raise RuntimeError("Provided token invalid, not expected base64")
         
-        return {"username": args.username,
-                "credentials": args.token,
+        return {"username": str(args.username),
+                "credentials": str(args.token),
                 "type": AuthenticationType.keys()[1]}
     
     @classmethod
@@ -769,7 +782,7 @@ class LoginHandler:
             except Exception as e:
                 Printer.hashtaged(PrintChannel.MANDATORY, f'Login5 failed! {e.args[0]}')
         
-        if not Zotify.CONFIG.get_api_client_id(): return
+        if not Zotify.CONFIG.permit_client_api(): return
         if not cls.OAUTH: 
             try: cls.oauth_cred_login(cls.get_creds_from_file(Zotify.CONFIG.get_api_credentials_location()))
             except Exception as e:
@@ -781,7 +794,7 @@ class LoginHandler:
     
     @classmethod
     def login_success(cls) -> bool:
-        return cls.SESSION and (Zotify.CONFIG.get_api_client_id() and cls.OAUTH)
+        return cls.SESSION and (Zotify.CONFIG.permit_client_api() == bool(cls.OAUTH))
     
     @classmethod
     def save_credentials(cls) -> None:
@@ -808,6 +821,10 @@ class LoginHandler:
         if cls.OAUTH and not force_login5:
             return cls.OAUTH.token()
         return cls.SESSION.tokens().get_token(*SCOPES).access_token
+    
+    @classmethod
+    def oauth_close(cls):
+        if cls.OAUTH: cls.OAUTH.close()
 
 
 class Zotify:
@@ -860,7 +877,7 @@ class Zotify:
         return prem, format_filter(quality), bitrate
     
     @classmethod
-    def boot(cls, args):
+    def boot(cls, args) -> None:
         Printer.splash()
         cls.start_stats()
         cls.CONFIG.load(args)
@@ -884,11 +901,11 @@ class Zotify:
     
     @staticmethod
     def id_from_gid(gid: str) -> str:
-        return metadata.Id.b62.encode(b64decode(gid.encode())).decode()
+        return metadata.Id.b62.encode(b64decode(gid)).decode()
     
     @staticmethod
     def hex_id_from_file_id(file_id: str) -> str:
-        return hexlify(b64decode(file_id.encode())).decode()
+        return hexlify(b64decode(file_id)).decode()
     
     @staticmethod
     def to_libre_content(ContClass: type, id: str) -> metadata.Id | None:
@@ -898,21 +915,61 @@ class Zotify:
         except:
             return
     
+    @staticmethod
+    def api_status_str(status_code: int, http: requests.Response = None) -> str:
+        if   status_code == 200:        return "OK"
+        elif status_code == 201:        return "Request fullfilled internally"
+        elif status_code == 202:        return "Awaiting processing"
+        elif status_code == 204:        return "No content"
+        elif status_code == 304:        return "Use cached values"
+        elif status_code == 400:        return "Malformed request" + (
+                                              f": {http.json()[ERROR][MESSAGE]}" if 
+                                                   http and http.json().get(ERROR, {}).get(MESSAGE) else "")
+        elif status_code in {401, 403}: return "Unauthorized or forbidden request"
+        elif status_code == 404:        return "Requested Content not Found"
+        elif status_code == 429:        return "Too Many Requests, Rate Limit Exceeded" + (
+                                              f". Timed out for {float(http.headers[RETRY_AFTER])} seconds." if
+                                                                 http and http.headers.get(RETRY_AFTER) else "")
+        elif status_code in {500, 502}: return "Internal/Upstream Server Error"
+        elif status_code == 503:        return "Service Unavailable (Possibly a Rate Limit)"
+        else:                           return ""
+    
     @classmethod
     def invoke_libre_md(cls, ContClass: type, uri: str) -> dict[str, str | int | dict]:
-        try:
-            content_id = cls.to_libre_content(ContClass, uri.split(":")[-1])
-            if ContClass.clsn == "Playlist":
-                proto = cls.SESSION.api().get_playlist(content_id)
-            else:
-                proto = getattr(cls.SESSION.api(), f"get_metadata_4_{ContClass.type_attr}")(content_id)
-            resp = MessageToDict(proto, preserving_proto_field_name=True)
-            if resp.get(GID): resp[GID] = proto.gid # use gid in bytes
+        api_retry = 0
+        while api_retry <= cls.CONFIG.get_retry_attempts():
+            if api_retry:
+                Printer.hashtaged(PrintChannel.WARNING, f'API ERROR {retry_text}- RETRYING\n' +
+                                                        f'FAILED TO FETCH METADATA FOR {uri}'+
+                                                        f'{fallback_message}')
+                sleep(retry_delay)
+            
+            try:
+                content_id = cls.to_libre_content(ContClass, uri.split(":")[-1])
+                if ContClass.clsn == "Playlist":
+                    proto = cls.SESSION.api().get_playlist(content_id)
+                else:
+                    proto = getattr(cls.SESSION.api(), f"get_metadata_4_{ContClass.type_attr}")(content_id)
+                resp = MessageToDict(proto, preserving_proto_field_name=True)
+                if resp.get(GID): resp[GID] = proto.gid # use gid in bytes
+                break
+            except ApiClient.StatusCodeException as e:
+                fallback_message = f'Status {e.code}:   \n{cls.api_status_str(e.code)}'
+            except ConnectionError as e:
+                fallback_message = e.args[0]
+            except Exception as e:
+                fallback_message = f'UNKNOWN OR UNEXPECTED ERROR: {e}'
+            finally: cls.TOTAL_API_CALLS += 1
+            retry_text = f"(RETRY {api_retry}) " if api_retry else ""
+            retry_delay = cls.CONFIG.get_retry_delay(api_retry)
+            api_retry += 1
+        
+        sleep(cls.CONFIG.get_fetch_delay())
+        if api_retry <= cls.CONFIG.get_retry_attempts():
             return resp
-        except Exception as e:
-            Printer.debug(f"Failed to fetch metadata for {uri}")
-            Printer.traceback(e)
-            return {}
+        Printer.hashtaged(PrintChannel.API_ERROR, f'RETRY LIMIT EXCEDED\n' +
+                                                  f'FAILED TO FETCH METADATA FOR {uri}')
+        return {}
     
     @classmethod
     def invoke_url(cls, url: str, params: dict | None = None, expectFail: bool = False, force_login5: bool = False) -> dict[str, str | int | dict]:
@@ -926,43 +983,45 @@ class Zotify:
         
         api_retry = 0
         while api_retry <= cls.CONFIG.get_retry_attempts():
-            resp = requests.get(url, headers=headers, params=params)
-            cls.TOTAL_API_CALLS += 1
-            retry_delay = cls.CONFIG.get_retry_delay()
-            if resp.status_code == 403 and not expectFail:
-                Printer.hashtaged(PrintChannel.WARNING, f'API ERROR\n' +
-                                                        f'ATTEMPTING TO ACCESS FORBIDDEN ENDPOINT')
-                return {}
-            try:
-                responsejson = resp.json()
-                if not responsejson:
-                    raise json.decoder.JSONDecodeError()
-            except json.decoder.JSONDecodeError:
-                fallback_message = "Received an empty response"
-                fallback_code = resp.status_code if resp.status_code != 200 else "Unknown"
-                if fallback_code in {403, 429}:
-                    fallback_message = "Too Many Requests, Rate Limit Exceeded"
-                    if resp.headers.get(RETRY_AFTER):
-                        timeout = float(resp.headers[RETRY_AFTER])
-                        fallback_message += f". Timed out for {timeout} seconds."
-                        if retry_delay < timeout: retry_delay = timeout
-                responsejson = {ERROR: {STATUS: fallback_code,  MESSAGE: fallback_message}}
-            if resp.ok and resp.status_code == 200 and not responsejson.get(ERROR):
-                return responsejson
-            elif not expectFail:
-                retry_text = f"(RETRY {api_retry}) " if api_retry else ""
-                Printer.hashtaged(PrintChannel.WARNING, f'API ERROR {retry_text}- RETRYING\n' +
-                                                        f'Status {responsejson.get(ERROR, {}).get(STATUS, "Unknown")}:  '+
-                                                        f'{responsejson.get(ERROR, {}).get(MESSAGE, "No message provided")}')
+            if api_retry and not expectFail:
+                Printer.hashtaged(PrintChannel.WARNING, f'{"REQUEST SUCCESSFUL" if http.ok else "API ERROR"} {retry_text}- RETRYING\n' +
+                                                        f'Status {http.status_code}:  '+
+                                                        f'{resp.get(ERROR, {}).get(MESSAGE, "No message provided")}')
+            if api_retry: sleep(retry_delay if not expectFail else 1)
             
-            if api_retry >= Zotify.CONFIG.get_retry_attempts(): break
-            api_retry += 1; sleep(retry_delay if not expectFail else 1)
+            try:
+                http = requests.get(url, headers=headers, params=params)
+                fallback_message = cls.api_status_str(http.status_code, http)
+                resp: dict[str, str | int | dict] = http.json()
+                http.raise_for_status()
+                if http.status_code != 202: break
+                resp = {ERROR: {MESSAGE: fallback_message}}
+            except json.decoder.JSONDecodeError:
+                resp = {ERROR: {MESSAGE: "ERROR: MALFORMED JSON"}}
+            except requests.exceptions.HTTPError:
+                if expectFail:              pass
+                elif http.status_code in {401, 403}:
+                    Printer.hashtaged(PrintChannel.API_ERROR, 'API ERROR\n' +
+                                                              'ATTEMPTING TO ACCESS FORBIDDEN ENDPOINT')
+                    return {} # do not count as fetch, skip FETCH_DELAY
+                elif not resp:              resp = {ERROR: {MESSAGE: "Received an empty response"}}
+                elif not resp.get(ERROR):   resp = {ERROR: {MESSAGE: fallback_message}}
+            finally: cls.TOTAL_API_CALLS += 1
+            retry_text = f"(RETRY {api_retry}) " if api_retry else ""
+            retry_delay = max(cls.CONFIG.get_retry_delay(api_retry), float(http.headers.get(RETRY_AFTER, 0.0)))
+            api_retry += 1
         
-        if not expectFail:
+        sleep(cls.CONFIG.get_fetch_delay())
+        if http.status_code == 200:
+            return resp
+        elif api_retry <= cls.CONFIG.get_retry_attempts():
+            Printer.hashtaged(PrintChannel.WARNING, f'REQUEST SUCCESSFUL\n' +
+                                                    f'Status {http.status_code}:   \n' +
+                                                    f'{fallback_message}')
+        elif not expectFail:
             Printer.hashtaged(PrintChannel.API_ERROR, f'RETRY LIMIT EXCEDED\n' +
-                                                      f'RESPONSE TEXT: {Printer.pretty(responsejson)}\n' +
+                                                      f'RESPONSE TEXT: {Printer.pretty(resp)}\n' +
                                                       f'URL: {Printer.pretty(url)}')
-        
         return {}
     
     @classmethod
@@ -1076,7 +1135,7 @@ class Zotify:
     @classmethod
     def end(cls) -> None:
         cls.start_stats()
-        LoginHandler.OAUTH.close()
+        LoginHandler.oauth_close()
         LogHandler.kill_logger()
         
         for dir in (Path(cls.CONFIG.get_root_path()), Path(cls.CONFIG.get_root_podcast_path())):

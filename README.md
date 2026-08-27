@@ -76,7 +76,7 @@ If an artist's URL is given, all albums by the specified artist will be download
 | `-h`, `--help`                      | See this message                                                                                               |
 | `-V`, `--version`                   | Show the version of Zotify                                                                                     |
 | `-P`, `--persist`                   | Perform multiple Queries on the same Session, requiring only one account login                                 |
-| `-T`, `--test`, `--dry-run`         | Perform a "dry run" of a Query, downloading metadata without downloading/modifying any music files             |
+| `-T`, `--test`, `--dry-run`         | Perform a "dry run" of a Query, fetching metadata without downloading/modifying any music files                |
 | `--update-config`                   | Updates the `config.json` file while keeping all current settings unchanged                                    |
 | `--update-archive`                  | Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged          |
 | `--debug`                           | Enable debug mode, printing extra information and creating a `config_DEBUG.json` file                          |
@@ -200,8 +200,10 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `API_CLIENT_ID`              | `--client-id`                       | Client ID for a Developer App to route metadata API requests through          | `""`                     |
 | `API_CREDENTIALS_LOCATION`   | `--api-creds`, `--api-credentials-location` | Directory/Filepath to store/load a Zotify `api_credentials.json` file | See [Path Option Parser](#path-option-parser) |
 | `API_CLIENT_LEGACY`          | `--client-legacy`                   | Whether the Developer App can access legacy endpoints\*\*                     | True                     |
+| `FETCH_DELAY`                | `--fetch-delay`                     | Wait time between all API requests, in seconds                                | 0.0                      |
 | `RETRY_ATTEMPTS`             | `--retry-attempts`                  | Number of times to retry failed API requests                                  | 1                        |
 | `RETRY_DELAY`                | `--retry-delay`                     | Wait time between API retry attempts, in seconds                              | 5.0                      |
+| `ESCALATING_DELAY`           | `--escalating-delay`                | Whether to double the `RETRY_DELAY` for each successive API failure           | True                     |
 | `CHUNK_SIZE`                 | `--chunk-size`                      | Chunk size for downloading                                                    | 20000                    |
 | `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests                                 | 127.0.0.1                |
 | `REDIRECT_PORT`              | `--redirect-port`                   | Destination port at `REDIRECT_ADDRESS` to receive OAuth login requests        | 4381                     |

@@ -143,7 +143,7 @@ def perform_query(args: Namespace) -> None:
         elif args.verify_library:
             VerifyLibrary(Zotify.DATETIME_LAUNCH).execute()
         
-        elif not Zotify.CONFIG.get_api_client_id():
+        elif not Zotify.CONFIG.permit_client_api():
             Printer.hashtaged(PrintChannel.MANDATORY, 'NO DEVELOPER CLIENT - SEARCH AND USERITEM QUERIES NON-FUNCTIONAL')
             return
         
