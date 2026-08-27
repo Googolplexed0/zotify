@@ -1241,7 +1241,7 @@ class Query(Container):
                 artist.parse_metadata(None, artist_resp)
                 artist._needs_expansion = False
             for track in alltracks:
-                genres: list[str] = [*set().union(*[set(artist.genres) for artist in track.artists if artist.genres])]
+                genres: list[str] = [*set().union(*[set(artist.genres) for artist in track.artists if track.artists and artist.genres])]
                 genres.sort()
                 track.genres = genres
         
