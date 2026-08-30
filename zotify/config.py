@@ -616,7 +616,7 @@ class Config:
         base_delay = max(cls.get(RETRY_DELAY), 0.0)
         if cls.get_escalating_delay():
             base_delay *= 2 ** retry_attempt_number
-        return 
+        return base_delay
     
     @classmethod
     def get_escalating_delay(cls) -> bool:
@@ -832,6 +832,7 @@ class Zotify:
     VERSION                                             = version("zotify")
     LEGACY_API_ENDOINTS     : bool                      = True
     FORCE_LIBRE_METADATA    : bool                      = False
+    ALLOW_LIBRE_BULK        : bool                      = True
     
     # STATIC AFTER BOOT
     CONFIG                  : Config                    = Config
@@ -969,6 +970,41 @@ class Zotify:
             return resp
         Printer.hashtaged(PrintChannel.API_ERROR, f'RETRY LIMIT EXCEDED\n' +
                                                   f'FAILED TO FETCH METADATA FOR {uri}')
+        return {}
+    
+    @classmethod
+    def invoke_libre_bulk_md(cls, ContClass: type, uris: list[str]) -> list[dict[str, str | int | dict] | None]:
+        api_retry = 0
+        while api_retry <= cls.CONFIG.get_retry_attempts():
+            if api_retry:
+                Printer.hashtaged(PrintChannel.WARNING, f'API ERROR {retry_text}- RETRYING\n' +
+                                                        f'FAILED TO FETCH METADATA FOR {ContClass.uppers}'+
+                                                        f'{fallback_message}')
+                sleep(retry_delay)
+            
+            try:
+                content_ids = [cls.to_libre_content(ContClass, uri.split(":")[-1]) for uri in uris]
+                protos = cls.SESSION.api().get_metadata_4_multiple(content_ids)
+                resps = [MessageToDict(proto, preserving_proto_field_name=True) if proto else None for proto in protos]
+                for proto, resp in zip(protos, resps):
+                    if resp.get(GID): resp[GID] = proto.gid # use gid in bytes
+                break
+            except ApiClient.StatusCodeException as e:
+                fallback_message = f'Status {e.code}:   \n{cls.api_status_str(e.code)}'
+            except ConnectionError as e:
+                fallback_message = e.args[0]
+            except Exception as e:
+                fallback_message = f'UNKNOWN OR UNEXPECTED ERROR: {e}'
+            finally: cls.TOTAL_API_CALLS += 1
+            retry_text = f"(RETRY {api_retry}) " if api_retry else ""
+            retry_delay = cls.CONFIG.get_retry_delay(api_retry)
+            api_retry += 1
+        
+        sleep(cls.CONFIG.get_fetch_delay())
+        if api_retry <= cls.CONFIG.get_retry_attempts():
+            return resp
+        Printer.hashtaged(PrintChannel.API_ERROR, f'RETRY LIMIT EXCEDED\n' +
+                                                    f'FAILED TO FETCH METADATA FOR {ContClass.uppers}')
         return {}
     
     @classmethod

@@ -149,7 +149,9 @@ class Content(HierarchicalNode):
         if not uris: return []
         elif not loader_text: loader_text = ContClass.type_attr
         
-        if Zotify.CONFIG.permit_legacy_api() and not ContClass is Playlist:
+        if ContClass in {Playlist, Show}:
+            pass # Playlist == no bulk option, Show == bulk option inferior to per-each
+        if Zotify.CONFIG.permit_legacy_api():
             with Loader(f"Fetching bulk {loader_text} information...", disabled=hide_loader):
                 fetch_url = f"{ContClass._url}?{MARKET_APPEND}&{BULK_APPEND}"
                 ids = [uri.split(":")[-1] for uri in uris]
@@ -159,6 +161,8 @@ class Content(HierarchicalNode):
                                                     'THIS WILL ALSO INHIBIT PLAYLIST ITEM FETCHING\n' +
                                                     'RECOMMENDED TO SET CONFIG "API_CLIENT_LEGACY = False"')
             Zotify.LEGACY_API_ENDOINTS = False
+        elif Zotify.ALLOW_LIBRE_BULK:
+            resps = Zotify.invoke_libre_bulk_md(ContClass, uris)
         
         suffix = "..." if Zotify.CONFIG.permit_client_api() else " (unsafe)..."
         with Loader(f"Fetching {loader_text} information{suffix}", disabled=hide_loader):
@@ -222,7 +226,7 @@ class Content(HierarchicalNode):
         
         return new_relatives
     
-    def parse_uris_metadata(self, item_resps: list[dict], ContClass: type[Content],
+    def parse_uris_metadata(self, item_resps: list[dict], ContClass: type[Content | Container],
                             loader_text: str = None, hide_loader: bool = False) -> list[Content | Container]:
         if not item_resps: return []
         elif not loader_text: loader_text = ContClass.type_attr
@@ -236,6 +240,10 @@ class Content(HierarchicalNode):
             if Zotify.CONFIG.permit_client_api():
                 for obj in objs:
                     if obj._needs_expansion: obj.grab_more_children(hide_loader=True)
+            elif any(obj._needs_expansion for obj in objs):
+                Printer.hashtaged(PrintChannel.WARNING, f'SOME {ContClass.uppers} NEED EXPANSION, WHICH REQUIRES A CLIENT API\n' +
+                                                        f'THESE {ContClass.uppers} WILL BE MISSING SOME OR ALL {ContClass._contains.uppers}:\n' +
+                                                        '"' + '"\n'.join(obj.name for obj in objs if obj._needs_expansion) + '"')
             
             # children missing metadata
             recurs_objs = [o for o in objs if isinstance(o, Container) and o._needs_recursion]
@@ -334,7 +342,7 @@ class DLContent(Content):
         path_exists = Path(path).is_file() and Path(path).stat().st_size
         if isinstance(self, Episode) and path.suffix == ".copy":
             # file suffix agnostic check
-            for file_match in Path(path.parent).glob(path.stem + ".*", case_sensitive=True):
+            for file_match in Path(path.parent).glob(path.stem + ".*"):
                 if file_match.stat().st_size:
                     path_exists = True
                     break
@@ -751,6 +759,7 @@ class Episode(DLContent, IsAddable):
         self.partner_url            : str       = None
         self.publish_time           : str       = None
         self.release_date           : str       = None
+        self.restricted_reason      : str       = None
         self.show                   : Show      = None
     
     def fill_output_template(self, parent_stack: list[Container], output_template: str = "") -> PurePath:
@@ -1093,6 +1102,7 @@ class Show(Container):
         super().__init__(uri)
         self.episodes               : list[Episode]     = self._main_items
         
+        self.consumption_order      : str               = None
         self.description            : str               = None
         self.explicit               : bool              = None
         self.is_externally_hosted   : bool              = None

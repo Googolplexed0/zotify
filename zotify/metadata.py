@@ -9,8 +9,8 @@ from zotify.api import *
 
 
 class MetadataIO:
-    PARSE_AS_STR        = {ADDED_AT, ALBUM_TYPE, DESCRIPTION, DISC_NUMBER, DISPLAY_NAME, EXTERNAL_URL,
-                           ID, ITEM_ID, LABEL, NAME, PUBLISHER, RELEASE_DATE, REVISION, SNAPSHOT_ID,}
+    PARSE_AS_STR        = {ADDED_AT, ALBUM_TYPE, CONSUMPTION_ORDER, DESCRIPTION, DISC_NUMBER, DISPLAY_NAME,
+                           EXTERNAL_URL, ID, ITEM_ID, LABEL, NAME, PUBLISHER, RELEASE_DATE, REVISION, SNAPSHOT_ID,}
     INT_PARSE_AS_STR    = {TOTAL_EPISODES, TOTAL_TRACKS, TRACK_NUMBER,}
     PARSE_AS_INT        = {DURATION_MS, LENGTH, POPULARITY, TIMESTAMP,}
     PARSE_AS_BOOL       = {COLLABORATIVE, DELETED_BY_OWNER, EXPLICIT,
@@ -165,9 +165,7 @@ class MetadataIO:
             if items:
                 for i, e in enumerate(items):     ensure_uri(e, EPISODE + str(i+1))
                 self.episodes       : list[Episode]     = obj.parse_relatives(items, Episode)
-                self._needs_expansion = episodes[NEXT] is not None
-            else:
-                self._needs_expansion = True
+            self._needs_expansion = not items or episodes[NEXT] is not None
         
         external_id                 : list[dict]        = resp.get(EXTERNAL_ID)
         external_ids                : dict              = resp.get(EXTERNAL_IDS)
@@ -215,6 +213,10 @@ class MetadataIO:
             self.publish_time = dt_to_str(dt)
             self.release_date = dt_to_str(dt.date())
         
+        restrictions                : dict[str, str]    = resp.get(RESTRICTIONS)
+        if restrictions:
+            self.restricted_reason  : str               = resp.get(REASON)
+        
         show                        : dict              = resp.get(SHOW)
         if isinstance(obj, Episode) and isinstance(relative, Show):
             self.show               : Show              = relative
@@ -250,13 +252,11 @@ class MetadataIO:
             if items:
                 for i, t in enumerate(items): ensure_uri(t, TRACK + str(obj.ccount+i+1))
                 self.tracks: list[Track] = obj.parse_relatives(items, Track)
-                self._needs_expansion = tracks.get(NEXT) is not None
-                if not self._needs_expansion:
-                    # set in Album.grab_more_children() later if album incomplete
-                    self.total_discs = safe_typecast(items[-1], DISC_NUMBER, int)
-                    self.duration_ms = sum(int(t.duration_ms) if t.duration_ms else 0 for t in self.tracks)
-            else:
-                self._needs_expansion = True
+            self._needs_expansion = not items or tracks.get(NEXT) is not None
+            if not self._needs_expansion:
+                # set in Album.grab_more_children() later if album incomplete
+                self.total_discs = safe_typecast(items[-1], DISC_NUMBER, int)
+                self.duration_ms = sum(int(t.duration_ms) if t.duration_ms else 0 for t in self.tracks)
         
         self.year                   : str               = self.release_date.split('-')[0] if self.release_date else None
         
