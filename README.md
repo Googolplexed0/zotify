@@ -32,7 +32,7 @@
 
 *Useable across system from the command line*
 
-`pipx install git+https://github.com/Googolplexed0/zotify.git`
+`pipx install git+https://github.com/Googolplexed0/zotify.git@metadata-io`
 
 </details>
 
@@ -40,7 +40,7 @@
 
 *Useable when launched as a Python module*
 
-`python -m pip install git+https://github.com/Googolplexed0/zotify.git`
+`python -m pip install git+https://github.com/Googolplexed0/zotify.git@metadata-io`
 
 </details>
 
@@ -49,10 +49,10 @@
 *Update in accordance with your install method*
 
 **If Executable (pipx):**
-`pipx install -f git+https://github.com/Googolplexed0/zotify.git`
+`pipx install -f git+https://github.com/Googolplexed0/zotify.git@metadata-io`
 
 **If Module:**
-`python -m pip install --force-reinstall git+https://github.com/Googolplexed0/zotify.git`
+`python -m pip install --force-reinstall git+https://github.com/Googolplexed0/zotify.git@metadata-io`
 
 </details>
 
@@ -205,6 +205,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `RETRY_DELAY`                | `--retry-delay`                     | Wait time between API retry attempts, in seconds                              | 5.0                      |
 | `ESCALATING_DELAY`           | `--escalating-delay`                | Whether to double the `RETRY_DELAY` for each successive API failure           | True                     |
 | `CHUNK_SIZE`                 | `--chunk-size`                      | Chunk size for downloading                                                    | 20000                    |
+| `REDIRECT_TIMEOUT`           | `--redirect-timeout`                | Wait time for OAuth login request callback before error, 0 meaning disabled   | 120.0                    |
 | `REDIRECT_ADDRESS`           | `--redirect-address`                | Local callback point for OAuth login requests                                 | 127.0.0.1                |
 | `REDIRECT_PORT`              | `--redirect-port`                   | Destination port at `REDIRECT_ADDRESS` to receive OAuth login requests        | 4381                     |
 

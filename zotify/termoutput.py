@@ -25,6 +25,7 @@ RIGHT_ONE_COL = "\033[C"
 LEFT_ONE_COL = "\033[D"
 START_OF_PREV_LINE = "\033[F"
 CLEAR_LINE = "\033[K"
+LOGIN_STRING = "Logging in..."
 
 
 class PrintChannel(Enum):
@@ -41,7 +42,7 @@ class PrintChannel(Enum):
     DOWNLOADS = PRINT_DOWNLOADS
 
 
-class PrintCategory(Enum):
+class PrintStyle(Enum):
     NONE = ""
     MANDATORY = "\n"
     LOADER = "\n\t"
@@ -52,7 +53,7 @@ class PrintCategory(Enum):
 
 
 class Printer:
-    LAST_PRINT: PrintCategory = PrintCategory.NONE
+    LAST_PRINT: PrintStyle = PrintStyle.NONE
     ACTIVE_LOADER: Loader | None = None
     ACTIVE_PBARS: list[tqdm] = []
     
@@ -66,28 +67,28 @@ class Printer:
         return columns
     
     @staticmethod
-    def _prefixes(msg: str, category: PrintCategory, channel: PrintChannel) -> tuple[str, PrintCategory]:
-        if category is PrintCategory.HASHTAG:
+    def _prefixes(msg: str, style: PrintStyle, channel: PrintChannel) -> tuple[str, PrintStyle]:
+        if style is PrintStyle.HASHTAG:
             if channel in {PrintChannel.WARNING, PrintChannel.ERROR, PrintChannel.API_ERROR,
                            PrintChannel.SKIPPING,}:
                 msg = channel.name + ":  " + msg
             msg =  msg.replace("\n", "   ###\n###   ") + "   ###"
             if channel is PrintChannel.DEBUG:
-                msg = category.value.replace("\n", "", 1) + msg
-                category = PrintCategory.DEBUG
-        elif category is PrintCategory.JSON:
+                msg = style.value.replace("\n", "", 1) + msg
+                style = PrintStyle.DEBUG
+        elif style is PrintStyle.JSON:
             msg = "#" * (Printer._term_cols()-1) + "\n" + msg + "\n" + "#" * Printer._term_cols()
         
-        if Printer.LAST_PRINT is PrintCategory.DEBUG and category is PrintCategory.DEBUG:
+        if Printer.LAST_PRINT is PrintStyle.DEBUG and style is PrintStyle.DEBUG:
             pass
-        elif Printer.LAST_PRINT in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE} and category is PrintCategory.LOADER:
-            msg = "\n" + PrintCategory.LOADER_CYCLE.value + msg
-        elif Printer.LAST_PRINT in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE} and "LOADER" not in category.name:
-            msg = category.value.replace("\n", "", 1) + msg
+        elif Printer.LAST_PRINT in {PrintStyle.LOADER, PrintStyle.LOADER_CYCLE} and style is PrintStyle.LOADER:
+            msg = "\n" + PrintStyle.LOADER_CYCLE.value + msg
+        elif Printer.LAST_PRINT in {PrintStyle.LOADER, PrintStyle.LOADER_CYCLE} and "LOADER" not in style.name:
+            msg = style.value.replace("\n", "", 1) + msg
         else:
-            msg = category.value + msg
+            msg = style.value + msg
         
-        return msg, category
+        return msg, style
     
     @staticmethod
     def _obj_shrink(obj: list | tuple | dict) -> dict:
@@ -142,8 +143,8 @@ class Printer:
         return pretty_str
     
     @staticmethod
-    def logger(msg: str | dict, channel: PrintChannel | None = None) -> None:
-        if channel in {PrintChannel.LOADER}:
+    def logger(msg: str | dict | BaseException, channel: PrintChannel | None = None) -> None:
+        if channel in {PrintChannel.LOADER} or LOGIN_STRING in str(msg):
             return
         from zotify.config import Zotify
         if Zotify.LOGGER is None:
@@ -173,7 +174,7 @@ class Printer:
         finally: Printer.ACTIVE_LOADER.resume()
     
     @staticmethod
-    def new_print(channel: PrintChannel, msg: str, category: PrintCategory = PrintCategory.NONE, 
+    def new_print(channel: PrintChannel, msg: str, style: PrintStyle = PrintStyle.NONE, 
                   end: str = "\n") -> None:
         Printer.logger(msg, channel)
         if channel != PrintChannel.MANDATORY:
@@ -181,14 +182,14 @@ class Printer:
             if Zotify.CONFIG.get_standard_interface():
                 return
         if channel == PrintChannel.MANDATORY or Zotify.CONFIG.get(channel.value):
-            msg, category = Printer._prefixes(msg, category, channel)
-            with Printer.pause_loader(category in {PrintCategory.LOADER, PrintCategory.LOADER_CYCLE}):
+            msg, style = Printer._prefixes(msg, style, channel)
+            with Printer.pause_loader(style in {PrintStyle.LOADER, PrintStyle.LOADER_CYCLE}):
                 for line in str(msg).splitlines():
                     if end == "\n":
                         tqdm.write(line.ljust(Printer._term_cols()))
                     else:
                         tqdm.write(line, end=end)
-                    Printer.LAST_PRINT = category
+                    Printer.LAST_PRINT = style
     
     @staticmethod
     def get_input(prompt: str) -> str:
@@ -205,22 +206,22 @@ class Printer:
         with Printer.pause_loader():
             for m in msg:
                 if isinstance(m, str):
-                    Printer.new_print(PrintChannel.DEBUG, m, PrintCategory.DEBUG)
+                    Printer.new_print(PrintChannel.DEBUG, m, PrintStyle.DEBUG)
                 else:
-                    Printer.new_print(PrintChannel.DEBUG, Printer.pretty(m), PrintCategory.DEBUG)
+                    Printer.new_print(PrintChannel.DEBUG, Printer.pretty(m), PrintStyle.DEBUG)
     
     @staticmethod
     def hashtaged(channel: PrintChannel, msg: str) -> None:
-        Printer.new_print(channel, msg, PrintCategory.HASHTAG)
+        Printer.new_print(channel, msg, PrintStyle.HASHTAG)
     
     @staticmethod
     def json_dump(channel: PrintChannel, obj: dict) -> None:
-        Printer.new_print(channel, Printer.pretty(obj), PrintCategory.JSON)
+        Printer.new_print(channel, Printer.pretty(obj), PrintStyle.JSON)
     
     @staticmethod
     def traceback(e: Exception) -> None:
         msg = "".join(TracebackException.from_exception(e).format())
-        Printer.new_print(PrintChannel.ERROR, msg, PrintCategory.MANDATORY)
+        Printer.new_print(PrintChannel.ERROR, msg, PrintStyle.MANDATORY)
     
     @staticmethod
     def depreciated_warning(option_string: str, help_msg: str = None, CONFIG = True) -> None:
@@ -254,7 +255,7 @@ class Printer:
         "     ███╔╝  ██║   ██║   ██║   ██║██╔══╝    ╚██╔╝  "+"\n"+
         "    ███████╗╚██████╔╝   ██║   ██║██║        ██║   "+"\n"+
         "    ╚══════╝ ╚═════╝    ╚═╝   ╚═╝╚═╝        ╚═╝   "+"\n",
-        PrintCategory.MANDATORY)
+        PrintStyle.MANDATORY)
     
     @staticmethod
     def user_make_select_prompt(only_one: bool = False) -> None:
@@ -264,7 +265,7 @@ class Printer:
               "> MAKE MULTIPLE SELECTIONS BY ADDING A COMMA BETWEEN IDs OR RANGES\n"
         Printer.new_print(PrintChannel.MANDATORY,
                           msg.splitlines()[0] if only_one else msg,
-                          PrintCategory.MANDATORY)
+                          PrintStyle.MANDATORY)
     
     @staticmethod
     def newline() -> None:
@@ -338,7 +339,7 @@ class Loader:
         self.end = end
         self.timeout = timeout
         self.channel = channel
-        self.category = PrintCategory.LOADER
+        self.style = PrintStyle.LOADER
         
         if mode == 'std1':
             self.steps = ["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"]
@@ -365,9 +366,9 @@ class Loader:
         Printer.ACTIVE_LOADER = self._inherited_active_loader
     
     def loader_print(self, msg: str):
-        Printer.new_print(self.channel, msg, self.category)
-        if self.category is PrintCategory.LOADER:
-            self.category = PrintCategory.LOADER_CYCLE
+        Printer.new_print(self.channel, msg, self.style)
+        if self.style is PrintStyle.LOADER:
+            self.style = PrintStyle.LOADER_CYCLE
     
     def animate(self):
         for c in cycle(self.steps):
@@ -395,7 +396,7 @@ class Loader:
                 except KeyboardInterrupt:
                     self.stop() # guarantee stop is called so outer funcs can clean up all loaders
                     raise
-            self.category = PrintCategory.LOADER
+            self.style = PrintStyle.LOADER
             if self.end != "":
                 self.loader_print(self.end)
             self._release_active_loader()
@@ -404,7 +405,7 @@ class Loader:
         self.paused = True
     
     def resume(self):
-        self.category = PrintCategory.LOADER
+        self.style = PrintStyle.LOADER
         self.paused = False
         sleep(self.timeout*2) #guarantee _animate can print at least once
 

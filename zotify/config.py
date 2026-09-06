@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import sys
 import requests
 from binascii import hexlify
 from base64 import b64encode, b64decode
@@ -123,6 +124,7 @@ CONFIG_VALUES = {
     RETRY_DELAY:                { DEFAULT: '5.0',                     TYPE: float,  ARG: ('--retry-delay'                             ,) },
     ESCALATING_DELAY:           { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--escalating-delay'                        ,) },
     CHUNK_SIZE:                 { DEFAULT: '20000',                   TYPE: int,    ARG: ('--chunk-size'                              ,) },
+    REDIRECT_TIMEOUT:           { DEFAULT: '120.0',                   TYPE: float,  ARG: ('--redirect-timeout'                        ,) },
     REDIRECT_ADDRESS:           { DEFAULT: '127.0.0.1',               TYPE: str,    ARG: ('--redirect-address'                        ,) },
     REDIRECT_PORT:              { DEFAULT: '4381',                    TYPE: int,    ARG: ('--redirect-port'                           ,) },
     
@@ -597,11 +599,11 @@ class Config:
     
     @classmethod
     def permit_client_api(cls) -> bool:
-        return cls.get_api_client_id() and not Zotify.FORCE_LIBRE_METADATA
+        return bool(cls.get_api_client_id() and not Zotify.FORCE_LIBRE_METADATA)
     
     @classmethod
     def permit_legacy_api(cls) -> bool:
-        return cls.permit_client_api() and cls.get(API_CLIENT_LEGACY) and Zotify.LEGACY_API_ENDOINTS
+        return bool(cls.permit_client_api() and cls.get(API_CLIENT_LEGACY) and Zotify.LEGACY_API_ENDOINTS)
     
     @classmethod
     def get_fetch_delay(cls) -> float:
@@ -625,6 +627,11 @@ class Config:
     @classmethod
     def get_chunk_size(cls) -> int:
         return cls.get(CHUNK_SIZE)
+    
+    @classmethod
+    def get_oauth_timeout(cls) -> float | None:
+        timeout = cls.get(REDIRECT_TIMEOUT)
+        return timeout if timeout > 0.0 else None
     
     @classmethod
     def get_oauth_address(cls) -> str:
@@ -730,7 +737,8 @@ class LoginHandler:
         def oauth_print(url):
             Printer.new_print(PrintChannel.MANDATORY, f"Click on the following link to login:\n{url}")
         
-        return OAuth(client_id, redirect_url, oauth_print).set_scopes(SCOPES).set_listen_all(True)
+        timeout = Zotify.CONFIG.get_oauth_timeout()
+        return OAuth(client_id, redirect_url, oauth_print).set_scopes(SCOPES).set_listen_all(True).set_timeout(timeout)
     
     @staticmethod
     def get_login5_from_args(args) -> dict | None:
@@ -794,7 +802,7 @@ class LoginHandler:
     
     @classmethod
     def login_success(cls) -> bool:
-        return cls.SESSION and (Zotify.CONFIG.permit_client_api() == bool(cls.OAUTH))
+        return bool(cls.SESSION and (Zotify.CONFIG.permit_client_api() == bool(cls.OAUTH)))
     
     @classmethod
     def save_credentials(cls) -> None:
@@ -821,10 +829,6 @@ class LoginHandler:
         if cls.OAUTH and not force_login5:
             return cls.OAUTH.token()
         return cls.SESSION.tokens().get_token(*SCOPES).access_token
-    
-    @classmethod
-    def oauth_close(cls):
-        if cls.OAUTH: cls.OAUTH.close()
 
 
 class Zotify:
@@ -884,13 +888,14 @@ class Zotify:
         cls.CONFIG.load(args)
         cls.LOGGER = LogHandler.start_logger(cls.DATETIME_LAUNCH)
         
-        with Loader("Logging in...", PrintChannel.MANDATORY):
+        with Loader(LOGIN_STRING, PrintChannel.MANDATORY):
             cls.SESSION = LoginHandler.login(args)
             LoginHandler.save_credentials()
         if not cls.SESSION:
             Printer.hashtaged(PrintChannel.MANDATORY, 'ALL LOGIN ATTEMPTS UNSUCCESSFUL\n'+ 
-                                                      'NO SESSION CREATED, EXITING')
-            return
+                                                      'NO SESSION CREATED, EXITING PROGRAM')
+            cls.end()
+            sys.exit(1) # TODO implement full exit code scheme
         
         prem, quality, bitrate = cls.parse_dl_quality(cls.CONFIG.get_download_qual_pref())
         cls.DOWNLOAD_QUALITY = quality
@@ -1171,7 +1176,6 @@ class Zotify:
     @classmethod
     def end(cls) -> None:
         cls.start_stats()
-        LoginHandler.oauth_close()
         LogHandler.kill_logger()
         
         for dir in (Path(cls.CONFIG.get_root_path()), Path(cls.CONFIG.get_root_podcast_path())):

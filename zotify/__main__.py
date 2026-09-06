@@ -58,10 +58,6 @@ def main():
                         action='store_true',
                         dest='debug',
                         help='Enable debug mode, prints extra information and creates a `config_DEBUG.json` file')
-    # parser.add_argument('-ns', '--no-splash',
-    #                     action='store_true',
-    #                     dest='no_splash',
-    #                     help='Suppress the splash screen when loading')
     
     # with args
     parser.add_argument('-c', '--config', '--config-location',
@@ -138,7 +134,6 @@ def main():
     
     args = parser.parse_args()
     Zotify.boot(args)
-    if not Zotify.SESSION: return
     
     from zotify.app import client
     client(args, modes)

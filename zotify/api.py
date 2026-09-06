@@ -151,7 +151,7 @@ class Content(HierarchicalNode):
         
         if ContClass in {Playlist, Show}:
             pass # Playlist == no bulk option, Show == bulk option inferior to per-each
-        if Zotify.CONFIG.permit_legacy_api():
+        elif Zotify.CONFIG.permit_legacy_api():
             with Loader(f"Fetching bulk {loader_text} information...", disabled=hide_loader):
                 fetch_url = f"{ContClass._url}?{MARKET_APPEND}&{BULK_APPEND}"
                 ids = [uri.split(":")[-1] for uri in uris]
