@@ -766,7 +766,9 @@ class Zotify:
             login_try = 0
             while login_try <= cls.CONFIG.get_retry_attempts():
                 login_try += 1
-                try: cls.login(args)
+                try:
+                    cls.login(args)
+                    break
                 except ConnectionError as e:
                     Printer.hashtaged(PrintChannel.WARNING, f'LOGIN FAILED ({e.args[0]})\n' + 
                                                              'TRYING AGAIN AFTER SMALL WAIT')
