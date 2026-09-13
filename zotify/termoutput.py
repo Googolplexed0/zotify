@@ -4,10 +4,11 @@ from enum import Enum
 from functools import partial
 from itertools import cycle
 from mutagen import FileType
-from os import get_terminal_size, system
-from platform import system as platform_system
+from os import get_terminal_size
+from platform import system
 from pprint import pformat
 from re import split, escape
+from subprocess import run
 from tabulate import tabulate
 from threading import Thread
 from time import sleep
@@ -240,10 +241,7 @@ class Printer:
     @staticmethod
     def clear() -> None:
         """ Clear the console window """
-        if platform_system() == WINDOWS_SYSTEM:
-            system('cls')
-        else:
-            system('clear')
+        run(["cls" if system() == WINDOWS_SYSTEM else "clear"], shell=True)
     
     @staticmethod
     def splash() -> None:

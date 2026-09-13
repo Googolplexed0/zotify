@@ -63,10 +63,10 @@ class Content(HierarchicalNode):
         self.id = self.uri.split(":", 1)[-1] # mutable, may be changed by automatic relinking in parse_metadata
         self.is_local = self.id.count(":") > 0
         
-        self._downloaded = False
-        self._hasMetadata = False
+        self._downloaded: bool = False
+        self._hasMetadata: bool = False
         
-        self.name = None
+        self.name: str = None
     
     def __eq__(self, other) -> bool:
         if isinstance(other, Content): return self.uri == other.uri
@@ -271,9 +271,9 @@ class Content(HierarchicalNode):
             parent_stack = ps if Zotify.CONFIG.get_optimized_dl() else ParentStack(ps.copy())
             self._real_filepaths[parent_stack] = path
             from zotify.metadata import SongArchive
-            if not self._in_global_archive:
+            if not SongArchive().obj_in_archive(self):
                 SongArchive().add_obj(self, path)
-            if isinstance(self, Track) and not self.id in SongArchive(path.parent).ids():
+            if isinstance(self, Track) and not SongArchive(path.parent).obj_in_archive(self):
                 SongArchive(path.parent).add_obj(self, path)
 
 
@@ -282,10 +282,8 @@ class DLContent(Content):
     _ext   = ""
     
     def __init__(self, uri: str):
-        from zotify.metadata import SongArchive
         super().__init__(uri)
         self._dl_status = ""
-        self._in_global_archive = self.id in SongArchive().ids()
         self._real_filepaths: dict[ParentStack, PurePath] = {}
         self._clone_to: set[ParentStack] = set()
         
@@ -332,8 +330,7 @@ class DLContent(Content):
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
         from zotify.metadata import SongArchive
-        def handle_archive(dir_path: PurePath | None):
-            archived_path = SongArchive(dir_path).id_path(self.id)
+        def handle_archive(archived_path: PurePath):
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} DOWNLOADED PREVIOUSLY)\n'
                                                      f'FILE: "{self.rel_path(archived_path)}"')
             self.mark_downloaded(parent_stack, archived_path)
@@ -346,22 +343,23 @@ class DLContent(Content):
                 if file_match.stat().st_size:
                     path_exists = True
                     break
-        in_dir_archive = self.id in SongArchive(path.parent).ids()
+        in_dir_archive = SongArchive(path.parent).obj_in_archive(self)
+        in_global_archive = SongArchive().obj_in_archive(self)
         if not Zotify.CONFIG.get_optimized_dl():
             Printer.debug(f'Duplicate Check @ "{path}"\n' +
                           f'File Already Exists: {path_exists}\n' +
                           f'id in Local Archive: {in_dir_archive}\n' +
-                          f'id in Global Archive: {self._in_global_archive}')
+                          f'id in Global Archive: {in_global_archive}')
         
         if path_exists and Zotify.CONFIG.get_skip_existing() and Zotify.CONFIG.get_no_dir_archives():
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self.rel_path(path)}" (FILE ALREADY EXISTS)')
             self.mark_downloaded(parent_stack, path)
             return True
         elif in_dir_archive and Zotify.CONFIG.get_skip_existing() and not Zotify.CONFIG.get_no_dir_archives():
-            handle_archive(path.parent)
+            handle_archive(in_dir_archive)
             return True
-        elif self._in_global_archive and Zotify.CONFIG.get_skip_previously_downloaded():
-            handle_archive(None)
+        elif in_global_archive and Zotify.CONFIG.get_skip_previously_downloaded():
+            handle_archive(in_global_archive)
             return True
         
         elif self.regex_check(skip_debug_print=Zotify.CONFIG.get_optimized_dl()):
@@ -555,7 +553,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         self.ean            : str                   = None # European Article Number
         self.isrc           : str                   = None # International Standard Recording Code
         self.lyrics         : list[str]             = None # only fetched if config set
-        self.track_number   : str                   = None
+        self.track_number   : int                   = None
         self.upc            : str                   = None # Universal Product Code (Type-A)
     
     def fill_output_template(self, parent_stack: ParentStack, output_template: str = "") -> PurePath:
@@ -569,7 +567,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         
         repl_dict: dict[str, str] = {}
         def update_repl(md_val, *replstrs: str):
-            # Printer.debug(replstrs[0])
+            if isinstance(md_val, int): md_val = str(md_val).zfill(2)
             repl_dict.update(zip(replstrs, [md_val]*len(replstrs)))
         
         update_repl(self.id,            "{id}", "{track_id}", "{song_id}")
@@ -597,7 +595,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
                 update_repl(self.album.total_discs,     "{total_discs}")
         
         if isinstance(parent, Playlist):
-            playlist_number = str(parent.tracks_or_eps.index(self) + 1).zfill(2)
+            playlist_number = parent.tracks_or_eps.index(self) + 1
             update_repl(parent.name,        "{playlist}")
             update_repl(parent.id,          "{playlist_id}")
             update_repl(playlist_number,    "{playlist_number}", "{playlist_num}")
@@ -689,13 +687,16 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
                 Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} ALREADY DOWNLOADED THIS SESSION)\n' + 
                                                          f'FILE COPIED TO NEW DESTINATION "{self.rel_path(parent_stack)}"')
                 return
-        elif Zotify.CONFIG.get_optimized_dl() and self._downloaded:
-            if self.clone_to_all(): return
+        elif Zotify.CONFIG.get_optimized_dl():
+            if self._downloaded and self.clone_to_all():
+                return
         
         if Zotify.CONFIG.get_always_check_lyrics():
             self.fetch_lyrics(parent_stack)
         
-        if parent_stack.check_skippable():
+        if parent_stack.check_skippable(force_fetch=Zotify.CONFIG.get_skip_by_isrc()):
+            # isrc skipping -> change archive mid-Query -> invalid optimized_dl SKIPPABLE_CACHE
+            # TODO get rid of SKIPPABLE_CACHE?
             return
         
         Interface.bind(parent_stack)
@@ -1007,7 +1008,7 @@ class Album(Container, HasArtists, IsFavoritable):
         self.label          : str                   = None
         self.release_date   : str                   = None
         self.total_discs    : int                   = None
-        self.total_tracks   : str                   = None
+        self.total_tracks   : int                   = None
         self.upc            : str                   = None # Universal Product Code (Type-A)
         self.year           : str                   = None
     
@@ -1108,7 +1109,7 @@ class Show(Container):
         self.is_externally_hosted   : bool              = None
         self.image_url              : str               = None
         self.publisher              : str               = None
-        self.total_episodes         : str               = None
+        self.total_episodes         : int               = None
 
 
 # start not implemented
@@ -1149,8 +1150,8 @@ class ParentStack(list):
     """ Will contain DLContent as last item in self if complete.
         Possible to include a NoneType if metadata fails to fetch,
         where None will always be the last item if present """
-    PBARS                               = []
-    skippable: dict[str, bool | None]   = {}
+    SKIPPABLE_CACHE: dict[str, bool] = {}
+    PBARS                            = []
     
     def __hash__(self: ParentStack | list[Content | None]):
         # this means Container._main_items with no metadata are indistinguishable,
@@ -1163,11 +1164,11 @@ class ParentStack(list):
     def __str__(self: ParentStack | list[Content | None]) -> str:
         return "[" + ' -> '.join([c.clsn if isinstance(c, Content) else "None" for c in self]) + "]"
     
-    def check_skippable(self: ParentStack | list[Content | None]) -> bool:
+    def check_skippable(self: ParentStack | list[Content | None], force_fetch: bool = False) -> bool:
         h = hash(self)
-        if h in self.skippable: return self.skippable[h]
+        if h in self.SKIPPABLE_CACHE and not force_fetch: return self.SKIPPABLE_CACHE[h]
         skip = self[-1] is None or any(c.check_skippable(self) for c in self[::-1])
-        self.skippable[h] = skip
+        self.SKIPPABLE_CACHE[h] = skip
         return skip
     
     def download(self: ParentStack | list[DLContent | Container | None], _: ParentStack):
@@ -1242,7 +1243,7 @@ class Query(Container):
     def conditional_metadata(self):
         alltracks = {t for t in self.ALL_NODES if isinstance(t, Track) and not t.is_local}
         
-        artists = set().union(*(set(track.artists) for track in alltracks if track.artists))
+        artists: set[Artist] = set().union(*(set(track.artists) for track in alltracks if track.artists))
         artist_uris: dict[str, Artist] = {a.uri: a for a in artists if not a.is_local and not a._hasMetadata
                                           and not "".join(a.name.lower().split()) == "variousartists"}
         if Zotify.CONFIG.get_save_genres() and artist_uris:
@@ -1383,27 +1384,36 @@ class VerifyLibrary(Query):
     _contains = Track
     name = "Verifiable Tracks"
     
-    def fetch_verifiable_metadata(self) -> tuple[dict[str, list[PurePath]], list[list[dict]]]:
+    def fetch_verifiable_metadata(self) -> tuple[set, dict[str, list[PurePath]], list[list[dict]]]:
         """ ONLY WORKS WITH ARCHIVED TRACKS (THEORETICALLY GUARANTEES METADATA FETCH) """
-        # prioritize most recent paths first
         from zotify.metadata import SongArchive
-        archived_ids = SongArchive().ids()[::-1]
-        archived_filenames_or_paths = SongArchive().paths()[::-1]
+        all_archives    : set[SongArchive]          = set()
+        track_uris      : set[str]                  = set()
+        paths_per_track : dict[str, list[PurePath]] = {}
         
-        paths_per_track: dict[str, list[PurePath]] = {}
+        def link_tracks(archive_path: PurePath, dir_path: PurePath):
+            # prioritize most recent paths first
+            archive = SongArchive(archive_path)
+            all_archives.add(archive)
+            ids = archive.ids()[::-1]
+            paths = archive.paths()[::-1]
+            
+            for filepath in walk_directory_for_tracks(dir_path):
+                if filepath not in paths: continue
+                uri = f"{TRACK}:{ids[paths.index(filepath)]}"
+                track_uris.add(uri)
+                if uri not in paths_per_track:                  paths_per_track[uri] = []
+                if filepath not in paths_per_track[uri]:        paths_per_track[uri].append(filepath)
         
-        track_ids: set[str] = set()
-        for filepath in walk_directory_for_tracks(Track._path_root):
-            if filepath in archived_filenames_or_paths:
-                uri = f"{TRACK}:{archived_ids[archived_filenames_or_paths.index(filepath)]}"
-                if uri not in paths_per_track:
-                    paths_per_track[uri] = []
-                paths_per_track[uri].append(filepath)
-                track_ids.add(uri)
+        link_tracks(None, Track._path_root) # global .song_archive
+        for song_ids in Path(Track._path_root).rglob(".song_ids"):
+            if not song_ids.is_file(): continue
+            dir_path = PurePath(song_ids.parent)
+            link_tracks(dir_path, dir_path)
         
-        return paths_per_track, [self.fetch_uris_metadata(track_ids, Track)]
+        return all_archives, paths_per_track, [self.fetch_uris_metadata(track_uris, Track)]
     
-    def verify_metadata(self, path: PurePath, track: Track) -> None:
+    def verify_track(self, path: PurePath, track: Track) -> None:
         """Overwrite metadata on file at path with fetched metadata if necessary"""
         from zotify.metadata import Tagger
         if not Tagger(path).matches_metadata(track):
@@ -1420,18 +1430,31 @@ class VerifyLibrary(Query):
                                                        '(UPDATED TAGS TO MATCH CURRENT API METADATA)')
         except Exception as e:
             Printer.hashtaged(PrintChannel.ERROR, f'FAILED TO CORRECT METADATA FOR "{track.rel_path(path)}"')
-            Printer.traceback(e)  
+            Printer.traceback(e)
     
-    def execute(self):
-        # no zmd prefetch, meant to update entries
-        paths_per_track, track_resps = self.fetch_verifiable_metadata()
-        self.parse_query_metadata(track_resps, [Track])
-        self.conditional_metadata()
+    def verify_metadata(self, paths_per_track: dict[str, list[PurePath]]) -> None:
         parent_stack = ParentStack([self])
         for track in self.pbar(self.requested_objs[0], parent_stack):
             for path in paths_per_track[track]:
-                self.verify_metadata(path, track)
+                self.verify_track(path, track)
             Printer.refresh_all_pbars(parent_stack.PBARS)
+    
+    def update_song_archives(self, all_archives: set) -> None:
+        if Zotify.CONFIG.test_mode():
+            Printer.hashtaged(PrintChannel.MANDATORY, f'SKIPPING UPDATE OF SONG ARCHIVE FILES, PER TEST MODE')
+            return
+        from zotify.metadata import SongArchive
+        all_archives: set[SongArchive] = all_archives
+        for archive in all_archives:
+            archive.update(self, TRACK)
+    
+    def execute(self) -> None:
+        # no zmd prefetch, meant to update entries
+        all_archives, paths_per_track, track_resps = self.fetch_verifiable_metadata()
+        self.parse_query_metadata(track_resps, [Track])
+        self.conditional_metadata()
+        self.verify_metadata(paths_per_track)
+        self.update_song_archives(all_archives)
 
 
 class UserItem(Query):

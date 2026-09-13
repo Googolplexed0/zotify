@@ -9,19 +9,14 @@ from zotify.api import *
 
 
 class MetadataIO:
-    PARSE_AS_STR        = {ADDED_AT, ALBUM_TYPE, CONSUMPTION_ORDER, DESCRIPTION, DISC_NUMBER, DISPLAY_NAME,
+    PARSE_AS_STR        = {ADDED_AT, ALBUM_TYPE, CONSUMPTION_ORDER, DESCRIPTION, DISPLAY_NAME,
                            EXTERNAL_URL, ID, ITEM_ID, LABEL, NAME, PUBLISHER, RELEASE_DATE, REVISION, SNAPSHOT_ID,}
-    INT_PARSE_AS_STR    = {TOTAL_EPISODES, TOTAL_TRACKS, TRACK_NUMBER,}
-    PARSE_AS_INT        = {DURATION_MS, LENGTH, POPULARITY, TIMESTAMP,}
-    PARSE_AS_BOOL       = {COLLABORATIVE, DELETED_BY_OWNER, EXPLICIT,
-                           IS_EXTERNALLY_HOSTED, IS_LOCAL, IS_PLAYABLE, PUBLIC,}
+    PARSE_AS_INT        = {DISC_NUMBER, DURATION_MS, LENGTH, POPULARITY, TIMESTAMP, TOTAL_EPISODES, TOTAL_TRACKS,}
+    PARSE_AS_BOOL       = {COLLABORATIVE, DELETED_BY_OWNER, EXPLICIT, IS_EXTERNALLY_HOSTED, IS_LOCAL, IS_PLAYABLE, PUBLIC,}
     
     def from_resp(self, obj: Content, relative: Content, resp: dict) -> dict[str]:
         for attr in self.PARSE_AS_STR:
             setattr(self, attr, safe_typecast(resp, attr, str))
-        for attr in self.INT_PARSE_AS_STR:
-            raw_val: str | None = safe_typecast(resp, attr, str)
-            setattr(self, attr, None if raw_val is None else raw_val.zfill(2))
         for attr in self.PARSE_AS_INT:
             setattr(self, attr, safe_typecast(resp, attr, int))
         for attr in self.PARSE_AS_BOOL:
@@ -176,6 +171,15 @@ class MetadataIO:
             self.isrc               : str               = external_ids.get(ISRC)
             self.upc                : str               = external_ids.get(UPC)
         
+        followers                   : dict              = resp.get(FOLLOWERS)
+        if followers:
+            self.followers          : int               = safe_typecast(followers, TOTAL, int)
+        
+        number                      : int               = resp.get(NUMBER)
+        track_number                : int               = resp.get(TRACK_NUMBER)
+        if number or track_number and isinstance(obj, Track):
+            self.track_number       : int               = number if number else track_number
+        
         owner_username              : str               = resp.get(OWNER_USERNAME)
         if owner_username:
             resp[OWNER]                                 = ensure_user_resp(owner_username)
@@ -208,8 +212,12 @@ class MetadataIO:
         
         publish_time                : dict[str, int]    = resp.get(PUBLISH_TIME)
         if publish_time:
-            dt = datetime(publish_time.get(YEAR), publish_time.get(MONTH), publish_time.get(DAY),
-                            publish_time.get(HOUR, 0), publish_time.get(MINUTE, 0))
+            dt = datetime(publish_time.get(YEAR),
+                          publish_time.get(MONTH),
+                          publish_time.get(DAY),
+                          publish_time.get(HOUR, 0),
+                          publish_time.get(MINUTE, 0),
+                          publish_time.get(SECOND, 0))
             self.publish_time = dt_to_str(dt)
             self.release_date = dt_to_str(dt.date())
         
@@ -234,10 +242,6 @@ class MetadataIO:
         timestamp                   : str               = resp.get(TIMESTAMP)
         if timestamp:
             self.timestamp          : str               = timestamp_utc(timestamp)
-        
-        followers                   : dict              = resp.get(FOLLOWERS)
-        if followers:
-            self.followers          : int               = safe_typecast(followers, TOTAL, int)
         
         top_tracks                  : list[dict]        = resp.get(TOP_TRACK)
         if top_tracks:
@@ -462,6 +466,7 @@ class Tagger:
         else:                                       self._custom_ogg_tag(tag, md_val)
     
     def write_tags(self, obj: Content):
+        """ Writing tags will never remove existing tags, only add or update them """
         reliable_tags, optional_tags, custom_tags = self._content_to_tags(obj)
         for tag, md_val in reliable_tags.items():
             if md_val is None: continue
@@ -482,6 +487,18 @@ class Tagger:
         elif M4A_CUSTOM_TAG_PREFIX in tag:  return [v.decode() for v in tag_obj]
         else:                               return tag_obj
     
+    @staticmethod
+    def _match_tag(on_file, md_val) -> bool:
+        # on_file_is_falsy = not Zotify.CONFIG.get_strict_library_verify() or not bool(on_file)
+        if md_val is None:
+            return True
+        elif isinstance(md_val, bool):
+            return md_val == bool(on_file)
+        elif isinstance(md_val, int):
+            return md_val == int(on_file)
+        else:
+            return str(md_val) == str(on_file)
+    
     def _match_tag_group(self, tag_group: dict[str]) -> dict[str]:
         mismatches = {}
         for tag, md_val in tag_group.items():
@@ -494,8 +511,7 @@ class Tagger:
             elif isinstance(md_val, list):              on_file = mditem.values
             elif isinstance(md_val, bytes):             on_file = mditem.val.data
             else:                                       on_file = mditem.val
-            match = (md_val is None and not bool(on_file)) or str(on_file) == str(md_val)
-            mismatches[tag] = False if match else f' on File: "{on_file}", in Metadata: "{md_val}"'
+            mismatches[tag] = False if self._match_tag(on_file, md_val) else f' on File: "{on_file}", in Metadata: "{md_val}"'
         return mismatches
     
     def matches_metadata(self, obj: Content) -> bool:
@@ -521,8 +537,22 @@ class Tagger:
 
 
 class SongArchive:
-    """ Entry: id, date, author, name, path (only filename if from legacy archive) """
-    UPDATE_ARCHIVE: bool = Zotify.CONFIG.get_update_archive()
+    UPDATE_GLOBAL: bool = Zotify.CONFIG.get_update_archive()
+    ITEM_ID = "item_id"
+    DL_TIMESTAMP = "dl_timestamp"
+    AUTHOR_NAME = "author_name"
+    ITEM_NAME = "item_name"
+    ITEM_PATH = "item_path"
+    ISRC_CODE = "isrc_code"
+    OPTIONAL_FIELDS = {ISRC_CODE}
+    ARCHIVE_FORMAT = {
+        ITEM_ID:        "",
+        DL_TIMESTAMP:   "",
+        AUTHOR_NAME:    "",
+        ITEM_NAME:      "",
+        ITEM_PATH:      "", # only filename if from legacy archive
+        ISRC_CODE:      "",
+    }
     
     def __init__(self, dir_path: PurePath | None = None):
         self._global = dir_path is None
@@ -530,7 +560,43 @@ class SongArchive:
         self.mode = 'a' if file_has_content(self.path) else 'w' # should always exist from Content.create_download_directory()
         self.disabled = Zotify.CONFIG.get_no_song_archive() if self._global else Zotify.CONFIG.get_no_dir_archives()
     
-    def upgrade_legacy_archive(self, entries: list[str]) -> None:
+    def _obj_to_entry(self, obj: DLContent, item_path: PurePath, timestamp: str = None) -> dict[str, str | PurePath]:
+        entry = self.ARCHIVE_FORMAT.copy()
+        entry.update({self.ITEM_ID:         obj.id,
+                      self.DL_TIMESTAMP:    timestamp if timestamp else now(),
+                      self.ITEM_PATH:       item_path if self._global else try_rel_path(item_path, self.path.parent)})
+        if isinstance(obj, Track):
+            if obj.artists and obj.artists[0].name: entry[self.AUTHOR_NAME] = obj.artists[0].name
+            if obj.name:                            entry[self.ITEM_NAME]   = obj.name
+            if obj.isrc:                            entry[self.ISRC_CODE]   = obj.isrc
+        elif isinstance(obj, Episode):
+            if obj.show and obj.show.publisher:     entry[self.AUTHOR_NAME] = obj.show.publisher
+            if obj.name:                            entry[self.ITEM_NAME]   = str(obj)
+        return entry
+    
+    def _add_entries(self, mode: str, entries: list[dict[str, str | PurePath]]) -> None:
+        with open(self.path, mode, encoding='utf-8') as file:
+            file.writelines("\t".join(str(v) for v in entry.values()) + "\n" for entry in entries)
+    
+    def add_obj(self, obj: DLContent, item_path: PurePath) -> None:
+        if self.disabled: return
+        self._add_entries(self.mode, [self._obj_to_entry(obj, item_path)])
+    
+    def update(self, query: Query, item_prefix: str) -> None:
+        entries = [self._parse_entry_str(entry_str) for entry_str in self._read_entry_strs()]
+        for entry in entries:
+            obj = query.get_if_exists(f"{item_prefix}:{entry[self.ITEM_ID]}")
+            if not obj: continue
+            entry.update(self._obj_to_entry(obj, entry[self.ITEM_PATH], entry[self.DL_TIMESTAMP]))
+        self._add_entries('w', entries)
+    
+    def _parse_entry_str(self, entry_str: str) -> dict[str, str | PurePath]:
+        entry = self.ARCHIVE_FORMAT.copy()
+        entry.update(zip(self.ARCHIVE_FORMAT.keys(), entry_str.strip().split('\t')))
+        if entry.get(self.ITEM_PATH): entry[self.ITEM_PATH] = PurePath(entry[self.ITEM_PATH])
+        return entry
+    
+    def _upgrade_legacy_archive(self, entries: list[dict[str, str | PurePath]]) -> None:
         """ Attempt to match a legacy archive's filename to a full path """
         
         def find_artist_names(artists: list[str] | str) -> list[str]:
@@ -538,64 +604,53 @@ class SongArchive:
             return artists.split(Zotify.CONFIG.get_artist_delimiter())
         
         rewrite_legacy = False
-        for i, entry in enumerate(entries):
-            entry_items = entry.strip().split('\t')
-            filename_or_path = PurePath(entry_items[-1])
-            if filename_or_path.is_absolute():
-                entries[i] = entry_items
-                continue
+        for entry in entries:
+            if entry[self.ITEM_PATH].is_absolute(): continue
             
             rewrite_legacy = True
-            path_entry = filename_or_path
-            for glob_path in Path(Zotify.CONFIG.get_root_path()).glob('**/' + str(filename_or_path)):
-                reliable_tags, unreliable_tags = Track.read_audio_tags(PurePath(glob_path))
-                if ("trackid" in unreliable_tags and unreliable_tags["trackid"] == entry_items[0]
-                or  find_artist_names(reliable_tags[0])[0] == entry_items[2]
-                or  reliable_tags[2] == entry_items[3]):
-                    path_entry = PurePath(glob_path)
+            for glob_path in Path(Zotify.CONFIG.get_root_path()).rglob(str(entry[self.ITEM_PATH])):
+                file_tags = Tagger(glob_path).file_tags
+                if file_tags.get(TRACKID)                       == entry[self.ITEM_ID] \
+                or find_artist_names(file_tags.get(ARTIST))[0]  == entry[self.AUTHOR_NAME] \
+                or file_tags.get(TRACKTITLE)                    == entry[self.ITEM_NAME]:
+                    entry[self.ITEM_PATH] = PurePath(glob_path)
                     break
-            
-            entries[i] = entry_items[:-1] + [path_entry]
         
-        if rewrite_legacy:
-            Path(self.path).unlink()
-            mode = 'w'
-            for entry in entries:
-                self.add_entry(*entry, mode)
-                mode = 'a'
+        if rewrite_legacy: self._add_entries('w', entries)
     
-    def read_entries(self) -> list[str]:
+    def _read_entry_strs(self) -> list[str] | list[dict[str, str | PurePath]]:
+        """ Return list of tab-delimted entries in archive file, upgrading legacy archives if necessary """
         if self.disabled or not file_has_content(self.path):
             return []
         with open(self.path, 'r', encoding='utf-8') as f:
             entries = f.readlines()
-        if self._global and SongArchive.UPDATE_ARCHIVE:
-            SongArchive.UPDATE_ARCHIVE = False
-            self.upgrade_legacy_archive(entries)
-            return self.read_entries()
+        if self._global and SongArchive.UPDATE_GLOBAL:
+            SongArchive.UPDATE_GLOBAL = False
+            self._upgrade_legacy_archive([self._parse_entry_str(entry_str) for entry_str in entries])
+            entries = self._read_entry_strs()
         return entries
     
-    def ids(self) -> list[str]:
-        return [e.strip().split('\t')[0] for e in self.read_entries()]
+    def _get_all_of_type(self, archive_key: str) -> list[str]:
+        archive_key_index = list(self.ARCHIVE_FORMAT.keys()).index(archive_key)
+        return [e.strip().split('\t')[archive_key_index] if e.count("\t") >= archive_key_index else ""
+                for e in self._read_entry_strs()]
+    def ids(self)           -> list[str]: return self._get_all_of_type(self.ITEM_ID)
+    def isrcs(self)         -> list[str]: return self._get_all_of_type(self.ISRC_CODE)
+    def paths(self)         -> list[PurePath]:
+        path_strs = self._get_all_of_type(self.ITEM_PATH)
+        if not self._global:
+            path_strs = [(p if PurePath(p).is_absolute() else str(self.path.parent / p)) if p else None for p in path_strs]
+        return [PurePath(p) if p else None for p in path_strs]
     
-    def paths(self) -> list[PurePath]:
-        return [PurePath(e.strip().split('\t')[-1]) for e in self.read_entries()]
-    
-    def id_path(self, item_id: str) -> PurePath:
-        return self.paths()[self.ids().index(item_id)]
-    
-    def add_entry(self, item_id: str, timestamp: str, author_name: str, item_name: str, item_path: PurePath, mode: str) -> None:
-        if not timestamp:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        entry = f'{item_id}\t{timestamp}\t{author_name}\t{item_name}\t{item_path}\n'
-        with open(self.path, mode, encoding='utf-8') as file:
-            file.write(entry)
-    
-    def add_obj(self, obj: Track | Episode, item_path: PurePath) -> None:
-        if self.disabled: return
-        author_name = obj.artists[0].name if isinstance(obj, Track) else obj.show.publisher
-        item_name = obj.name if isinstance(obj, Track) else str(obj)
-        self.add_entry(obj.id, "", author_name, item_name, item_path, self.mode)
+    def obj_in_archive(self, obj: DLContent) -> PurePath | None:
+        index = None
+        if obj.id in self.ids():
+            index = self.ids().index(obj.id);       log_str = f"ID: {obj.id}"
+        elif Zotify.CONFIG.get_skip_by_isrc() and isinstance(obj, Track) and obj.isrc and obj.isrc in self.isrcs():
+            index = self.isrcs().index(obj.isrc);   log_str = f"ISRC: {obj.isrc}"
+        if index is None: return None
+        Printer.logger(f'Found {obj.clsn} {log_str} in archive ("{self.path}") at line {index}')
+        return self.paths()[index]
 
 
 class M3U8:

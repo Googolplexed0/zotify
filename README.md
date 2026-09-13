@@ -71,31 +71,31 @@ If an artist's URL is given, all albums by the specified artist will be download
 
 `(python -m) zotify <{config flag} {config value}> <{mode flag}> <track/album/playlist/episode/artist url>`
 
-| Command Line Config Flag (no value) | Function                                                                                                       |
-|-------------------------------------|----------------------------------------------------------------------------------------------------------------|
-| `-h`, `--help`                      | See this message                                                                                               |
-| `-V`, `--version`                   | Show the version of Zotify                                                                                     |
-| `-P`, `--persist`                   | Perform multiple Queries on the same Session, requiring only one account login                                 |
-| `-T`, `--test`, `--dry-run`         | Perform a "dry run" of a Query, fetching metadata without downloading/modifying any music files                |
-| `--update-config`                   | Updates the `config.json` file while keeping all current settings unchanged                                    |
-| `--update-archive`                  | Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged          |
-| `--debug`                           | Enable debug mode, printing extra information and creating a `config_DEBUG.json` file                          |
+| Command Line Config Flag (no value) | Function                                                                                                           |
+|-------------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| `-h`, `--help`                      | See this message                                                                                                   |
+| `-V`, `--version`                   | Show the version of Zotify                                                                                         |
+| `-P`, `--persist`                   | Perform multiple Queries on the same Session, requiring only one account login                                     |
+| `-T`, `--test`, `--dry-run`         | Perform a "dry run" of a Query, fetching metadata without downloading/modifying any music files                    |
+| `--update-config`                   | Updates the `config.json` file while keeping all current settings unchanged                                        |
+| `--update-archive`                  | Updates the global `.song_archive` file with full filepaths, keeping non-findable entries unchanged                |
+| `--debug`                           | Enable debug mode, printing extra information and creating a `config_DEBUG.json` file                              |
 
-| Command Line Config Flag            | Value                                                                                                          |
-|-------------------------------------|----------------------------------------------------------------------------------------------------------------|
-| `-c`, `--config-location`           | Specify a directory containing a Zotify `config.json` file (or a filepath to a `.json` file) to load settings  |
-| `-u`, `--username`                  | Account username                                                                                               |
-| `--token`                           | Authentication token                                                                                           |
+| Command Line Config Flag            | Value                                                                                                              |
+|-------------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| `-c`, `--config-location`           | Specify a directory containing a Zotify `config.json` file (or a filepath to a `.json` file) to load settings      |
+| `-u`, `--username`                  | Account username                                                                                                   |
+| `--token`                           | Authentication token                                                                                               |
 
-| Command Line Mode Flag (exclusive)  | Mode                                                                                                           |
-|-------------------------------------|----------------------------------------------------------------------------------------------------------------|
-| `-s`, `--search`                    | Search tracks/albums/artists/playlists based on passed argument (interactive)                                  |
-| `-p`, `--playlist`                  | Download playlist(s) created/saved by your account (interactive)                                               |
-| `-a`, `--artists`                   | Download all songs by followed artist(s) (interactive)                                                         |
-| `-m`, `--albums`                    | Download followed albums (interactive)                                                                         |
-| `-l`, `--liked`                     | Download all Liked Songs on your account                                                                       |
-| `-f`, `--file`                      | Download all tracks/albums/episodes/playlists URLs within the file passed as argument                          |
-| `-v`, `--verify-library`            | Check metadata for all tracks in ROOT_PATH or listed in SONG_ARCHIVE, updating the metadata if necessary       |
+| Command Line Mode Flag (exclusive)  | Mode                                                                                                               |
+|-------------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| `-s`, `--search`                    | Search tracks/albums/artists/playlists based on passed argument (interactive)                                      |
+| `-p`, `--playlist`                  | Download playlist(s) created/saved by your account (interactive)                                                   |
+| `-a`, `--artists`                   | Download all songs by followed artist(s) (interactive)                                                             |
+| `-m`, `--albums`                    | Download followed albums (interactive)                                                                             |
+| `-l`, `--liked`                     | Download all Liked Songs on your account                                                                           |
+| `-f`, `--file`                      | Download all tracks/albums/episodes/playlists URLs within the file passed as argument                              |
+| `-v`, `--verify-library`            | Update metadata for all Tracks in `ROOT_PATH` with an entry in the global `.song_archive` or directory `.song_ids` |
 
 <details><summary>
 
@@ -153,11 +153,12 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 
 | Archive Options              | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|
-| `SONG_ARCHIVE_LOCATION`      | `--song-archive-location`           | Directory for storing a global song_archive file         | See [Path Option Parser](#path-option-parser) |
-| `DISABLE_SONG_ARCHIVE`       | `--disable-song-archive`            | Disable global song_archive for `SKIP_PREVIOUSLY_DOWNLOADED` checks (NOT RECOMMENDED)   | False          |
-| `DISABLE_DIRECTORY_ARCHIVES` | `--disable-directory-archives`      | Disable local song_archive in download directories                                      | False          |
-| `SKIP_EXISTING`              | `-ie`, `--skip-existing`            | Skip songs already present in the expected output directory                             | True           |
-| `SKIP_PREVIOUSLY_DOWNLOADED` | `-ip`, `--skip-prev-downloaded`     | Use the global song_archive file to skip previously downloaded songs                    | False          |
+| `SONG_ARCHIVE_LOCATION`      | `--song-archive-location`           | Directory for storing a global .song_archive file        | See [Path Option Parser](#path-option-parser) |
+| `DISABLE_SONG_ARCHIVE`       | `--disable-song-archive`            | Disable global .song_archive for `SKIP_PREVIOUSLY_DOWNLOADED` checks (NOT RECOMMENDED)  | False          |
+| `DISABLE_DIRECTORY_ARCHIVES` | `--disable-directory-archives`      | Disable local .song_ids in download directories, use filenames to `SKIP_EXISTING`       | False          |
+| `SKIP_EXISTING`              | `-ie`, `--skip-existing`            | Use local .song_ids file to skip songs already present in the expected output directory | True           |
+| `SKIP_PREVIOUSLY_DOWNLOADED` | `-ip`, `--skip-prev-downloaded`     | Use the global .song_archive file to skip previously downloaded songs                   | False          |
+| `SKIP_BY_ISRC`               | `-ii`, `--skip-by-isrc`             | Use International Standard Recording Codes to identify and skip (potential) duplicates  | False          |
 
 | Playlist File Options        | Command Line Config Flag            | Description                                                                  | Default Value             |
 |------------------------------|-------------------------------------|------------------------------------------------------------------------------|---------------------------|

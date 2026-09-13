@@ -165,7 +165,11 @@ def fmt_duration(duration: float | int, unit_conv: tuple[int, int] = (60, 60), c
 
 
 def dt_to_str(dt: datetime) -> str:
-    return dt.strftime(r'%Y-%m-%d_%H:%M:%S')
+    return dt.strftime(r'%Y-%m-%d %H:%M:%S')
+
+
+def now() -> str:
+    return dt_to_str(datetime.now())
 
 
 def timestamp_utc(timestamp_ms: str | None) -> str | None:

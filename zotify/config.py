@@ -6,7 +6,6 @@ import requests
 from binascii import hexlify
 from base64 import b64encode, b64decode
 from contextlib import contextmanager
-from datetime import datetime
 from importlib.metadata import version
 from google.protobuf.json_format import MessageToDict, ParseDict
 from librespot import metadata
@@ -16,11 +15,11 @@ from librespot.core import Session, OAuth, MercuryRequests, ApiClient
 from librespot.proto.Authentication_pb2 import AuthenticationType
 from librespot.proto.Metadata_pb2 import AudioFile
 from pathlib import Path, PurePath
-from platform import system as platform_system
+from platform import system
 from time import sleep
 from typing import Any, Callable
 
-from zotify.utils import ensure_is_file, file_has_content, safe_typecast
+from zotify.utils import ensure_is_file, file_has_content, safe_typecast, now
 from zotify.termoutput import *
 
 Streamer = CdnManager.Streamer
@@ -82,6 +81,7 @@ CONFIG_VALUES = {
     SKIP_EXISTING:              { DEFAULT: 'True',                    TYPE: bool,   ARG: ('-ie', '--skip-existing'                    ,) },
     SKIP_PREVIOUSLY_DOWNLOADED: { DEFAULT: 'False',                   TYPE: bool,   ARG: ('-ip', '--skip-prev-downloaded', 
                                                                                                  '--skip-previously-downloaded'       ,) },
+    SKIP_BY_ISRC:               { DEFAULT: 'False',                   TYPE: bool,   ARG: ('-ii', '--skip-by-isrc'                     ,) },
     
     # Playlist File Options
     EXPORT_M3U8:                { DEFAULT: 'False',                   TYPE: bool,   ARG: ('-e, --export-m3u8'                         ,) },
@@ -176,7 +176,7 @@ class Config:
             LINUX_SYSTEM    : Path.home() / '.config/zotify',
             MACOS_SYSTEM    : Path.home() / 'Library/Application Support/Zotify'
         }
-        return system_paths.get(platform_system(), Path.cwd() / '.zotify')
+        return system_paths.get(system(), Path.cwd() / '.zotify')
     
     @classmethod
     def load(cls, args) -> None:
@@ -444,6 +444,10 @@ class Config:
     @classmethod
     def get_skip_previously_downloaded(cls) -> bool:
         return cls.get(SKIP_PREVIOUSLY_DOWNLOADED)
+    
+    @classmethod
+    def get_skip_by_isrc(cls) -> bool:
+        return cls.get(SKIP_BY_ISRC)
     
     @classmethod
     def get_update_archive(cls) -> bool:
@@ -856,7 +860,7 @@ class Zotify:
     def start_stats(cls) -> None:
         if cls.TOTAL_API_CALLS:
             Printer.debug(f"Total API Calls: {cls.TOTAL_API_CALLS}")
-        cls.DATETIME_LAUNCH = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        cls.DATETIME_LAUNCH = now().replace(":", "-").replace(" ", "_")
         cls.TOTAL_API_CALLS = 0
     
     @classmethod

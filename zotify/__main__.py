@@ -53,7 +53,7 @@ def main():
     parser.add_argument('--update-archive',
                         action='store_true',
                         dest='update_archive',
-                        help='Updates the `.song_archive` file entries with full paths while keeping non-findable entries unchanged')
+                        help='Updates the global `.song_archive` file with full filepaths, keeping non-findable entries unchanged')
     parser.add_argument('--debug',
                         action='store_true',
                         dest='debug',
@@ -109,7 +109,7 @@ def main():
     group.add_argument('-v', '--verify-library',
                        action='store_true',
                        dest='verify_library',
-                       help='Check metadata for all tracks in ROOT_PATH or listed in SONG_ARCHIVE, updating the metadata if necessary. This will not download any new tracks, but may take a very, very long time.')
+                       help='Update metadata for all Tracks in `ROOT_PATH` with an entry in the global `.song_archive` or directory `.song_ids`, no tracks will be downloaded.')
     modes = group._group_actions.copy()
     
     for arg in DEPRECIATED_ARGS: 
