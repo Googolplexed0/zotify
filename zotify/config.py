@@ -846,6 +846,7 @@ class Zotify:
     # STATIC AFTER BOOT
     CONFIG                  : Config                    = Config
     SESSION                 : Session                   = None
+    SESSION_CREDENTIALS     : dict                      = None
     LOGGER                  : logging.Logger            = None
     DOWNLOAD_QUALITY        : FormatOnlyAudioQuality    = None
     DOWNLOAD_BITRATE        : str                       = None
@@ -901,6 +902,7 @@ class Zotify:
                                                       'NO SESSION CREATED, EXITING PROGRAM')
             cls.end()
             sys.exit(1) # TODO implement full exit code scheme
+        cls.SESSION_CREDENTIALS = cls.SESSION.credentials()
         
         prem, quality, bitrate = cls.parse_dl_quality(cls.CONFIG.get_download_qual_pref())
         cls.DOWNLOAD_QUALITY = quality
@@ -1114,12 +1116,14 @@ class Zotify:
     @classmethod
     def renew_session(cls) -> None:
         old_session = cls.SESSION
-        credentials = old_session.credentials()
+        credentials = cls.SESSION_CREDENTIALS or old_session.credentials()
         builder = Session.Builder()
         builder.conf.store_credentials = False
         encoded = b64encode(json.dumps(credentials, ensure_ascii=True).encode("ascii"))
         new_session = builder.stored(encoded).create()
+        new_credentials = new_session.credentials()
         cls.SESSION = new_session
+        cls.SESSION_CREDENTIALS = new_credentials
         LoginHandler.SESSION = new_session
         cls.FORCE_STREAM_API_CALLS = False
         try:
@@ -1129,7 +1133,7 @@ class Zotify:
 
     @classmethod
     def retry_after_session_loss(cls, content, use_qual_pref: bool,
-                                 recover_session: bool, error: OSError) -> Streamer | None:
+                                 recover_session: bool, error: Exception) -> Streamer | None:
         if not recover_session:
             raise RuntimeError("Spotify session is still disconnected after reconnection") from error
         Printer.hashtaged(PrintChannel.WARNING, 'SPOTIFY SESSION DISCONNECTED - RECONNECTING')
@@ -1173,7 +1177,9 @@ class Zotify:
             return cls.get_content_stream(content, use_qual_pref=False, recover_session=recover_session)
         except RuntimeError as e:
             error_arg = e.args[0]
-            if isinstance(error_arg, str) and 'Failed fetching audio key!' in error_arg:
+            if isinstance(error_arg, str) and error_arg in {"Session is closed!", "Session isn't authenticated!"}:
+                return cls.retry_after_session_loss(content, use_qual_pref, recover_session, e)
+            elif isinstance(error_arg, str) and 'Failed fetching audio key!' in error_arg:
                 gid, fileid = error_arg.split('! ')[1].split(', ')
                 Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +
                                                   'MAY BE CAUSED BY RATE LIMITS - CONSIDER INCREASING `BULK_WAIT_TIME`\n' +
