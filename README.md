@@ -191,10 +191,12 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 
 | ZMD Options                  | Command Line Config Flag            | Description                                                                     | Default Value          |
 |------------------------------|-------------------------------------|---------------------------------------------------------------------------------|------------------------|
-| `IMPORT_ZMD`                 | `--zmd-import`                      | Whether to import ZMD files, using previously cached metadata                   | False                  |
-| `IMPORT_ZMD_LOCATION`        | `--zmd-import-location`             | Source for ZMD, either an individual .zmd file (default) or a directory         | `""`                   |
-| `EXPORT_ZMD`                 | `--zmd-export`                      | Whether to export ZMD files, caching metadata                                   | False                  |
-| `EXPORT_ZMD_LOCATION`        | `--zmd-export-location`             | Destination for ZMD, updating an individual .zmd file (default) or a directory  | `""`                   |
+| `IMPORT_ZMD`                 | `--import-zmd`                      | Whether to import ZMD files, using previously cached metadata                   | False                  |
+| `IMPORT_ZMD_LOCATION`        | `--import-zmd-location`             | Source for ZMD, either an individual .zmd file or a directory                   | `./.zmd`               |
+| `EXPORT_ZMD`                 | `--export-zmd`                      | Whether to export ZMD files, caching metadata                                   | False                  |
+| `EXPORT_ZMD_LOCATION`        | `--export-zmd-location`             | Destination for ZMD, an individual .zmd file or a directory                     | `./.zmd`               |
+
+Export ZMD on the first run, then import it on later runs to reuse playlist and track metadata. Imported playlists reflect their contents when exported; omit `--import-zmd True` to fetch an updated playlist.
 
 | API Options                  | Command Line Config Flag            | Description                                                                   | Default Value            |
 |------------------------------|-------------------------------------|-------------------------------------------------------------------------------|--------------------------|
