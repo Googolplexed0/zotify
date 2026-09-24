@@ -3,6 +3,7 @@ import logging
 import re
 import sys
 import requests
+from errno import EBADF, ECONNRESET, ENOTCONN, EPIPE, ETIMEDOUT
 from binascii import hexlify
 from base64 import b64encode, b64decode
 from contextlib import contextmanager
@@ -1111,7 +1112,37 @@ class Zotify:
         return items
     
     @classmethod
-    def get_content_stream(cls, content, use_qual_pref: bool = True) -> Streamer | None:
+    def renew_session(cls) -> None:
+        old_session = cls.SESSION
+        credentials = old_session.credentials()
+        builder = Session.Builder()
+        builder.conf.store_credentials = False
+        encoded = b64encode(json.dumps(credentials, ensure_ascii=True).encode("ascii"))
+        new_session = builder.stored(encoded).create()
+        cls.SESSION = new_session
+        LoginHandler.SESSION = new_session
+        cls.FORCE_STREAM_API_CALLS = False
+        try:
+            old_session.close()
+        except Exception:
+            pass  # The old socket may already be closed.
+
+    @classmethod
+    def retry_after_session_loss(cls, content, use_qual_pref: bool,
+                                 recover_session: bool, error: OSError) -> Streamer | None:
+        if not recover_session:
+            raise RuntimeError("Spotify session is still disconnected after reconnection") from error
+        Printer.hashtaged(PrintChannel.WARNING, 'SPOTIFY SESSION DISCONNECTED - RECONNECTING')
+        sleep(cls.CONFIG.get_retry_delay())
+        try:
+            cls.renew_session()
+        except Exception as reconnect_error:
+            raise RuntimeError("Could not restore Spotify session; rerun Zotify to resume") from reconnect_error
+        return cls.get_content_stream(content, use_qual_pref=use_qual_pref, recover_session=False)
+
+    @classmethod
+    def get_content_stream(cls, content, use_qual_pref: bool = True,
+                           recover_session: bool = True) -> Streamer | None:
         content_id = cls.to_libre_content(content.__class__, content.id)
         if not content_id: return
         qual = cls.DOWNLOAD_QUALITY if use_qual_pref else cls.parse_dl_quality()[1]
@@ -1139,7 +1170,7 @@ class Zotify:
             preference = cls.DOWNLOAD_QUALITY.preferred.name
             Printer.hashtaged(PrintChannel.WARNING, 'FAILED TO FETCH AUDIO FILE\n' +
                                                    f'PREFERED AUDIO QUALITY {preference} NOT AVAILABLE - FALLING BACK TO AUTO')
-            return cls.get_content_stream(content, use_qual_pref=False)
+            return cls.get_content_stream(content, use_qual_pref=False, recover_session=recover_session)
         except RuntimeError as e:
             error_arg = e.args[0]
             if isinstance(error_arg, str) and 'Failed fetching audio key!' in error_arg:
@@ -1154,15 +1185,19 @@ class Zotify:
                 Printer.logger("\n".join(e.args), PrintChannel.ERROR)
             else: raise
         except ConnectionError as e:
+            if isinstance(e, OSError) and e.errno in {EBADF, ECONNRESET, ENOTCONN, EPIPE, ETIMEDOUT}:
+                return cls.retry_after_session_loss(content, use_qual_pref, recover_session, e)
             if "Status code " not in e.args[0]: raise
             status_code = e.args[0].split("Status code ")[1]
             Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO FILE\n' +
                                                  f'CONNECTION ERROR WHEN FETCHING CONTENT STREAM - STATUS CODE {status_code}')
             Printer.logger("\n".join(e.args), PrintChannel.ERROR)
         except Exception as e:
+            if isinstance(e, OSError) and e.errno in {EBADF, ECONNRESET, ENOTCONN, EPIPE, ETIMEDOUT}:
+                return cls.retry_after_session_loss(content, use_qual_pref, recover_session, e)
             if risky_method:
                 cls.FORCE_STREAM_API_CALLS = True
-                return cls.get_content_stream(content, use_qual_pref=use_qual_pref)
+                return cls.get_content_stream(content, use_qual_pref=use_qual_pref, recover_session=recover_session)
             Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO STREAM\n' +
                                                   'AN UNEXPECTED ERROR OCCURED - CHECK LOGS FOR DETAILS')
             Printer.traceback(e)
