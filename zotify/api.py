@@ -674,8 +674,8 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         if self._ext == "mp3" and not Zotify.CONFIG.get_disc_track_totals() and self.disc_number and self.track_number:
             # music_tag python library writes DISCNUMBER and TRACKNUMBER as X/Y instead of X for mp3
             # this method bypasses all internal formatting, probably not resilient against arbitrary inputs
-            tags._write_tag_raw("mp3", "TPOS", str(self.disc_number))
-            tags._write_tag_raw("mp3", "TRCK", str(self.track_number))
+            tags._write_tag_raw("mp3", "TPOS", str(self.disc_number), False)
+            tags._write_tag_raw("mp3", "TRCK", str(self.track_number), False)
     
     def download(self, parent_stack: ParentStack) -> None:
         if not Zotify.CONFIG.get_optimized_dl():
