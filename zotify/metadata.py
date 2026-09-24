@@ -354,7 +354,12 @@ class MetadataIO:
                     obj._main_items[:] = v
                 else:
                     setattr(obj, k, v)
-            obj._hasMetadata = obj.full_metadata()
+            if isinstance(obj, Playlist) and (obj.length is None or len(obj._main_items) < obj.length):
+                # A partial playlist must be fetched again rather than silently omitting tracks.
+                obj._main_items.clear()
+                obj._hasMetadata = False
+            else:
+                obj._hasMetadata = obj.full_metadata()
         cls.PARSING = None
     
     @classmethod
