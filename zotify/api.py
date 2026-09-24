@@ -1219,14 +1219,20 @@ class Query(Container):
         from zotify.metadata import MetadataIO
         MetadataIO.from_zmd()
         
-        def skip_fetch(uri: str) -> bool:
-            zmd_cont: Content | None = self.get_if_exists(uri)
-            return zmd_cont and zmd_cont._hasMetadata
-        
-        self.prefetched_map = [{i: self.get_if_exists(uri) for i, uri in enumerate(uris) if skip_fetch(uri)}
-                              for uris in self.parsed_request]
-        self.parsed_request = [[uri for uri in uris if uri not in prefet.values()]
-                              for uris, prefet in zip(self.parsed_request, self.prefetched_map)]
+        self.prefetched_map = []
+        uncached_uris = []
+        for uris in self.parsed_request:
+            prefetched = {}
+            remaining = []
+            for i, uri in enumerate(uris):
+                content: Content | None = self.get_if_exists(uri)
+                if content is not None and content._hasMetadata:
+                    prefetched[i] = content
+                else:
+                    remaining.append(uri)
+            self.prefetched_map.append(prefetched)
+            uncached_uris.append(remaining)
+        self.parsed_request = uncached_uris
     
     def fetch_query_metadata(self) -> list[list[dict]]:
         item_resps_by_type: list[list[dict]] = []

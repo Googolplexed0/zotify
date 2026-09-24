@@ -349,7 +349,11 @@ class MetadataIO:
             if obj_link not in dests: continue
             obj = dests[obj_link]
             for k, v in cls._reref(md, dests).items():
-                setattr(obj, k, v)
+                current = getattr(obj, k, None)
+                if isinstance(obj, Container) and current is obj._main_items and isinstance(v, list):
+                    obj._main_items[:] = v
+                else:
+                    setattr(obj, k, v)
             obj._hasMetadata = obj.full_metadata()
         cls.PARSING = None
     
