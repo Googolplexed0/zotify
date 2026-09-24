@@ -308,12 +308,15 @@ class MetadataIO:
         
         derefed = {}
         for k, v in obj.items():
-            if k[0] == "_" or k in cls.SKIP_ATTRS or not v:         continue
-            elif k == ID and v == obj.get(URI, "").split(":")[-1]:  continue
-            elif k in cls.SET_ATTRS:                                derefed[k] = [cls._deref(n) for n in v]
-            elif isinstance(v, bytes):                              derefed[k] = cls.BYTES_HEADER + b64encode(v).decode('ascii')
-            elif isinstance(v, (Content, list, dict)):              derefed[k] = cls._deref(v)
-            else:                                                   derefed[k] = v
+            if not v: continue
+            if isinstance(k, str):
+                if k.startswith("_") or k in cls.SKIP_ATTRS: continue
+                if k == ID and v == obj.get(URI, "").split(":")[-1]: continue
+            key = cls._to_link(k) if isinstance(k, Content) else str(k)
+            if k in cls.SET_ATTRS:                                  derefed[key] = [cls._deref(n) for n in v]
+            elif isinstance(v, bytes):                              derefed[key] = cls.BYTES_HEADER + b64encode(v).decode('ascii')
+            elif isinstance(v, (Content, list, dict)):              derefed[key] = cls._deref(v)
+            else:                                                   derefed[key] = v
         return derefed
     
     @classmethod
@@ -326,9 +329,10 @@ class MetadataIO:
         
         rerefed = {}
         for k, v in obj.items():
-            if k in cls.SET_ATTRS:                  rerefed[k] = set(cls._reref(v, dests))
-            if isinstance(v, (str, list, dict)):    rerefed[k] = cls._reref(v, dests)
-            else:                                   rerefed[k] = v
+            key = dests.get(k, k)
+            if k in cls.SET_ATTRS:                  rerefed[key] = set(cls._reref(v, dests))
+            elif isinstance(v, (str, list, dict)):  rerefed[key] = cls._reref(v, dests)
+            else:                                   rerefed[key] = v
         return rerefed
     
     @classmethod
