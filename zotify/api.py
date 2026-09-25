@@ -136,6 +136,8 @@ class Content(HierarchicalNode):
                 album = album.copy()
                 album[ALBUM_TYPE] = str.lower(album.pop(TYPE, None) or "album")
                 resp[ALBUM] = album
+        elif cls is Artist and GENRES not in resp and GENRE in resp:
+            resp[GENRES] = resp.pop(GENRE)
         elif cls is Album and resp.get(TYPE):
             resp[ALBUM_TYPE] = str.lower(resp.pop(TYPE))
         elif cls is Playlist and resp.get(ATTRIBUTES):
