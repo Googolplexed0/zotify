@@ -845,6 +845,7 @@ class Zotify:
     # STATIC AFTER BOOT
     CONFIG                  : Config                    = Config
     SESSION                 : Session                   = None
+    SESSION_CREDENTIALS     : dict                      = None
     LOGGER                  : logging.Logger            = None
     DOWNLOAD_QUALITY        : FormatOnlyAudioQuality    = None
     DOWNLOAD_BITRATE        : str                       = None
@@ -900,6 +901,7 @@ class Zotify:
                                                       'NO SESSION CREATED, EXITING PROGRAM')
             cls.end()
             sys.exit(1) # TODO implement full exit code scheme
+        cls.SESSION_CREDENTIALS = cls.SESSION.credentials()
         
         prem, quality, bitrate = cls.parse_dl_quality(cls.CONFIG.get_download_qual_pref())
         cls.DOWNLOAD_QUALITY = quality
@@ -1166,6 +1168,24 @@ class Zotify:
             Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO STREAM\n' +
                                                   'AN UNEXPECTED ERROR OCCURED - CHECK LOGS FOR DETAILS')
             Printer.traceback(e)
+
+    @classmethod
+    def renew_session(cls) -> None:
+        """Create a fresh librespot session from the last valid credentials."""
+        old_session = cls.SESSION
+        credentials = cls.SESSION_CREDENTIALS or old_session.credentials()
+        builder = Session.Builder()
+        builder.conf.store_credentials = False
+        encoded = b64encode(json.dumps(credentials, ensure_ascii=True).encode("ascii"))
+        new_session = builder.stored(encoded).create()
+        cls.SESSION_CREDENTIALS = new_session.credentials()
+        cls.SESSION = new_session
+        LoginHandler.SESSION = new_session
+        cls.FORCE_STREAM_API_CALLS = False
+        try:
+            old_session.close()
+        except Exception:
+            pass  # The old transport may already be closed.
         return None
     
     @classmethod

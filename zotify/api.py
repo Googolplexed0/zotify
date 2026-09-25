@@ -433,10 +433,10 @@ class DLContent(Content):
                                                          f'({attempt + 1}/{Zotify.CONFIG.get_retry_attempts()})\n'
                                                          f'{self.clsn.upper()}_ID: {self.id}\nERROR: {e}')
                 try:
-                    reconnect = getattr(Zotify.SESSION, "reconnect", None)
-                    if reconnect: reconnect()
+                    Zotify.renew_session()
                 except Exception as reconnect_error:
                     Printer.logger(f'SESSION RECONNECT FAILED: {reconnect_error}', PrintChannel.ERROR)
+                    raise RuntimeError("Could not restore Spotify session; stopping this query") from reconnect_error
                 sleep(Zotify.CONFIG.get_retry_delay(attempt))
     
     @staticmethod
