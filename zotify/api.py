@@ -1243,7 +1243,7 @@ class Query(Container):
     def conditional_metadata(self):
         alltracks = {t for t in self.ALL_NODES if isinstance(t, Track) and not t.is_local}
         
-        artists: set[Artist] = set().union(*(set(track.artists) for track in alltracks if track.artists))
+        artists: set[Artist] = {artist for track in alltracks for artist in (track.artists or []) if artist is not None}
         artist_uris: dict[str, Artist] = {a.uri: a for a in artists if not a.is_local and not a._hasMetadata
                                           and not "".join(a.name.lower().split()) == "variousartists"}
         if Zotify.CONFIG.get_save_genres() and artist_uris:
@@ -1252,9 +1252,8 @@ class Query(Container):
                 artist.parse_metadata(None, artist_resp)
                 artist._needs_expansion = False
             for track in alltracks:
-                genres: list[str] = [*set().union(*[set(artist.genres) for artist in track.artists if track.artists and artist.genres])]
-                genres.sort()
-                track.genres = genres
+                track.genres = sorted({genre for artist in (track.artists or []) if artist and artist.genres
+                                       for genre in artist.genres})
         
         albums = {track.album for track in alltracks if track.album and not track.album.is_local}
         album_uris: dict[str, Album] = {a.uri: a for a in albums if not a._hasMetadata}
