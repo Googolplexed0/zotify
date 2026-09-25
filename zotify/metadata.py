@@ -443,7 +443,7 @@ class Tagger:
             }
         return reliable_tags, optional_tags, custom_tags
     
-    def _write_tag_raw(self, norm_key, key, md_val, appendable):
+    def _write_tag_raw(self, norm_key, key, md_val, appendable: bool = False):
         self.file_tags.set_raw(norm_key, key, md_val, appendable)
         self.file_tags.save()
     
@@ -632,7 +632,7 @@ class SongArchive:
     
     def _get_all_of_type(self, archive_key: str) -> list[str]:
         archive_key_index = list(self.ARCHIVE_FORMAT.keys()).index(archive_key)
-        return [e.strip().split('\t')[archive_key_index] if e.count("\t") >= archive_key_index else ""
+        return [e.strip().split('\t')[archive_key_index] if e.strip().count("\t") >= archive_key_index else ""
                 for e in self._read_entry_strs()]
     def ids(self)           -> list[str]: return self._get_all_of_type(self.ITEM_ID)
     def isrcs(self)         -> list[str]: return self._get_all_of_type(self.ISRC_CODE)
@@ -644,10 +644,11 @@ class SongArchive:
     
     def obj_in_archive(self, obj: DLContent) -> PurePath | None:
         index = None
-        if obj.id in self.ids():
-            index = self.ids().index(obj.id);       log_str = f"ID: {obj.id}"
-        elif Zotify.CONFIG.get_skip_by_isrc() and isinstance(obj, Track) and obj.isrc and obj.isrc in self.isrcs():
-            index = self.isrcs().index(obj.isrc);   log_str = f"ISRC: {obj.isrc}"
+        for i, id in enumerate(self.ids()):
+            if obj.id == id:            index = i;  log_str = f"ID: {obj.id}"
+        if not index and Zotify.CONFIG.get_skip_by_isrc() and isinstance(obj, Track) and obj.isrc:
+            for i, isrc in enumerate(self.isrcs()):
+                if obj.isrc == isrc:    index = i;  log_str = f"ISRC: {obj.isrc}"
         if index is None: return None
         Printer.logger(f'Found {obj.clsn} {log_str} in archive ("{self.path}") at line {index}')
         return self.paths()[index]

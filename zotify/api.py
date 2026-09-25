@@ -1252,9 +1252,9 @@ class Query(Container):
                 artist.parse_metadata(None, artist_resp)
                 artist._needs_expansion = False
             for track in alltracks:
-                genres: list[str] = [*set().union(*[set(artist.genres) for artist in track.artists if track.artists and artist.genres])]
-                genres.sort()
-                track.genres = genres
+                if not track.artists: continue
+                genres: set[str] = set().union(*(set(artist.genres) for artist in track.artists if artist.genres))
+                track.genres = sorted(genres)
         
         albums = {track.album for track in alltracks if track.album and not track.album.is_local}
         album_uris: dict[str, Album] = {a.uri: a for a in albums if not a._hasMetadata}
@@ -1326,7 +1326,6 @@ class Query(Container):
                 if not nonskipped: continue
                 downloadables.add(nonskipped.pop()) # prioritize parent album entry if present
                 dlc._clone_to.update(nonskipped)
-            
             downloadables = edge_zip(sorted(downloadables, key=lambda c: getattr(c[-1], DURATION_MS, 0)))
             if Zotify.CONFIG.get_download_parent_album():
                 downloadables = sorted(downloadables, key=lambda c: getattr(getattr(c, ALBUM, Album("")), URI))
