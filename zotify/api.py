@@ -134,7 +134,7 @@ class Content(HierarchicalNode):
             if cls is Track and resp.get(DURATION):
                 resp[DURATION_MS] = resp.pop(DURATION)
                 if resp[ALBUM]:
-                    resp[ALBUM][ALBUM_TYPE] = str.lower(resp[ALBUM].pop(TYPE, "album"))
+                    resp[ALBUM][ALBUM_TYPE] = str.lower(resp[ALBUM].pop(TYPE, ALBUM))
             elif cls is Album and resp.get(TYPE):
                 resp[ALBUM_TYPE] = str.lower(resp.pop(TYPE))
             elif cls is Playlist and resp.get(ATTRIBUTES):
