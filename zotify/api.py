@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from zotify.config import Zotify, Streamer
 from zotify.utils import *
+from zotify.stream_utils import expected_stream_size
 
 
 class DynamicClassNameAttrs(type):
@@ -394,14 +395,15 @@ class DLContent(Content):
     
     def fetch_stream_content(self, stream: Streamer, temppath: PurePath, parent_stack: ParentStack) -> str:
         disable = Zotify.CONFIG.get_standard_interface() or not Zotify.CONFIG.get_show_download_pbar()
-        pbar = Printer.pbar(desc=str(self), total=stream.size, unit='B', unit_scale=True,
+        expected_size = expected_stream_size(stream)
+        pbar = Printer.pbar(desc=str(self), total=expected_size, unit='B', unit_scale=True,
                             unit_divisor=1024, disable=disable, pbar_stack=parent_stack.PBARS)
         Path(temppath.parent).mkdir(parents=True, exist_ok=True)
         try:
             with open(temppath, 'wb') as file:
                 no_responses = 0
                 time_start = time()
-                t_per_byte = (self.duration_ms / 1000. / stream.size * Zotify.CONFIG.get_dl_rate_limter()) if self.duration_ms else 0
+                t_per_byte = (self.duration_ms / 1000. / expected_size * Zotify.CONFIG.get_dl_rate_limter()) if self.duration_ms and expected_size else 0
                 while no_responses < 5:
                     bytes_r = file.write(stream.stream().read(Zotify.CONFIG.get_chunk_size()))
                     if bytes_r:
@@ -411,8 +413,8 @@ class DLContent(Content):
                         no_responses += 1
                         sleep(0.05)
             received = Path(temppath).stat().st_size
-            if stream.size and received != stream.size:
-                raise IOError(f"Incomplete audio stream: received {received} of {stream.size} bytes")
+            if expected_size and received != expected_size:
+                raise IOError(f"Incomplete audio stream: received {received} of {expected_size} bytes")
         except Exception:
             Path(temppath).unlink(missing_ok=True)
             raise
