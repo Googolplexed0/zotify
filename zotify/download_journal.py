@@ -9,6 +9,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+from threading import RLock
 from time import time
 from typing import Iterator
 
@@ -16,23 +17,46 @@ from typing import Iterator
 class DownloadJournal:
     """Persist the last download lifecycle state for each Spotify URI."""
 
+    _instances: dict[str, DownloadJournal] = {}
+    _instance_lock = RLock()
+
+    def __new__(cls, root: str | Path):
+        root_path = Path(root).expanduser().resolve()
+        key = str(root_path)
+        with cls._instance_lock:
+            instance = cls._instances.get(key)
+            if instance is None:
+                instance = super().__new__(cls)
+                instance._root_path = root_path
+                cls._instances[key] = instance
+            return instance
+
     def __init__(self, root: str | Path):
-        self.path = Path(root) / ".zotify-downloads.sqlite3"
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connection() as db:
-            db.execute("""CREATE TABLE IF NOT EXISTS downloads (
-                uri TEXT PRIMARY KEY,
-                state TEXT NOT NULL,
-                stage_path TEXT,
-                final_path TEXT,
-                error TEXT,
-                updated_at REAL NOT NULL
-            )""")
+        with self._instance_lock:
+            if getattr(self, "_initialized", False):
+                return
+            self.path = self._root_path / ".zotify-downloads.sqlite3"
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            db = sqlite3.connect(self.path, timeout=30)
+            try:
+                db.execute("PRAGMA journal_mode=WAL")
+                db.execute("PRAGMA synchronous=FULL")
+                db.execute("""CREATE TABLE IF NOT EXISTS downloads (
+                    uri TEXT PRIMARY KEY,
+                    state TEXT NOT NULL,
+                    stage_path TEXT,
+                    final_path TEXT,
+                    error TEXT,
+                    updated_at REAL NOT NULL
+                )""")
+                db.commit()
+            finally:
+                db.close()
+            self._initialized = True
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
         db = sqlite3.connect(self.path, timeout=30)
-        db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA synchronous=FULL")
         try:
             yield db
