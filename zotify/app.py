@@ -175,7 +175,7 @@ def perform_query(args: Namespace) -> None:
             PrintChannel.MANDATORY,
         )
         Zotify.end()
-        raise SystemExit(1) from None
+        raise SystemExit(2) from None
 
 
 def client(args: Namespace, modes: list[Action]) -> None:
