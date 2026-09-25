@@ -20,7 +20,7 @@ def expected_stream_size(stream) -> int:
     """
     try:
         available = stream.stream().available()
-    except Exception:
+    except (AttributeError, TypeError):
         available = None
     if isinstance(available, int) and available >= 0:
         return available
