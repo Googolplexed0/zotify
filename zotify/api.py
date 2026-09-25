@@ -305,7 +305,7 @@ class DLContent(Content):
             pass
         elif skip_wait:
             sleep(min(0.5, waittime))
-        elif waittime > 5:
+        else:
             Printer.hashtaged(PrintChannel.DOWNLOADS, f'PAUSED: WAITING FOR {waittime} SECONDS BETWEEN DOWNLOADS')
             sleep(waittime)
     
@@ -410,6 +410,34 @@ class DLContent(Content):
             pbar.close(); pbar.clear()
         
         return fmt_duration(time() - time_start)
+
+    def fetch_stream_with_recovery(self, temppath: PurePath, parent_stack: ParentStack) -> str | None:
+        """Retry a failed transfer from byte zero using a fresh stream and session."""
+        for attempt in range(Zotify.CONFIG.get_retry_attempts() + 1):
+            stream = self.fetch_stream()
+            if stream is None:
+                self.wait_between_downloads()
+                return None
+            self.set_dl_status("Downloading Stream")
+            try:
+                return self.fetch_stream_content(stream, temppath, parent_stack)
+            except (ConnectionError, OSError, TimeoutError, requests.RequestException) as e:
+                if attempt >= Zotify.CONFIG.get_retry_attempts():
+                    Printer.hashtaged(PrintChannel.ERROR, f'FAILED TO READ STREAM AFTER {attempt + 1} ATTEMPTS\n'
+                                                          f'{self.clsn.upper()}_ID: {self.id}\nERROR: {e}')
+                    try: Path(temppath).unlink(missing_ok=True)
+                    except OSError: pass
+                    self.wait_between_downloads()
+                    return None
+                Printer.hashtaged(PrintChannel.WARNING, f'STREAM CONNECTION FAILED; RECONNECTING AND RETRYING '
+                                                         f'({attempt + 1}/{Zotify.CONFIG.get_retry_attempts()})\n'
+                                                         f'{self.clsn.upper()}_ID: {self.id}\nERROR: {e}')
+                try:
+                    Zotify.renew_session()
+                except Exception as reconnect_error:
+                    Printer.logger(f'SESSION RECONNECT FAILED: {reconnect_error}', PrintChannel.ERROR)
+                    raise RuntimeError("Could not restore Spotify session; stopping this query") from reconnect_error
+                sleep(Zotify.CONFIG.get_retry_delay(attempt))
     
     @staticmethod
     def run_ffm(in_path: PurePath, in_cmd: list[str] | None, out_path: PurePath | None = None, out_cmd: list[str] | None = None) -> str:
@@ -709,9 +737,8 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
             if Zotify.CONFIG.get_temp_download_dir():
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
         
-        if (stream := self.fetch_stream()) is None: return
-        self.set_dl_status("Downloading Stream")
-        time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
+        time_elapsed_dl = self.fetch_stream_with_recovery(temppath, parent_stack)
+        if time_elapsed_dl is None: return
         
         if not Zotify.CONFIG.get_always_check_lyrics():
             self.fetch_lyrics(parent_stack)
@@ -819,9 +846,8 @@ class Episode(DLContent, IsAddable):
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
         
         if not self.fetch_partner_url():
-            if (stream := self.fetch_stream()) is None: return
-            self.set_dl_status("Downloading Stream")
-            time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
+            time_elapsed_dl = self.fetch_stream_with_recovery(temppath, parent_stack)
+            if time_elapsed_dl is None: return
         else:
             try:
                 time_elapsed_dl = self.download_directly(temppath)
@@ -1175,7 +1201,15 @@ class ParentStack(list):
         if self[-1] is None: 
             Printer.hashtaged(PrintChannel.WARNING, f'ATTEMPTING TO DOWNLOAD A STACK THAT FAILED TO FETCH METADATA')
             return
-        self[-1].download(self)
+        try:
+            self[-1].download(self)
+        except Exception as e:
+            if not isinstance(self[-1], DLContent):
+                raise
+            Printer.hashtaged(PrintChannel.ERROR, f'FAILED ITEM; CONTINUING WITH THE REST OF THE RUN\n'
+                                                  f'{self[-1].clsn.upper()}_ID: {self[-1].id}\nERROR: {e}')
+            Printer.traceback(e)
+            self[-1].wait_between_downloads()
 
 
 class Query(Container):
