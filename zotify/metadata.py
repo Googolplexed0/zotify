@@ -559,6 +559,9 @@ class SongArchive:
         self.path = Zotify.CONFIG.get_song_archive_location() if dir_path is None else dir_path / '.song_ids'
         self.mode = 'a' if file_has_content(self.path) else 'w' # should always exist from Content.create_download_directory()
         self.disabled = Zotify.CONFIG.get_no_song_archive() if self._global else Zotify.CONFIG.get_no_dir_archives()
+        self._entries: list[dict[str, str | PurePath]] | None = None
+        self._lookup_index: tuple[dict[str, list[tuple[int, dict[str, str | PurePath]]]],
+                                  dict[str, list[tuple[int, dict[str, str | PurePath]]]]] | None = None
     
     def _obj_to_entry(self, obj: DLContent, item_path: PurePath, timestamp: str = None) -> dict[str, str | PurePath]:
         entry = self.ARCHIVE_FORMAT.copy()
@@ -581,6 +584,9 @@ class SongArchive:
     def add_obj(self, obj: DLContent, item_path: PurePath) -> None:
         if self.disabled: return
         self._add_entries(self.mode, [self._obj_to_entry(obj, item_path)])
+        self.mode = 'a'
+        self._entries = None
+        self._lookup_index = None
     
     def update(self, query: Query, item_prefix: str) -> None:
         entries = [self._parse_entry_str(entry_str) for entry_str in self._read_entry_strs()]
@@ -589,6 +595,8 @@ class SongArchive:
             if not obj: continue
             entry.update(self._obj_to_entry(obj, entry[self.ITEM_PATH], entry[self.DL_TIMESTAMP]))
         self._add_entries('w', entries)
+        self._entries = None
+        self._lookup_index = None
     
     def _parse_entry_str(self, entry_str: str) -> dict[str, str | PurePath]:
         entry = self.ARCHIVE_FORMAT.copy()
@@ -629,6 +637,37 @@ class SongArchive:
             self._upgrade_legacy_archive([self._parse_entry_str(entry_str) for entry_str in entries])
             entries = self._read_entry_strs()
         return entries
+
+    def _get_entries(self) -> list[dict[str, str | PurePath]]:
+        """Read and parse this archive once for repeated lookups."""
+        if self._entries is None:
+            self._entries = [self._parse_entry_str(entry_str) for entry_str in self._read_entry_strs()]
+        return self._entries
+
+    def _get_lookup_index(self):
+        if self._lookup_index is None:
+            ids: dict[str, list[tuple[int, dict[str, str | PurePath]]]] = {}
+            isrcs: dict[str, list[tuple[int, dict[str, str | PurePath]]]] = {}
+            for index, entry in enumerate(self._get_entries()):
+                ids.setdefault(str(entry[self.ITEM_ID]), []).append((index, entry))
+                if entry[self.ISRC_CODE]:
+                    isrcs.setdefault(str(entry[self.ISRC_CODE]), []).append((index, entry))
+            self._lookup_index = ids, isrcs
+        return self._lookup_index
+
+    def _entry_path(self, entry: dict[str, str | PurePath]) -> PurePath | None:
+        path = entry[self.ITEM_PATH]
+        if not path:
+            return None
+        path = PurePath(path)
+        if not path.is_absolute():
+            base = self.path.parent if not self._global else PurePath(Zotify.CONFIG.get_root_path())
+            path = base / path
+        # An archive record alone does not prove that a download completed.
+        try:
+            return path if Path(path).is_file() and Path(path).stat().st_size > 0 else None
+        except OSError:
+            return None
     
     def _get_all_of_type(self, archive_key: str) -> list[str]:
         archive_key_index = list(self.ARCHIVE_FORMAT.keys()).index(archive_key)
@@ -643,14 +682,17 @@ class SongArchive:
         return [PurePath(p) if p else None for p in path_strs]
     
     def obj_in_archive(self, obj: DLContent) -> PurePath | None:
-        index = None
-        if obj.id in self.ids():
-            index = self.ids().index(obj.id);       log_str = f"ID: {obj.id}"
-        elif Zotify.CONFIG.get_skip_by_isrc() and isinstance(obj, Track) and obj.isrc and obj.isrc in self.isrcs():
-            index = self.isrcs().index(obj.isrc);   log_str = f"ISRC: {obj.isrc}"
-        if index is None: return None
-        Printer.logger(f'Found {obj.clsn} {log_str} in archive ("{self.path}") at line {index}')
-        return self.paths()[index]
+        id_index, isrc_index = self._get_lookup_index()
+        matches = [(id_index.get(str(obj.id), []), f"ID: {obj.id}")]
+        if Zotify.CONFIG.get_skip_by_isrc() and isinstance(obj, Track) and obj.isrc:
+            matches.append((isrc_index.get(str(obj.isrc), []), f"ISRC: {obj.isrc}"))
+        for entries, log_str in matches:
+            for index, entry in entries:
+                path = self._entry_path(entry)
+                if path is not None:
+                    Printer.logger(f'Found {obj.clsn} {log_str} in archive ("{self.path}") at line {index}')
+                    return path
+        return None
 
 
 class M3U8:
