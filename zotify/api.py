@@ -783,10 +783,12 @@ class Episode(DLContent, IsAddable):
     def download_directly(self, path: PurePath) -> str:
         time_start = time()
         
-        r = requests.get(self.partner_url, stream=True, allow_redirects=True)
+        try:
+            r = requests.get(self.partner_url, stream=True, allow_redirects=True, timeout=HTTP_REQUEST_TIMEOUT)
+        except requests.exceptions.RequestException as error:
+            raise RuntimeError(f"Podcast download request failed ({type(error).__name__})") from None
         if r.status_code != 200:
-            r.raise_for_status()  # Will only raise for 4xx codes, so...
-            raise RuntimeError(f"Request to {self.partner_url} returned status code {r.status_code}")
+            raise RuntimeError(f"Podcast download request returned status code {r.status_code}")
         file_size = int(r.headers.get('Content-Length', 0))
         desc = "" if file_size else "(Unknown total file size)"
         
@@ -1046,7 +1048,7 @@ class Album(Container, HasArtists, IsFavoritable):
     def save_album_art_to_file(self, filepath: PurePath, parent_stack: ParentStack):
         if not Zotify.CONFIG.get_album_art_jpg_file() or self.image_url is None:
             return
-        image_bytes = requests.get(self.image_url).content # expect jpeg
+        image_bytes = fetch_artwork(self.image_url) # expect jpeg
         if not image_bytes:
             return
         album_path = filepath.with_name('cover.jpg');   a_exists = file_has_content(album_path)

@@ -1,11 +1,41 @@
 import re
+import logging
+from functools import lru_cache
 from datetime import datetime, timezone
 from fractions import Fraction
 from os.path import commonpath
 from pathlib import Path, PurePath
 from shutil import move, copyfile, copyfileobj
+import requests
 
 from zotify.termoutput import *
+
+
+# Bound connect and read waits for auxiliary HTTP requests. Artwork is fetched
+# repeatedly while tagging and exporting metadata, so retain a small in-memory
+# cache for the lifetime of this process.
+HTTP_REQUEST_TIMEOUT = (10, 30)
+
+
+@lru_cache(maxsize=32)
+def _fetch_artwork_cached(url: str) -> bytes:
+    response = requests.get(url, timeout=HTTP_REQUEST_TIMEOUT)
+    response.raise_for_status()
+    return response.content
+
+
+def fetch_artwork(url: str) -> bytes | None:
+    """Fetch an artwork image once per URL, logging only safe failure details."""
+    if not url:
+        return None
+    try:
+        content = _fetch_artwork_cached(url)
+        return content or None
+    except requests.exceptions.RequestException as error:
+        status = error.response.status_code if error.response is not None else None
+        detail = f"HTTP {status}" if status is not None else type(error).__name__
+        logging.getLogger("zotify.debug").warning("Artwork request failed (%s)", detail)
+        return None
 
 
 # Path Utils
