@@ -1147,18 +1147,18 @@ class Zotify:
                 Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +
                                                   'MAY BE CAUSED BY RATE LIMITS - CONSIDER INCREASING `BULK_WAIT_TIME`\n' +
                                                  f'GID: {gid[5:]} - File_ID: {fileid[8:]}')
-                Printer.logger("\n".join(e.args), PrintChannel.ERROR)
+                Printer.logger("\n".join(str(a) for a in e.args), PrintChannel.ERROR)
             elif isinstance(error_arg, int):
                 Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +
                                                      f'(ASSUMED HTTP) RUNTIME ERROR - STATUS CODE {error_arg}')
-                Printer.logger("\n".join(e.args), PrintChannel.ERROR)
+                Printer.logger("\n".join(str(a) for a in e.args), PrintChannel.ERROR)
             else: raise
         except ConnectionError as e:
             if "Status code " not in e.args[0]: raise
             status_code = e.args[0].split("Status code ")[1]
             Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO FILE\n' +
                                                  f'CONNECTION ERROR WHEN FETCHING CONTENT STREAM - STATUS CODE {status_code}')
-            Printer.logger("\n".join(e.args), PrintChannel.ERROR)
+            Printer.logger("\n".join(str(a) for a in e.args), PrintChannel.ERROR)
         except Exception as e:
             if risky_method:
                 cls.FORCE_STREAM_API_CALLS = True
