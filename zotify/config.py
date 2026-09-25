@@ -1055,7 +1055,8 @@ class Zotify:
             except requests.exceptions.RequestException as e:
                 http = requests.Response()
                 http.status_code = 0
-                resp = {ERROR: {MESSAGE: f"Request failed ({type(e).__name__})"}}
+                fallback_message = f"Request failed ({type(e).__name__})"
+                resp = {ERROR: {MESSAGE: fallback_message}}
             finally:
                 cls.TOTAL_API_CALLS += 1
                 logging.getLogger("zotify.debug").debug(
