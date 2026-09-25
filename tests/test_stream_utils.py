@@ -27,6 +27,16 @@ class FakeStreamer(FakeStream):
         return self._input
 
 
+class BrokenInputStream:
+    def available(self):
+        raise RuntimeError("input stream state is unavailable")
+
+
+class BrokenStreamer(FakeStream):
+    def stream(self):
+        return BrokenInputStream()
+
+
 class StreamSizeTests(unittest.TestCase):
     def test_unmodified_stream_uses_its_full_size(self):
         self.assertEqual(expected_stream_size(FakeStream(1000)), 1000)
@@ -46,6 +56,10 @@ class StreamSizeTests(unittest.TestCase):
 
     def test_unskipped_streamer_uses_its_full_size(self):
         self.assertEqual(expected_stream_size(FakeStreamer(1000)), 1000)
+
+    def test_unexpected_stream_state_errors_are_not_hidden(self):
+        with self.assertRaisesRegex(RuntimeError, "input stream state is unavailable"):
+            expected_stream_size(BrokenStreamer(1000))
 
 
 if __name__ == "__main__":
