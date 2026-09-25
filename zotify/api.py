@@ -2,6 +2,8 @@ from __future__ import annotations
 import ffmpy
 import requests
 import subprocess
+import os
+import shutil
 from time import time, sleep
 from uuid import uuid4
 
@@ -330,6 +332,13 @@ class DLContent(Content):
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
         from zotify.metadata import SongArchive
+        # An interrupted tag write must be retried before archive/file skips.
+        if isinstance(self, Track):
+            from zotify.download_journal import DownloadJournal
+            state = DownloadJournal(self._path_root).get(self.uri)
+            if state and state["state"] == "tags_pending":
+                return False
+
         def handle_archive(archived_path: PurePath):
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} DOWNLOADED PREVIOUSLY)\n'
                                                      f'FILE: "{self.rel_path(archived_path)}"')
@@ -676,8 +685,79 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
             # this method bypasses all internal formatting, probably not resilient against arbitrary inputs
             tags._write_tag_raw("mp3", "TPOS", str(self.disc_number))
             tags._write_tag_raw("mp3", "TRCK", str(self.track_number))
+
+    def _journal(self):
+        from zotify.download_journal import DownloadJournal
+        return DownloadJournal(self._path_root)
+
+    def _validate_audio(self, filepath: PurePath) -> bool:
+        """Require a non-empty file that ffprobe recognizes as audio."""
+        if not file_has_content(filepath):
+            return False
+        try:
+            return self.get_audio_duration(filepath) > 0
+        except Exception as error:
+            Printer.hashtaged(PrintChannel.ERROR,
+                              f'FAILED TO VALIDATE STAGED AUDIO FOR TRACK {self.id}\n{error}')
+            return False
+
+    def _finish_pending_tags(self, parent_stack: ParentStack, state: dict) -> bool:
+        """Tag a copy of published audio, then atomically replace it."""
+        from pathlib import Path
+        final_path = Path(state["final_path"] or "")
+        if not file_has_content(final_path):
+            # A crash may have happened before audio publication: redownload.
+            return False
+        staged = final_path.with_name(
+            f".{final_path.stem}.{uuid4()}.zotify-stage{final_path.suffix}"
+        )
+        journal = self._journal()
+        journal.set_state(self.uri, "tags_pending", stage_path=staged,
+                          final_path=final_path)
+        try:
+            shutil.copy2(final_path, staged)
+            self.write_audio_tags(staged)
+            if not self._validate_audio(staged):
+                raise ValueError("Tagged stage is empty or invalid audio")
+            os.replace(staged, final_path)
+        except Exception as error:
+            try:
+                staged.unlink(missing_ok=True)
+            except OSError:
+                pass
+            journal.set_state(self.uri, "tags_pending", final_path=final_path,
+                              error=str(error))
+            Printer.hashtaged(PrintChannel.ERROR,
+                              f'FAILED TO WRITE METADATA FOR "{self}"; AUDIO KEPT FOR TAG RETRY')
+            Printer.traceback(error)
+            return True
+
+        journal.set_state(self.uri, "complete", final_path=final_path)
+        self.mark_downloaded(parent_stack, final_path)
+        return True
     
     def download(self, parent_stack: ParentStack) -> None:
+        journal = self._journal()
+        prior_state = journal.get(self.uri)
+        if prior_state and prior_state["state"] == "audio_verified":
+            staged = Path(prior_state["stage_path"] or "")
+            final = Path(prior_state["final_path"] or "")
+            if not staged.exists() and file_has_content(final):
+                # Recover a crash after atomic audio publication but before the
+                # state transition to tags_pending.
+                journal.set_state(self.uri, "tags_pending", final_path=final)
+                prior_state = journal.get(self.uri)
+            else:
+                staged.unlink(missing_ok=True)
+                journal.set_state(self.uri, "failed", error="Interrupted before audio publication")
+                prior_state = journal.get(self.uri)
+        if prior_state and prior_state["state"] == "tags_pending":
+            # Retry only metadata; never request audio a second time.
+            if self._finish_pending_tags(parent_stack, prior_state):
+                if Zotify.CONFIG.get_optimized_dl() and journal.get(self.uri)["state"] == "complete":
+                    self.clone_to_all()
+                return
+
         if not Zotify.CONFIG.get_optimized_dl():
             if Zotify.CONFIG.get_download_parent_album():
                 with Zotify.CONFIG.temporary_config(DOWNLOAD_PARENT_ALBUM, False):
@@ -709,7 +789,10 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
             if Zotify.CONFIG.get_temp_download_dir():
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
         
-        if (stream := self.fetch_stream()) is None: return
+        if (stream := self.fetch_stream()) is None:
+            journal.set_state(self.uri, "failed", error="Failed to obtain content stream")
+            return
+        journal.set_state(self.uri, "downloading")
         self.set_dl_status("Downloading Stream")
         time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
         
@@ -718,27 +801,44 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         
         with self.set_dl_status("Converting File"):
             self.create_download_directory(path.parent)
-            time_elapsed_ffmpeg = self.convert_audio_format(temppath, path) # temppath -> path here
+            staged_path = path.with_name(
+                f".{path.stem}.{uuid4()}.zotify-stage{path.suffix}"
+            )
+            time_elapsed_ffmpeg = self.convert_audio_format(temppath, staged_path) # temppath -> staged
             if time_elapsed_ffmpeg is None:
-                path = pathlike_move_safe(temppath, path.with_suffix(".ogg"))
-            self.mark_downloaded(parent_stack, path)
-        
-        try: 
-            self.write_audio_tags(path)
-            if self.album: self.album.save_album_art_to_file(path, parent_stack)
-        except NotImplementedError as e:
-            if not "Mutagen type" in e.args[0]: raise
-            err_codec = e.args[0].removeprefix("Mutagen type ").removesuffix(" not implemented")
-            Printer.hashtaged(PrintChannel.ERROR,  'FAILED TO WRITE METADATA\n' +
-                                                  f'FILE "{self.rel_path(path)}" OF MEDIA TYPE {err_codec}\n' +
-                                                  f'INSTEAD OF EXPECTED MEDIA TYPE {self._codec}')
-        except Exception as e:
-            Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO WRITE METADATA\n')
-            Printer.traceback(e)
+                path = path.with_suffix(".ogg")
+                staged_path = path.with_name(
+                    f".{path.stem}.{uuid4()}.zotify-stage{path.suffix}"
+                )
+                pathlike_move_safe(temppath, staged_path)
+
+        if not self._validate_audio(staged_path):
+            journal.set_state(self.uri, "failed", stage_path=staged_path,
+                              final_path=path, error="Audio validation failed")
+            staged_path.unlink(missing_ok=True)
+            Printer.hashtaged(PrintChannel.ERROR,
+                              f'FAILED TO VALIDATE DOWNLOAD FOR "{self}"; EXISTING FILE KEPT')
+            return
+
+        # Keep verified audio available even if metadata writing fails.
+        journal.set_state(self.uri, "audio_verified", stage_path=staged_path,
+                          final_path=path)
+        os.replace(staged_path, path)
+        journal.set_state(self.uri, "tags_pending", final_path=path)
+        self.mark_downloaded(parent_stack, path)
+
+        if self.album:
+            self.album.save_album_art_to_file(path, parent_stack)
+        # Tag a copy so an interrupted mutagen write cannot damage audio.
+        if not self._finish_pending_tags(parent_stack, journal.get(self.uri)):
+            journal.set_state(self.uri, "failed", final_path=path,
+                              error="Published audio missing before tag retry")
+            return
         
         Interface.dl_complete(self, path, time_elapsed_dl, time_elapsed_ffmpeg)
         
-        if Zotify.CONFIG.get_optimized_dl(): self.clone_to_all()
+        if Zotify.CONFIG.get_optimized_dl() and journal.get(self.uri)["state"] == "complete":
+            self.clone_to_all()
         self.wait_between_downloads()
 
 
