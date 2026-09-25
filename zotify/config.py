@@ -21,6 +21,7 @@ from typing import Any, Callable
 
 from zotify.utils import ensure_is_file, file_has_content, safe_typecast, now
 from zotify.termoutput import *
+from zotify.stream_utils import mark_stream_prefix_skipped
 
 Streamer = CdnManager.Streamer
 
@@ -1130,6 +1131,7 @@ class Zotify:
             url = cls.SESSION.content_feeder().resolve_storage_interactive(file.file_id, False)
             streamer = cls.SESSION.cdn().stream_file(file, key, CdnFeedHelper.get_url(url), None)
             if streamer.stream().skip(0xA7) != 0xA7: raise IOError("Couldn't skip 0xa7 bytes!")
+            mark_stream_prefix_skipped(streamer, 0xA7)
             return streamer
         except FeederException as e:
             if not use_qual_pref:
