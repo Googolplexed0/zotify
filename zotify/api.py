@@ -284,6 +284,12 @@ class Content(HierarchicalNode):
                     recurse_uris = [item.uri for item in recurs_children if isinstance(item, recurse_type)]
                     recurs_item_resps = self.fetch_uris_metadata(recurse_uris, recurse_type, hide_loader=True)
                     _ = self.parse_uris_metadata(recurs_item_resps, recurse_type, hide_loader=True)
+                for recurs_obj in recurs_objs:
+                    recurs_obj._needs_recursion = False
+            for obj in objs:
+                if isinstance(obj, Artist) and not obj._needs_expansion and not obj._needs_recursion:
+                    obj.discography_complete = True
+                    obj._hasMetadata = obj.full_metadata()
             return objs
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
@@ -1111,12 +1117,12 @@ class Artist(Container, HasGenres):
         self.end_year       : str               = None
         self.followers      : int               = None
         self.genres         : list[str]         = None
+        self.discography_complete: bool         = False
         self.singles        : list[Album]       = None
         self.start_year     : str               = None
     
     def full_metadata(self) -> bool:
-        # An empty genre list is a valid, successfully fetched result.
-        return self.genres is not None
+        return self.discography_complete
 
 
 class Show(Container):
@@ -1279,7 +1285,7 @@ class Query(Container):
                 alltracks.update(t for t in item.recurse_DLC() if isinstance(t, Track) and not t.is_local)
         
         artists: set[Artist] = set().union(*(set(track.artists) for track in alltracks if track.artists))
-        artist_uris: dict[str, Artist] = {a.uri: a for a in artists if not a.is_local and not a._hasMetadata
+        artist_uris: dict[str, Artist] = {a.uri: a for a in artists if not a.is_local and a.genres is None
                                           and not "".join((a.name or "").lower().split()) == "variousartists"}
         if Zotify.CONFIG.get_save_genres() and artist_uris:
             artist_resps = self.fetch_uris_metadata(artist_uris.keys(), Artist, loader_text=GENRE)
@@ -1289,7 +1295,6 @@ class Query(Container):
                 # Genre lookup must not parse artist discographies and create thousands
                 # of unrelated album and top-track objects in the query graph.
                 artist.genres = sorted(set(artist_resp.get(GENRES) or []))
-                artist._hasMetadata = True
         if Zotify.CONFIG.get_save_genres():
             for track in alltracks:
                 genres: list[str] = [*set().union(*[set(artist.genres) for artist in track.artists if track.artists and artist.genres])]
