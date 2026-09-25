@@ -18,7 +18,6 @@ from librespot.proto.Metadata_pb2 import AudioFile
 from pathlib import Path, PurePath
 from platform import system
 from time import sleep
-from traceback import TracebackException
 from typing import Any, Callable
 
 from zotify.utils import ensure_is_file, file_has_content, safe_typecast, now
@@ -943,13 +942,7 @@ class Zotify:
                 message = "Spotify's connection receiver stopped: {}.".format(
                     describe(error))
 
-            Printer.new_print(PrintChannel.MANDATORY, message, PrintStyle.MANDATORY)
-            if cls.LOGGER is not None:
-                trace = "".join(TracebackException.from_exception(error).format())
-                cls.LOGGER.critical(
-                    "Suppressed receiver-thread traceback; concise message shown in console:\n%s",
-                    trace,
-                )
+            Printer.traceback(error, message, PrintChannel.MANDATORY)
 
         threading.excepthook = exception_hook
     
