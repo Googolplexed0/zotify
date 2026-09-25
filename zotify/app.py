@@ -165,13 +165,17 @@ def perform_query(args: Namespace) -> None:
         else:
             search_and_select()
     
-    except BaseException as e:
-        # catch all but do not throw KeyboardInterrupts
-        if isinstance(e, KeyboardInterrupt):
-            Printer.hashtaged(PrintChannel.MANDATORY, "ABORTING QUERY")
-            return
+    except KeyboardInterrupt:
+        Printer.hashtaged(PrintChannel.MANDATORY, "ABORTING QUERY")
+        return
+    except Exception as e:
+        Printer.traceback(
+            e,
+            f"Zotify stopped: {type(e).__name__}: {e}",
+            PrintChannel.MANDATORY,
+        )
         Zotify.end()
-        raise
+        raise SystemExit(1) from None
 
 
 def client(args: Namespace, modes: list[Action]) -> None:
