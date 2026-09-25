@@ -982,39 +982,64 @@ class Zotify:
         return {}
     
     @classmethod
-    def invoke_libre_bulk_md(cls, ContClass: type, uris: list[str]) -> list[dict[str, str | int | dict] | None]:
-        api_retry = 0
-        while api_retry <= cls.CONFIG.get_retry_attempts():
-            if api_retry:
-                Printer.hashtaged(PrintChannel.WARNING, f'API ERROR {retry_text}- RETRYING\n' +
-                                                        f'FAILED TO FETCH METADATA FOR {ContClass.uppers}'+
-                                                        f'{fallback_message}')
-                sleep(retry_delay)
-            
-            try:
-                content_ids = [cls.to_libre_content(ContClass, uri.split(":")[-1]) for uri in uris]
-                protos = cls.SESSION.api().get_metadata_4_multiple(content_ids)
-                resps = [MessageToDict(proto, preserving_proto_field_name=True) if proto else None for proto in protos]
-                for proto, resp in zip(protos, resps):
-                    if resp.get(GID): resp[GID] = proto.gid # use gid in bytes
-                break
-            except ApiClient.StatusCodeException as e:
-                fallback_message = f'Status {e.code}:   \n{cls.api_status_str(e.code)}'
-            except ConnectionError as e:
-                fallback_message = e.args[0]
-            except Exception as e:
-                fallback_message = f'UNKNOWN OR UNEXPECTED ERROR: {e}'
-            finally: cls.TOTAL_API_CALLS += 1
-            retry_text = f"(RETRY {api_retry}) " if api_retry else ""
-            retry_delay = cls.CONFIG.get_retry_delay(api_retry)
-            api_retry += 1
-        
-        sleep(cls.CONFIG.get_fetch_delay())
-        if api_retry <= cls.CONFIG.get_retry_attempts():
-            return resp
-        Printer.hashtaged(PrintChannel.API_ERROR, f'RETRY LIMIT EXCEDED\n' +
-                                                    f'FAILED TO FETCH METADATA FOR {ContClass.uppers}')
-        return {}
+    def invoke_libre_bulk_md(cls, ContClass: type, uris: list[str]) -> list[dict[str, str | int | dict] | None] | None:
+        def fetch_batch(batch: list[str]) -> list[dict | None] | None:
+            api_retry = 0
+            while api_retry <= cls.CONFIG.get_retry_attempts():
+                if api_retry:
+                    Printer.hashtaged(PrintChannel.WARNING, f'API ERROR (RETRY {api_retry}) - RETRYING\n' +
+                                                            f'FAILED TO FETCH METADATA FOR {ContClass.uppers}\n' +
+                                                            fallback_message)
+                    sleep(cls.CONFIG.get_retry_delay(api_retry - 1))
+                try:
+                    content_ids = [cls.to_libre_content(ContClass, uri.split(":")[-1]) for uri in batch]
+                    protos = cls.SESSION.api().get_metadata_4_multiple(content_ids)
+                    resps = [MessageToDict(proto, preserving_proto_field_name=True) if proto else None
+                             for proto in protos]
+                    for proto, resp in zip(protos, resps):
+                        if proto and resp and resp.get(GID): resp[GID] = proto.gid
+                    break
+                except ApiClient.StatusCodeException as e:
+                    fallback_message = f'Status {e.code}:   \n{cls.api_status_str(e.code)}'
+                    if e.code == 413:
+                        if len(batch) == 1:
+                            # The batch wrapper can be too large even for one item;
+                            # try the provider's single-item endpoint once.
+                            return [cls.invoke_libre_md(ContClass, batch[0]) or None]
+                        midpoint = len(batch) // 2
+                        return fetch_batch(batch[:midpoint]) + fetch_batch(batch[midpoint:])
+                except ConnectionError as e:
+                    fallback_message = str(e)
+                except Exception as e:
+                    fallback_message = f'UNKNOWN OR UNEXPECTED ERROR: {e}'
+                finally:
+                    cls.TOTAL_API_CALLS += 1
+                retry_delay = cls.CONFIG.get_retry_delay(api_retry)
+                api_retry += 1
+
+            sleep(cls.CONFIG.get_fetch_delay())
+            if api_retry <= cls.CONFIG.get_retry_attempts():
+                # A partial batch can omit an unavailable or malformed item. Retry
+                # only those positions through the single-item endpoint.
+                resps = (resps + [None] * len(batch))[:len(batch)]
+                for i, resp in enumerate(resps):
+                    if not resp:
+                        resps[i] = cls.invoke_libre_md(ContClass, batch[i]) or None
+                return resps
+            Printer.hashtaged(PrintChannel.API_ERROR, f'RETRY LIMIT EXCEEDED\n' +
+                                                      f'FAILED TO FETCH METADATA FOR {ContClass.uppers}')
+            return None
+
+        # Keep payloads comfortably below the size that caused 413 responses.
+        # Split further on a 413, preserving the original URI order.
+        batch_size = 50
+        results = []
+        for offset in range(0, len(uris), batch_size):
+            batch_result = fetch_batch(uris[offset:offset + batch_size])
+            if batch_result is None:
+                return None
+            results.extend(batch_result)
+        return results
     
     @classmethod
     def invoke_url(cls, url: str, params: dict | None = None, expectFail: bool = False, force_login5: bool = False) -> dict[str, str | int | dict]:

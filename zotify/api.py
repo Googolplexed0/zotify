@@ -124,22 +124,35 @@ class Content(HierarchicalNode):
         return try_rel_path(p, cls._path_root)
     
     @classmethod
+    def _normalize_libre_metadata(cls, uri: str, resp: dict) -> dict:
+        """Normalize librespot responses to the shape expected by the content parser."""
+        if not resp:
+            return {}
+        resp = resp.copy()
+        if cls is Track and resp.get(DURATION):
+            resp[DURATION_MS] = resp.pop(DURATION)
+            album = resp.get(ALBUM)
+            if album:
+                album = album.copy()
+                album[ALBUM_TYPE] = str.lower(album.pop(TYPE, None) or "album")
+                resp[ALBUM] = album
+        elif cls is Artist and GENRES not in resp and GENRE in resp:
+            resp[GENRES] = resp.pop(GENRE)
+        elif cls is Album and resp.get(TYPE):
+            resp[ALBUM_TYPE] = str.lower(resp.pop(TYPE))
+        elif cls is Playlist and resp.get(ATTRIBUTES):
+            resp.update(resp.pop(ATTRIBUTES))
+        resp.update({URI: ":" + uri, TYPE: cls.type_attr})
+        return resp
+
+    @classmethod
     def fetch_metadata(cls, uri: str, args: list[str] = []) -> dict[str]:
         resp = {}
         if Zotify.CONFIG.permit_legacy_api() or (Zotify.CONFIG.permit_client_api() and not cls is Playlist):
             argstr = arg_comb(cls._fetch_args, *args)
             resp = Zotify.invoke_url(f'{cls._url}/{uri.split(":")[-1]}?{MARKET_APPEND}{argstr}')
         else:
-            resp = Zotify.invoke_libre_md(cls, uri)
-            if cls is Track and resp.get(DURATION):
-                resp[DURATION_MS] = resp.pop(DURATION)
-                if resp[ALBUM]:
-                    resp[ALBUM][ALBUM_TYPE] = str.lower(resp[ALBUM].pop(TYPE, ALBUM))
-            elif cls is Album and resp.get(TYPE):
-                resp[ALBUM_TYPE] = str.lower(resp.pop(TYPE))
-            elif cls is Playlist and resp.get(ATTRIBUTES):
-                resp.update(resp.pop(ATTRIBUTES))
-            resp.update({URI: ":" + uri, TYPE: cls.type_attr})
+            resp = cls._normalize_libre_metadata(uri, Zotify.invoke_libre_md(cls, uri))
         if resp: return resp
         else:    raise ValueError("No Metadata Fetched")
     
@@ -162,7 +175,22 @@ class Content(HierarchicalNode):
                                                     'RECOMMENDED TO SET CONFIG "API_CLIENT_LEGACY = False"')
             Zotify.LEGACY_API_ENDOINTS = False
         elif Zotify.ALLOW_LIBRE_BULK:
-            resps = Zotify.invoke_libre_bulk_md(ContClass, uris)
+            with Loader(f"Fetching bulk {loader_text} information (unsafe)...", disabled=hide_loader):
+                resps = Zotify.invoke_libre_bulk_md(ContClass, uris)
+            # Bulk responses are already fetched. Normalize them with the same adapter
+            # as single responses. A failed batch is reported once by the provider;
+            # do not turn it into one retrying request per item.
+            if resps is None:
+                return []
+            if resps is not None:
+                normalized = []
+                for i, uri in enumerate(uris):
+                    resp = resps[i] if i < len(resps) else None
+                    if resp is None:
+                        normalized.append(None)
+                    else:
+                        normalized.append(ContClass._normalize_libre_metadata(uri, resp))
+                return normalized
         
         suffix = "..." if Zotify.CONFIG.permit_client_api() else " (unsafe)..."
         with Loader(f"Fetching {loader_text} information{suffix}", disabled=hide_loader):
@@ -256,6 +284,12 @@ class Content(HierarchicalNode):
                     recurse_uris = [item.uri for item in recurs_children if isinstance(item, recurse_type)]
                     recurs_item_resps = self.fetch_uris_metadata(recurse_uris, recurse_type, hide_loader=True)
                     _ = self.parse_uris_metadata(recurs_item_resps, recurse_type, hide_loader=True)
+                for recurs_obj in recurs_objs:
+                    recurs_obj._needs_recursion = False
+            for obj in objs:
+                if isinstance(obj, Artist) and not obj._needs_expansion and not obj._needs_recursion:
+                    obj.discography_complete = True
+                    obj._hasMetadata = obj.full_metadata()
             return objs
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
@@ -1083,11 +1117,12 @@ class Artist(Container, HasGenres):
         self.end_year       : str               = None
         self.followers      : int               = None
         self.genres         : list[str]         = None
+        self.discography_complete: bool         = False
         self.singles        : list[Album]       = None
         self.start_year     : str               = None
     
     def full_metadata(self) -> bool:
-        return bool(self.genres)
+        return self.discography_complete
 
 
 class Show(Container):
@@ -1241,16 +1276,26 @@ class Query(Container):
         return self.requested_objs
     
     def conditional_metadata(self):
-        alltracks = {t for t in self.ALL_NODES if isinstance(t, Track) and not t.is_local}
+        requested_items = (item for item_type_items in self.requested_objs for item in item_type_items)
+        alltracks: set[Track] = set()
+        for item in requested_items:
+            if isinstance(item, Track) and not item.is_local:
+                alltracks.add(item)
+            elif isinstance(item, Container):
+                alltracks.update(t for t in item.recurse_DLC() if isinstance(t, Track) and not t.is_local)
         
         artists: set[Artist] = set().union(*(set(track.artists) for track in alltracks if track.artists))
-        artist_uris: dict[str, Artist] = {a.uri: a for a in artists if not a.is_local and not a._hasMetadata
-                                          and not "".join(a.name.lower().split()) == "variousartists"}
+        artist_uris: dict[str, Artist] = {a.uri: a for a in artists if not a.is_local and a.genres is None
+                                          and not "".join((a.name or "").lower().split()) == "variousartists"}
         if Zotify.CONFIG.get_save_genres() and artist_uris:
             artist_resps = self.fetch_uris_metadata(artist_uris.keys(), Artist, loader_text=GENRE)
             for artist, artist_resp in zip(artist_uris.values(), artist_resps):
-                artist.parse_metadata(None, artist_resp)
-                artist._needs_expansion = False
+                if not artist_resp:
+                    continue
+                # Genre lookup must not parse artist discographies and create thousands
+                # of unrelated album and top-track objects in the query graph.
+                artist.genres = sorted(set(artist_resp.get(GENRES) or []))
+        if Zotify.CONFIG.get_save_genres():
             for track in alltracks:
                 if not track.artists: continue
                 genres: set[str] = set().union(*(set(artist.genres) for artist in track.artists if artist.genres))
