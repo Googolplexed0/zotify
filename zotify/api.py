@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from zotify.config import Zotify, Streamer
 from zotify.utils import *
-from zotify.stream_utils import expected_stream_size
+from zotify.stream_utils import expected_stream_size, IncompleteStreamError
 
 
 class DynamicClassNameAttrs(type):
@@ -333,11 +333,11 @@ class DLContent(Content):
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
         from zotify.metadata import SongArchive
-        # An interrupted tag write must be retried before archive/file skips.
+        # Interrupted publication or tagging must be recovered before archive/file skips.
         if isinstance(self, Track):
             from zotify.download_journal import DownloadJournal
             state = DownloadJournal(self._path_root).get(self.uri)
-            if state and state["state"] == "tags_pending":
+            if state and state["state"] in {"audio_verified", "tags_pending"}:
                 return False
 
         def handle_archive(archived_path: PurePath):
@@ -414,7 +414,7 @@ class DLContent(Content):
                         sleep(0.05)
             received = Path(temppath).stat().st_size
             if expected_size and received != expected_size:
-                raise IOError(f"Incomplete audio stream: received {received} of {expected_size} bytes")
+                raise IncompleteStreamError(f"Incomplete audio stream: received {received} of {expected_size} bytes")
         except Exception:
             Path(temppath).unlink(missing_ok=True)
             raise
@@ -557,6 +557,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
     _codec = CODEC_MAP_TRACK.get(Zotify.CONFIG.get_download_format().lower(), "copy")
     _ext = EXT_MAP.get(Zotify.CONFIG.get_download_format().lower(), "ogg")
     _url = TRACK_URL
+    _CLONEABLE_STATES = {"complete", "complete_untagged"}
     
     def __init__(self, uri: str) -> None:
         super().__init__(uri)
@@ -710,6 +711,10 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
                                       f'FOUND {actual_duration:.2f}s')
                     return False
             return True
+        except ffmpy.FFExecutableNotFoundError:
+            # Without ffprobe, the stream byte count is the only available check.
+            Printer.debug(f'FFPROBE NOT FOUND, SKIPPING DURATION CHECK FOR TRACK {self.id}')
+            return True
         except Exception as error:
             Printer.hashtaged(PrintChannel.ERROR,
                               f'FAILED TO VALIDATE STAGED AUDIO FOR TRACK {self.id}\n{error}')
@@ -749,6 +754,8 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
                 Printer.hashtaged(PrintChannel.ERROR,
                                   f'METADATA RETRIES EXHAUSTED FOR "{self}"; AUDIO KEPT WITHOUT TAGS')
                 return True
+            # The untagged audio is usable, so keep it in this run's playlists.
+            self.mark_downloaded(parent_stack, final_path)
             Printer.hashtaged(PrintChannel.ERROR,
                               f'FAILED TO WRITE METADATA FOR "{self}"; AUDIO KEPT FOR TAG RETRY')
             Printer.traceback(error)
@@ -783,7 +790,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         if prior_state and prior_state["state"] == "tags_pending":
             # Retry only metadata; never request audio a second time.
             if self._finish_pending_tags(parent_stack, prior_state):
-                if Zotify.CONFIG.get_optimized_dl() and journal.get(self.uri)["state"] == "complete":
+                if Zotify.CONFIG.get_optimized_dl() and journal.get(self.uri)["state"] in self._CLONEABLE_STATES:
                     self.clone_to_all()
                 return
 
@@ -822,8 +829,16 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
             journal.set_state(self.uri, "failed", error="Failed to obtain content stream")
             return
         journal.set_state(self.uri, "downloading")
+        journal.reset_tag_attempts(self.uri)
         self.set_dl_status("Downloading Stream")
-        time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
+        try:
+            time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
+        except IncompleteStreamError as error:
+            journal.set_state(self.uri, "failed", error=str(error))
+            Printer.hashtaged(PrintChannel.ERROR, f'SKIPPING {self.clsn.upper()} - {str(error).upper()}\n' +
+                                                  f'{self.clsn}_ID: {self.id}')
+            self.wait_between_downloads()
+            return
         
         if not Zotify.CONFIG.get_always_check_lyrics():
             self.fetch_lyrics(parent_stack)
@@ -866,7 +881,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         
         Interface.dl_complete(self, path, time_elapsed_dl, time_elapsed_ffmpeg)
         
-        if Zotify.CONFIG.get_optimized_dl() and journal.get(self.uri)["state"] == "complete":
+        if Zotify.CONFIG.get_optimized_dl() and journal.get(self.uri)["state"] in self._CLONEABLE_STATES:
             self.clone_to_all()
         self.wait_between_downloads()
 
@@ -950,7 +965,13 @@ class Episode(DLContent, IsAddable):
         if not self.fetch_partner_url():
             if (stream := self.fetch_stream()) is None: return
             self.set_dl_status("Downloading Stream")
-            time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
+            try:
+                time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
+            except IncompleteStreamError as e:
+                Printer.hashtaged(PrintChannel.ERROR, f'SKIPPING {self.clsn.upper()} - {str(e).upper()}\n' +
+                                                      f'{self.clsn}_ID: {self.id}')
+                self.wait_between_downloads()
+                return
         else:
             try:
                 time_elapsed_dl = self.download_directly(temppath)
