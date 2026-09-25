@@ -410,11 +410,12 @@ class DLContent(Content):
                     else:
                         no_responses += 1
                         sleep(0.05)
-                # if Zotify.CONFIG.get_download_real_time():
-                    #     elapsed_real = time() - time_start
-                    #     elapsed_want = (pbar.n / stream.size) * (self.duration_ms/1000)
-                    # if elapsed_want > elapsed_real:
-                    #     sleep(elapsed_want - elapsed_real)
+            received = Path(temppath).stat().st_size
+            if stream.size and received != stream.size:
+                raise IOError(f"Incomplete audio stream: received {received} of {stream.size} bytes")
+        except Exception:
+            Path(temppath).unlink(missing_ok=True)
+            raise
         finally:
             pbar.close(); pbar.clear()
         
@@ -690,12 +691,23 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         from zotify.download_journal import DownloadJournal
         return DownloadJournal(self._path_root)
 
-    def _validate_audio(self, filepath: PurePath) -> bool:
-        """Require a non-empty file that ffprobe recognizes as audio."""
+    def _validate_audio(self, filepath: PurePath, expected_duration_ms: int | None = None) -> bool:
+        """Require audio with a duration consistent with track metadata."""
         if not file_has_content(filepath):
             return False
         try:
-            return self.get_audio_duration(filepath) > 0
+            actual_duration = self.get_audio_duration(filepath)
+            if actual_duration <= 0:
+                return False
+            if expected_duration_ms:
+                expected_duration = expected_duration_ms / 1000
+                tolerance = max(2.0, expected_duration * 0.02)
+                if abs(actual_duration - expected_duration) > tolerance:
+                    Printer.hashtaged(PrintChannel.ERROR,
+                                      f'AUDIO DURATION MISMATCH: EXPECTED {expected_duration:.2f}s, '
+                                      f'FOUND {actual_duration:.2f}s')
+                    return False
+            return True
         except Exception as error:
             Printer.hashtaged(PrintChannel.ERROR,
                               f'FAILED TO VALIDATE STAGED AUDIO FOR TRACK {self.id}\n{error}')
@@ -714,6 +726,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         journal = self._journal()
         journal.set_state(self.uri, "tags_pending", stage_path=staged,
                           final_path=final_path)
+        attempts = journal.increment_tag_attempts(self.uri)
         try:
             shutil.copy2(final_path, staged)
             self.write_audio_tags(staged)
@@ -727,12 +740,20 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
                 pass
             journal.set_state(self.uri, "tags_pending", final_path=final_path,
                               error=str(error))
+            if attempts >= Zotify.CONFIG.get_retry_attempts() + 1:
+                journal.set_state(self.uri, "complete_untagged", final_path=final_path,
+                                  error=f"Tagging abandoned after {attempts} attempts: {error}")
+                self.mark_downloaded(parent_stack, final_path)
+                Printer.hashtaged(PrintChannel.ERROR,
+                                  f'METADATA RETRIES EXHAUSTED FOR "{self}"; AUDIO KEPT WITHOUT TAGS')
+                return True
             Printer.hashtaged(PrintChannel.ERROR,
                               f'FAILED TO WRITE METADATA FOR "{self}"; AUDIO KEPT FOR TAG RETRY')
             Printer.traceback(error)
             return True
 
         journal.set_state(self.uri, "complete", final_path=final_path)
+        journal.reset_tag_attempts(self.uri)
         self.mark_downloaded(parent_stack, final_path)
         return True
     
@@ -742,7 +763,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         if prior_state and prior_state["state"] == "audio_verified":
             staged = Path(prior_state["stage_path"]) if prior_state["stage_path"] else None
             final = Path(prior_state["final_path"]) if prior_state["final_path"] else None
-            if staged and final and staged.is_file() and self._validate_audio(staged):
+            if staged and final and staged.is_file() and self._validate_audio(staged, self.duration_ms):
                 # Recover a crash after staging audio but before publication.
                 os.replace(staged, final)
                 journal.set_state(self.uri, "tags_pending", final_path=final)
@@ -818,7 +839,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
                 )
                 pathlike_move_safe(temppath, staged_path)
 
-        if not self._validate_audio(staged_path):
+        if not self._validate_audio(staged_path, self.duration_ms):
             journal.set_state(self.uri, "failed", stage_path=staged_path,
                               final_path=path, error="Audio validation failed")
             staged_path.unlink(missing_ok=True)

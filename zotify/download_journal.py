@@ -47,8 +47,12 @@ class DownloadJournal:
                     stage_path TEXT,
                     final_path TEXT,
                     error TEXT,
+                    tag_attempts INTEGER NOT NULL DEFAULT 0,
                     updated_at REAL NOT NULL
                 )""")
+                columns = {row[1] for row in db.execute("PRAGMA table_info(downloads)")}
+                if "tag_attempts" not in columns:
+                    db.execute("ALTER TABLE downloads ADD COLUMN tag_attempts INTEGER NOT NULL DEFAULT 0")
                 db.commit()
             finally:
                 db.close()
@@ -70,12 +74,24 @@ class DownloadJournal:
     def get(self, uri: str) -> dict | None:
         with self._connection() as db:
             row = db.execute(
-                "SELECT state, stage_path, final_path, error, updated_at "
+                "SELECT state, stage_path, final_path, error, updated_at, tag_attempts "
                 "FROM downloads WHERE uri = ?", (uri,)
             ).fetchone()
         if row is None:
             return None
-        return dict(zip(("state", "stage_path", "final_path", "error", "updated_at"), row))
+        return dict(zip(("state", "stage_path", "final_path", "error", "updated_at", "tag_attempts"), row))
+
+    def increment_tag_attempts(self, uri: str) -> int:
+        with self._connection() as db:
+            db.execute("UPDATE downloads SET tag_attempts = tag_attempts + 1, updated_at = ? WHERE uri = ?",
+                       (time(), uri))
+            row = db.execute("SELECT tag_attempts FROM downloads WHERE uri = ?", (uri,)).fetchone()
+        return int(row[0]) if row else 0
+
+    def reset_tag_attempts(self, uri: str) -> None:
+        with self._connection() as db:
+            db.execute("UPDATE downloads SET tag_attempts = 0, updated_at = ? WHERE uri = ?",
+                       (time(), uri))
 
     def set_state(self, uri: str, state: str, stage_path: Path | None = None,
                   final_path: Path | None = None, error: str | None = None) -> None:
