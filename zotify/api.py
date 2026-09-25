@@ -740,15 +740,21 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         journal = self._journal()
         prior_state = journal.get(self.uri)
         if prior_state and prior_state["state"] == "audio_verified":
-            staged = Path(prior_state["stage_path"] or "")
-            final = Path(prior_state["final_path"] or "")
-            if not staged.exists() and file_has_content(final):
+            staged = Path(prior_state["stage_path"]) if prior_state["stage_path"] else None
+            final = Path(prior_state["final_path"]) if prior_state["final_path"] else None
+            if staged and final and staged.is_file() and self._validate_audio(staged):
+                # Recover a crash after staging audio but before publication.
+                os.replace(staged, final)
+                journal.set_state(self.uri, "tags_pending", final_path=final)
+                prior_state = journal.get(self.uri)
+            elif staged and final and not staged.exists() and file_has_content(final):
                 # Recover a crash after atomic audio publication but before the
                 # state transition to tags_pending.
                 journal.set_state(self.uri, "tags_pending", final_path=final)
                 prior_state = journal.get(self.uri)
             else:
-                staged.unlink(missing_ok=True)
+                if staged and staged.is_file():
+                    staged.unlink(missing_ok=True)
                 journal.set_state(self.uri, "failed", error="Interrupted before audio publication")
                 prior_state = journal.get(self.uri)
         if prior_state and prior_state["state"] == "tags_pending":
