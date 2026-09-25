@@ -220,9 +220,15 @@ class Printer:
         Printer.new_print(channel, Printer.pretty(obj), PrintStyle.JSON)
     
     @staticmethod
-    def traceback(e: Exception) -> None:
-        msg = "".join(TracebackException.from_exception(e).format())
-        Printer.new_print(PrintChannel.ERROR, msg, PrintStyle.MANDATORY)
+    def traceback(e: BaseException, message: str | None = None,
+                  channel: PrintChannel = PrintChannel.ERROR) -> None:
+        """Log full exception details and show a concise console summary."""
+        trace = "".join(TracebackException.from_exception(e).format())
+        from zotify.config import Zotify
+        if Zotify.LOGGER is not None:
+            Zotify.LOGGER.critical("Exception details:\n%s", trace)
+        summary = message or f"{type(e).__name__}: {e}"
+        Printer.new_print(channel, summary, PrintStyle.MANDATORY)
     
     @staticmethod
     def depreciated_warning(option_string: str, help_msg: str = None, CONFIG = True) -> None:

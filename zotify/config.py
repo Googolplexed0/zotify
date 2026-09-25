@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import sys
+import threading
 import requests
 from binascii import hexlify
 from base64 import b64encode, b64decode
@@ -848,6 +849,7 @@ class Zotify:
     LOGGER                  : logging.Logger            = None
     DOWNLOAD_QUALITY        : FormatOnlyAudioQuality    = None
     DOWNLOAD_BITRATE        : str                       = None
+    _ORIGINAL_THREAD_EXCEP_HOOK                         = None
     
     # DYNAMIC PER SESSION
     FORCE_STREAM_API_CALLS  : bool                      = False
@@ -891,6 +893,7 @@ class Zotify:
         cls.start_stats()
         cls.CONFIG.load(args)
         cls.LOGGER = LogHandler.start_logger(cls.DATETIME_LAUNCH)
+        cls.install_thread_exception_hook()
         
         with Loader(LOGIN_STRING, PrintChannel.MANDATORY):
             cls.SESSION = LoginHandler.login(args)
@@ -899,7 +902,7 @@ class Zotify:
             Printer.hashtaged(PrintChannel.MANDATORY, 'ALL LOGIN ATTEMPTS UNSUCCESSFUL\n'+ 
                                                       'NO SESSION CREATED, EXITING PROGRAM')
             cls.end()
-            sys.exit(1) # TODO implement full exit code scheme
+            sys.exit(2)
         
         prem, quality, bitrate = cls.parse_dl_quality(cls.CONFIG.get_download_qual_pref())
         cls.DOWNLOAD_QUALITY = quality
@@ -908,6 +911,40 @@ class Zotify:
                       ('Custom Client API Initialized Successfully\n' if LoginHandler.OAUTH else '') +
                       f'User Subscription Type: {"PREMIUM" if prem else "FREE"}\n' +
                       f'Zotify Version v{cls.VERSION}')
+
+    @classmethod
+    def install_thread_exception_hook(cls) -> None:
+        """Show concise network failures from librespot's receiver thread."""
+        if cls._ORIGINAL_THREAD_EXCEP_HOOK is not None:
+            return
+
+        cls._ORIGINAL_THREAD_EXCEP_HOOK = threading.excepthook
+        original_hook = cls._ORIGINAL_THREAD_EXCEP_HOOK
+
+        def exception_hook(args) -> None:
+            error = args.exc_value
+            thread = args.thread
+            if (thread is None or thread.name != "session-packet-receiver"
+                    or not isinstance(error, OSError)):
+                original_hook(args)
+                return
+
+            def describe(exception: BaseException) -> str:
+                return getattr(exception, "strerror", None) or str(exception)
+
+            previous_error = error.__context__ or error.__cause__
+            if isinstance(previous_error, OSError):
+                message = (
+                    "Spotify lost its connection ({}) and reconnect failed ({}). "
+                    "If downloads stop progressing, rerun Zotify to resume."
+                ).format(describe(previous_error), describe(error))
+            else:
+                message = "Spotify's connection receiver stopped: {}.".format(
+                    describe(error))
+
+            Printer.traceback(error, message, PrintChannel.MANDATORY)
+
+        threading.excepthook = exception_hook
     
     @staticmethod
     def id_from_gid(gid: str) -> str:
