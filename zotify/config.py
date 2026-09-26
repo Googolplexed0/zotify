@@ -3,6 +3,7 @@ import logging
 import re
 import sys
 import requests
+import webbrowser
 from binascii import hexlify
 from base64 import b64encode, b64decode
 from contextlib import contextmanager
@@ -739,7 +740,12 @@ class LoginHandler:
     def create_oauth(client_id: str) -> OAuth:
         redirect_url = f"http://{Zotify.CONFIG.get_oauth_address()}:{Zotify.CONFIG.get_oauth_port()}/login"
         def oauth_print(url):
-            Printer.new_print(PrintChannel.MANDATORY, f"Click on the following link to login:\n{url}")
+            Printer.new_print(PrintChannel.MANDATORY,
+                              f"Opening the login page in your browser. If it doesn't open, open this link manually:\n{url}")
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
         
         timeout = Zotify.CONFIG.get_oauth_timeout()
         return OAuth(client_id, redirect_url, oauth_print).set_scopes(SCOPES).set_listen_all(True).set_timeout(timeout)
