@@ -6,6 +6,7 @@ from music_tag.mp4 import freeform_set
 from mutagen.id3 import TXXX
 
 from zotify.api import *
+from zotify.utils import fetch_artwork
 
 
 class MetadataIO:
@@ -431,7 +432,7 @@ class Tagger:
                 ALBUMARTIST:    obj.artist_names(),
                 COMPILATION:    obj.compilation,
                 YEAR:           obj.year,
-                ARTWORK:        requests.get(obj.image_url).content if obj.image_url else None, # expect jpeg
+                ARTWORK:        fetch_artwork(obj.image_url),
             }
             optional_tags = {
                 TOTALTRACKS:    obj.total_tracks if Zotify.CONFIG.get_disc_track_totals() else None,

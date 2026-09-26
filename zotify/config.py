@@ -16,10 +16,10 @@ from librespot.proto.Authentication_pb2 import AuthenticationType
 from librespot.proto.Metadata_pb2 import AudioFile
 from pathlib import Path, PurePath
 from platform import system
-from time import sleep
+from time import sleep, monotonic
 from typing import Any, Callable
 
-from zotify.utils import ensure_is_file, file_has_content, safe_typecast, now
+from zotify.utils import ensure_is_file, file_has_content, safe_typecast, now, HTTP_REQUEST_TIMEOUT
 from zotify.termoutput import *
 
 Streamer = CdnManager.Streamer
@@ -1033,9 +1033,10 @@ class Zotify:
                                                         f'Status {http.status_code}:  '+
                                                         f'{resp.get(ERROR, {}).get(MESSAGE, "No message provided")}')
             if api_retry: sleep(retry_delay if not expectFail else 1)
+            request_started = monotonic()
             
             try:
-                http = requests.get(url, headers=headers, params=params)
+                http = requests.get(url, headers=headers, params=params, timeout=HTTP_REQUEST_TIMEOUT)
                 fallback_message = cls.api_status_str(http.status_code, http)
                 resp: dict[str, str | int | dict] = http.json()
                 http.raise_for_status()
@@ -1051,7 +1052,16 @@ class Zotify:
                     return {} # do not count as fetch, skip FETCH_DELAY
                 elif not resp:              resp = {ERROR: {MESSAGE: "Received an empty response"}}
                 elif not resp.get(ERROR):   resp = {ERROR: {MESSAGE: fallback_message}}
-            finally: cls.TOTAL_API_CALLS += 1
+            except requests.exceptions.RequestException as e:
+                http = requests.Response()
+                http.status_code = 0
+                fallback_message = f"Request failed ({type(e).__name__})"
+                resp = {ERROR: {MESSAGE: fallback_message}}
+            finally:
+                cls.TOTAL_API_CALLS += 1
+                logging.getLogger("zotify.debug").debug(
+                    "Metadata HTTP attempt completed: status=%s elapsed=%.3fs",
+                    http.status_code, monotonic() - request_started)
             retry_text = f"(RETRY {api_retry}) " if api_retry else ""
             retry_delay = max(cls.CONFIG.get_retry_delay(api_retry), float(http.headers.get(RETRY_AFTER, 0.0)))
             api_retry += 1
@@ -1065,8 +1075,7 @@ class Zotify:
                                                     f'{fallback_message}')
         elif not expectFail:
             Printer.hashtaged(PrintChannel.API_ERROR, f'RETRY LIMIT EXCEDED\n' +
-                                                      f'RESPONSE TEXT: {Printer.pretty(resp)}\n' +
-                                                      f'URL: {Printer.pretty(url)}')
+                                                      f'RESPONSE TEXT: {Printer.pretty(resp)}')
         return {}
     
     @classmethod
