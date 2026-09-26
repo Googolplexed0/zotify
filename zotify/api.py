@@ -373,11 +373,13 @@ class DLContent(Content):
         
         return False
     
-    def fetch_stream(self):
+    def fetch_stream(self) -> Streamer | None:
         stream_retry = 0
-        while not (stream := Zotify.get_content_stream(self)):
-            if stream_retry >= Zotify.CONFIG.get_retry_attempts(): break
-            stream_retry += 1; sleep(Zotify.CONFIG.get_retry_delay())
+        while stream_retry <= Zotify.CONFIG.get_retry_attempts():
+            if stream_retry: sleep(retry_delay)
+            if stream := Zotify.get_content_stream(self): break
+            retry_delay = Zotify.CONFIG.get_retry_delay(stream_retry)
+            stream_retry += 1
         if stream is None:
             Printer.hashtaged(PrintChannel.ERROR, f'SKIPPING {self.clsn.upper()} - FAILED TO GET CONTENT STREAM\n' +
                                                   f'{self.clsn}_ID: {self.id}')

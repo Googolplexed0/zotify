@@ -824,11 +824,12 @@ class LoginHandler:
         while login_retry <= Zotify.CONFIG.get_retry_attempts():
             if login_retry:
                 Printer.hashtaged(PrintChannel.WARNING, 'LOGIN FAILED, TRYING AGAIN AFTER DELAY')
-                sleep(Zotify.CONFIG.get_retry_delay())
+                sleep(retry_delay)
             cls.attempt_login(args)
             if cls.login_success():
                 cls.save_credentials()
                 return cls.SESSION
+            retry_delay = Zotify.CONFIG.get_retry_delay(login_retry)
             login_retry += 1
     
     @classmethod
