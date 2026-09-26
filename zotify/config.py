@@ -821,12 +821,15 @@ class LoginHandler:
     @classmethod
     def login(cls, args) -> Session | None:
         login_retry = 0
-        while not cls.login_success():
+        while login_retry <= Zotify.CONFIG.get_retry_attempts():
+            if login_retry:
+                Printer.hashtaged(PrintChannel.WARNING, 'LOGIN FAILED, TRYING AGAIN AFTER DELAY')
+                sleep(Zotify.CONFIG.get_retry_delay())
             cls.attempt_login(args)
-            if cls.login_success() or login_retry >= Zotify.CONFIG.get_retry_attempts():
+            if cls.login_success():
+                cls.save_credentials()
                 return cls.SESSION
-            Printer.hashtaged(PrintChannel.WARNING, 'LOGIN FAILED, TRYING AGAIN AFTER DELAY')
-            login_retry += 1; sleep(Zotify.CONFIG.get_retry_delay())
+            login_retry += 1
     
     @classmethod
     def choose_token(cls, force_login5: bool) -> str:
@@ -894,7 +897,6 @@ class Zotify:
         
         with Loader(LOGIN_STRING, PrintChannel.MANDATORY):
             cls.SESSION = LoginHandler.login(args)
-            LoginHandler.save_credentials()
         if not cls.SESSION:
             Printer.hashtaged(PrintChannel.MANDATORY, 'ALL LOGIN ATTEMPTS UNSUCCESSFUL\n'+ 
                                                       'NO SESSION CREATED, EXITING PROGRAM')
