@@ -1,11 +1,10 @@
 from __future__ import annotations
 import ffmpy
-import requests
 import subprocess
 from time import time, sleep
 from uuid import uuid4
 
-from zotify.config import Zotify, Streamer
+from zotify.config import Zotify, Streamer, HTTPError
 from zotify.utils import *
 
 
@@ -28,7 +27,7 @@ class HierarchicalNode(metaclass=DynamicClassNameAttrs):
         self.parents:           set[HierarchicalNode] = set()
         self.children:          set[HierarchicalNode] = set()
         self.ALL_NODES[self] = self
-        super().__init__() # handle add-on classes
+        super().__init__() # handle mix-in classes
     
     @classmethod
     def get_if_exists(cls, node_comparable) -> HierarchicalNode | None:
@@ -323,10 +322,10 @@ class DLContent(Content):
             return self._path_root / f"{self.id}.{self._ext}"
     
     @staticmethod
-    def create_download_directory(dir_path: str | PurePath):
+    def create_download_directory(dir_path: PurePath):
         Path(dir_path).mkdir(parents=True, exist_ok=True)
         if Zotify.CONFIG.get_no_dir_archives(): return
-        Path(dir_path).joinpath('.song_ids').touch() # add hidden file with song ids
+        Path(dir_path).joinpath(LOCAL_SONG_ARCHIVE).touch()
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
         from zotify.metadata import SongArchive
@@ -403,11 +402,6 @@ class DLContent(Content):
                     else:
                         no_responses += 1
                         sleep(0.05)
-                # if Zotify.CONFIG.get_download_real_time():
-                    #     elapsed_real = time() - time_start
-                    #     elapsed_want = (pbar.n / stream.size) * (self.duration_ms/1000)
-                    # if elapsed_want > elapsed_real:
-                    #     sleep(elapsed_want - elapsed_real)
         finally:
             pbar.close(); pbar.clear()
         
@@ -505,7 +499,7 @@ class DLContent(Content):
         return True
 
 
-class HasArtists:
+class HasArtists(metaclass=DynamicClassNameAttrs):
     def __init__(self):
         self.artists        : list[Artist]          = None
         super().__init__()
@@ -517,7 +511,7 @@ class HasArtists:
         if not delim and FORCE_STR: return ", ".join(artist_names)
         elif not delim:             return artist_names
         else:                       return delim.join(artist_names)
-class HasGenres: # only fetched if config set
+class HasGenres(metaclass=DynamicClassNameAttrs): # only fetched if config set
     def __init__(self):
         self.genres         : list[str]             = None
         super().__init__()
@@ -529,12 +523,52 @@ class HasGenres: # only fetched if config set
         elif not delim and FORCE_STR:               return ", ".join(self.genres)
         elif not delim:                             return self.genres
         else:                                       return delim.join(self.genres)
-class IsAddable: # set by Playlist API
+class HasImage(metaclass=DynamicClassNameAttrs):
+    MAGIC_NUMBERS = {
+        b'\xff\xd8\xff': '.jpg',
+        b'\x89PNG\r\n\x1a\n': '.png',
+        b'GIF87a': '.gif',
+        b'GIF89a': '.gif',
+        b'BM': '.bmp'
+    }
+    
+    def __init__(self):
+        self._image         : bytes                 = None
+        self.image_url      : str                   = None
+        super().__init__()
+    
+    def get_image(self) -> bytes | None:
+        if self._image: return self._image
+        elif not self.image_url: return
+        
+        image_retry = 0
+        while image_retry <= Zotify.CONFIG.get_retry_attempts():
+            if image_retry: sleep(retry_delay)
+            try: self._image: bytes | None = Zotify.get_request(self.image_url).content
+            except: pass
+            if self._image: break
+            retry_delay = Zotify.CONFIG.get_retry_delay(image_retry)
+            image_retry += 1
+        if not self._image:
+            Printer.hashtaged(PrintChannel.WARNING, f'FAILED TO FETCH {self.uppers} IMAGE')
+            self._image = None
+        
+        return self._image
+    
+    def image_to_file(self, no_suffix_path: PurePath) -> None:
+        if not self._image: return
+        file_suffix = ".jpg" # assumed encoding
+        for k, v in self.MAGIC_NUMBERS.items():
+            if self._image.startswith(k): file_suffix = self.MAGIC_NUMBERS[k]; break
+        path = ensure_real_file(no_suffix_path.with_suffix(file_suffix), "")
+        if file_has_content(path): return
+        with open(path, 'wb') as f: f.write(self._image)
+class IsAddable(metaclass=DynamicClassNameAttrs): # set by Playlist API
     def __init__(self):
         self.added_at       : dict[Playlist, str]   = {}
         self.added_by       : dict[Playlist, User]  = {}
         super().__init__()
-class IsFavoritable: # set by UserItem API
+class IsFavoritable(metaclass=DynamicClassNameAttrs): # set by UserItem API
     def __init__(self):
         self.added_at       : dict[UserItem, str]   = {}
         super().__init__()
@@ -653,13 +687,12 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         
         if Zotify.CONFIG.get_lyrics_to_file():
             lyricdir = Zotify.CONFIG.get_lyrics_location()
-            if lyricdir is None:
+            if not lyricdir:
                 lyricdir = self.output_path(parent_stack).parent
-            Path(lyricdir).mkdir(parents=True, exist_ok=True)
-            
             lrc_filename = self.output_path(parent_stack, Zotify.CONFIG.get_lyrics_filename()).stem
-            
-            with open(lyricdir / f"{lrc_filename}.lrc", 'w', encoding='utf-8') as file:
+            lcr_path = ensure_real_file(lyricdir, f"{lrc_filename}.lrc")
+            # if file_has_content(lcr_path): return
+            with open(lcr_path, 'w', encoding='utf-8') as file:
                 if Zotify.CONFIG.get_lyrics_header():
                     lrc_header = [f"[ti: {self.name}]\n",
                                   f"[ar: {self.artist_names(FORCE_STR=True)}]\n",
@@ -744,7 +777,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         self.wait_between_downloads()
 
 
-class Episode(DLContent, IsAddable):
+class Episode(DLContent, HasImage, IsAddable):
     _path_root: PurePath = Zotify.CONFIG.get_root_podcast_path()
     _regex_flag = Zotify.CONFIG.get_regex_episode()
     _to_str_attrs = [SHOW, NAME]
@@ -785,15 +818,14 @@ class Episode(DLContent, IsAddable):
     def download_directly(self, path: PurePath) -> str:
         time_start = time()
         
-        r = requests.get(self.partner_url, stream=True, allow_redirects=True)
-        if r.status_code != 200:
-            r.raise_for_status()  # Will only raise for 4xx codes, so...
-            raise RuntimeError(f"Request to {self.partner_url} returned status code {r.status_code}")
-        file_size = int(r.headers.get('Content-Length', 0))
+        http = Zotify.get_request(self.partner_url, stream=True, allow_redirects=True)
+        if not http.content:            raise HTTPError("No response received")
+        elif http.status_code != 200:   raise HTTPError(f"{http.status_code} Error: {http.reason} for url: {self.partner_url}")
+        file_size = int(http.headers.get('Content-Length', 0))
         desc = "" if file_size else "(Unknown total file size)"
         
         path = Path(path).expanduser().resolve()
-        with Printer.pbar_stream(r.raw, desc=desc, total=file_size) as f_stream:
+        with Printer.pbar_stream(http.raw, desc=desc, total=file_size) as f_stream:
             self.set_dl_status("Downloading Stream")
             pathlike_move_safe(f_stream, path)
         
@@ -928,7 +960,7 @@ class Container(Content):
         self.mark_downloaded()
 
 
-class Playlist(Container):
+class Playlist(Container, HasImage):
     _show_pbar = Zotify.CONFIG.get_show_playlist_pbar()
     _to_str_attrs = [OWNER, NAME]
     _contains = (Track, Episode)
@@ -945,7 +977,6 @@ class Playlist(Container):
         self.description        : str                       = None
         self.deleted_by_owner   : bool                      = None
         self.length             : int                       = None
-        self.image_url          : str                       = None
         self.owner              : User                      = None
         self.public             : bool                      = None
         self.revision           : str                       = None
@@ -968,7 +999,7 @@ class Playlist(Container):
         return self.unwrap( super().fetch_items(hide_loader=hide_loader) )
 
 
-class User(Container):
+class User(Container, HasImage):
     _contains = Playlist
     _display_name_map = {}
     
@@ -987,7 +1018,7 @@ class User(Container):
         return cls._display_name_map[username]
 
 
-class Album(Container, HasArtists, IsFavoritable):
+class Album(Container, HasArtists, HasImage, IsFavoritable):
     _regex_flag = Zotify.CONFIG.get_regex_album()
     _show_pbar = Zotify.CONFIG.get_show_album_pbar()
     _to_str_attrs = [ARTISTS, NAME]
@@ -1005,7 +1036,6 @@ class Album(Container, HasArtists, IsFavoritable):
         self.compilation    : bool                  = None
         self.duration_ms    : int                   = None
         self.ean            : str                   = None # European Article Number
-        self.image_url      : str                   = None
         self.isrc           : str                   = None # International Standard Recording Code
         self.label          : str                   = None
         self.release_date   : str                   = None
@@ -1046,22 +1076,12 @@ class Album(Container, HasArtists, IsFavoritable):
         return False
     
     def save_album_art_to_file(self, filepath: PurePath, parent_stack: ParentStack):
-        if not Zotify.CONFIG.get_album_art_jpg_file() or self.image_url is None:
-            return
-        image_bytes = requests.get(self.image_url).content # expect jpeg
-        if not image_bytes:
-            return
-        album_path = filepath.with_name('cover.jpg');   a_exists = file_has_content(album_path)
-        single_path = filepath.with_suffix('.jpg');     s_exists = file_has_content(single_path)
-        Printer.logger(f"Album Art Detected: {a_exists}\n" +
-                       f"Single Art Detected: {s_exists}", PrintChannel.DEBUG)
-        if a_exists or s_exists:
-            return
-        jpg_path = album_path if len(parent_stack) > 1 and isinstance(parent_stack[-2], Album) else single_path
-        with open(jpg_path, 'wb') as f: f.write(image_bytes)
+        if not Zotify.CONFIG.get_album_art_to_file(): return
+        downloaded_as_album = len(parent_stack) > 1 and isinstance(parent_stack[-2], Album)
+        self.image_to_file(filepath.with_name('cover') if downloaded_as_album else filepath.with_suffix(''))
 
 
-class Artist(Container, HasGenres):
+class Artist(Container, HasGenres, HasImage):
     _show_pbar = Zotify.CONFIG.get_show_artist_pbar()
     _to_str_attrs = [NAME, FOLLOWERS, GENRES]
     _to_db_attrs = [GENRES]
@@ -1092,7 +1112,7 @@ class Artist(Container, HasGenres):
         return bool(self.genres)
 
 
-class Show(Container):
+class Show(Container, HasImage):
     _path_root: PurePath = Zotify.CONFIG.get_root_podcast_path()
     _show_pbar = Zotify.CONFIG.get_show_album_pbar()
     _to_str_attrs = [PUBLISHER, NAME]
@@ -1109,7 +1129,6 @@ class Show(Container):
         self.description            : str               = None
         self.explicit               : bool              = None
         self.is_externally_hosted   : bool              = None
-        self.image_url              : str               = None
         self.publisher              : str               = None
         self.total_episodes         : int               = None
 
@@ -1406,9 +1425,9 @@ class VerifyLibrary(Query):
                 if uri not in paths_per_track:                  paths_per_track[uri] = []
                 if filepath not in paths_per_track[uri]:        paths_per_track[uri].append(filepath)
         
-        link_tracks(None, Track._path_root) # global .song_archive
-        for song_ids in Path(Track._path_root).rglob(".song_ids"):
-            if not song_ids.is_file(): continue
+        link_tracks(None, Track._path_root)
+        for song_ids in Path(Track._path_root).rglob(LOCAL_SONG_ARCHIVE):
+            if not file_has_content(song_ids): continue
             dir_path = PurePath(song_ids.parent)
             link_tracks(dir_path, dir_path)
         

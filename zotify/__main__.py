@@ -7,7 +7,8 @@ It's like youtube-dl, but for that other music platform.
 
 import argparse
 
-from zotify.config import Zotify, Printer, CONFIG_VALUES, DEPRECIATED_CONFIGS, ARG, TYPE, HELP
+from zotify.config import Zotify, Printer, CONFIG_VALUES, DEPRECIATED_CONFIGS
+from zotify.const import ARG, TYPE, HELP, CONFIG_FILE, LOCAL_SONG_ARCHIVE, GLOBAL_SONG_ARCHIVE
 
 
 class DepreciatedAction(argparse.Action):
@@ -41,7 +42,7 @@ def main():
     parser.add_argument('-P', '--persist',
                         action='store_true',
                         dest='persist',
-                        help='Perform multiple queries with a single persistent Session')
+                        help='Perform multiple Queries with a single persistent Session')
     parser.add_argument('-T', '--test', '--dry-run',
                         action='store_true',
                         dest='test',
@@ -49,21 +50,21 @@ def main():
     parser.add_argument('--update-config',
                         action='store_true',
                         dest='update_config',
-                        help='Updates the `config.json` file while keeping all current settings unchanged')
+                        help=f'Updates the `{CONFIG_FILE}` file while keeping all current settings unchanged')
     parser.add_argument('--update-archive',
                         action='store_true',
                         dest='update_archive',
-                        help='Updates the global `.song_archive` file with full filepaths, keeping non-findable entries unchanged')
+                        help=f'Updates the global `{GLOBAL_SONG_ARCHIVE}` file with full filepaths, keeping non-findable entries unchanged')
     parser.add_argument('--debug',
                         action='store_true',
                         dest='debug',
-                        help='Enable debug mode, prints extra information and creates a `config_DEBUG.json` file')
+                        help=f'Enables debugging, printing extra information and creating a `{CONFIG_FILE.replace(".json", "_DEBUG.json")}` file')
     
     # with args
     parser.add_argument('-c', '--config', '--config-location',
                         type=str,
                         dest='config_location',
-                        help='Specify a directory containing a Zotify `config.json` file to load settings')
+                        help=f'Specify a directory containing a Zotify `{CONFIG_FILE}` file to load settings')
     parser.add_argument('-u', '--username',
                         type=str,
                         dest='username',
@@ -109,7 +110,7 @@ def main():
     group.add_argument('-v', '--verify-library',
                        action='store_true',
                        dest='verify_library',
-                       help='Update metadata for all Tracks in `ROOT_PATH` with an entry in the global `.song_archive` or directory `.song_ids`, no tracks will be downloaded.')
+                       help=f'Update metadata for all Tracks in `ROOT_PATH` with an entry in the global `{GLOBAL_SONG_ARCHIVE}` or directory `{LOCAL_SONG_ARCHIVE}`, no tracks will be downloaded.')
     modes = group._group_actions.copy()
     
     for arg in DEPRECIATED_ARGS: 

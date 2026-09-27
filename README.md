@@ -79,7 +79,7 @@ If an artist's URL is given, all albums by the specified artist will be download
 | `-T`, `--test`, `--dry-run`         | Perform a "dry run" of a Query, fetching metadata without downloading/modifying any music files                    |
 | `--update-config`                   | Updates the `config.json` file while keeping all current settings unchanged                                        |
 | `--update-archive`                  | Updates the global `.song_archive` file with full filepaths, keeping non-findable entries unchanged                |
-| `--debug`                           | Enable debug mode, printing extra information and creating a `config_DEBUG.json` file                              |
+| `--debug`                           | Enables debugging, printing extra information and creating a `config_DEBUG.json` file                              |
 
 | Command Line Config Flag            | Value                                                                                                              |
 |-------------------------------------|--------------------------------------------------------------------------------------------------------------------|
@@ -187,7 +187,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `MD_ARTISTDELIMITER`         | `--md-artistdelimiter`              | Delimiter character to split artists in metadata, use `""` if array-like tags desired    | `", "`        |
 | `SEARCH_QUERY_SIZE`          | `--search-query-size`               | Number of items to fetch per category when performing a search                           | 10            |
 | `STRICT_LIBRARY_VERIFY`      | `--strict-library-verify`           | Whether unreliable tags should be forced to match when verifying local library           | True          |
-| `ALBUM_ART_JPG_FILE`         | `--album-art-jpg-file`              | Save album art as a separate .jpg file                                                   | False         |
+| `ALBUM_ART_TO_FILE`          | `--album-art-to-file`               | Save album art as a separate image file                                                   | False         |
 
 | ZMD Options                  | Command Line Config Flag            | Description                                                                     | Default Value          |
 |------------------------------|-------------------------------------|---------------------------------------------------------------------------------|------------------------|
@@ -201,6 +201,7 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `API_CLIENT_ID`              | `--client-id`                       | Client ID for a Developer App to route metadata API requests through          | `""`                     |
 | `API_CREDENTIALS_LOCATION`   | `--api-creds`, `--api-credentials-location` | Directory/Filepath to store/load a Zotify `api_credentials.json` file | See [Path Option Parser](#path-option-parser) |
 | `API_CLIENT_LEGACY`          | `--client-legacy`                   | Whether the Developer App can access legacy endpoints\*\*                     | True                     |
+| `FETCH_TIMEOUT`              | `--fetch-timeout`                   | Wait time for request callback before error, 0 meaning disabled               | 30.0                     |
 | `FETCH_DELAY`                | `--fetch-delay`                     | Wait time between all API requests, in seconds                                | 0.0                      |
 | `RETRY_ATTEMPTS`             | `--retry-attempts`                  | Number of times to retry failed API requests                                  | 1                        |
 | `RETRY_DELAY`                | `--retry-delay`                     | Wait time between API retry attempts, in seconds                              | 5.0                      |

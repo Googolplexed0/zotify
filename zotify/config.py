@@ -2,7 +2,6 @@ import json
 import logging
 import re
 import sys
-import requests
 from binascii import hexlify
 from base64 import b64encode, b64decode
 from contextlib import contextmanager
@@ -16,10 +15,12 @@ from librespot.proto.Authentication_pb2 import AuthenticationType
 from librespot.proto.Metadata_pb2 import AudioFile
 from pathlib import Path, PurePath
 from platform import system
+from requests import Response, get as r_get
+from requests.exceptions import HTTPError, Timeout
 from time import sleep
 from typing import Any, Callable
 
-from zotify.utils import ensure_is_file, file_has_content, safe_typecast, now
+from zotify.utils import ensure_real_file, file_has_content, safe_typecast, now
 from zotify.termoutput import *
 
 Streamer = CdnManager.Streamer
@@ -107,7 +108,7 @@ CONFIG_VALUES = {
     MD_ARTISTDELIMITER:         { DEFAULT: ', ',                      TYPE: str,    ARG: ('--md-artistdelimiter'                      ,) },
     SEARCH_QUERY_SIZE:          { DEFAULT: '10',                      TYPE: int,    ARG: ('--search-query-size'                       ,) },
     STRICT_LIBRARY_VERIFY:      { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--strict-library-verify'                   ,) },
-    ALBUM_ART_JPG_FILE:         { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--album-art-jpg-file'                      ,) },
+    ALBUM_ART_TO_FILE:          { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--album-art-to-file'                       ,) },
     
     # ZMD Options
     IMPORT_ZMD:                 { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--import-zmd'                              ,) },
@@ -119,6 +120,7 @@ CONFIG_VALUES = {
     API_CLIENT_ID:              { DEFAULT: '',                        TYPE: str,    ARG: ('--client-id'                               ,) },
     API_CREDENTIALS_LOCATION:   { DEFAULT: '',                        TYPE: str,    ARG: ('--api-creds', '--api-credentials-location' ,) },
     API_CLIENT_LEGACY:          { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--client-legacy'                           ,) },
+    FETCH_TIMEOUT:              { DEFAULT: '30.0',                    TYPE: float,  ARG: ('--fetch-timeout'                           ,) },
     FETCH_DELAY:                { DEFAULT: '0.0',                     TYPE: float,  ARG: ('--fetch-delay'                             ,) },
     RETRY_ATTEMPTS:             { DEFAULT: '1',                       TYPE: int,    ARG: ('--retry-attempts'                          ,) },
     RETRY_DELAY:                { DEFAULT: '5.0',                     TYPE: float,  ARG: ('--retry-delay'                             ,) },
@@ -159,6 +161,7 @@ DEPRECIATED_CONFIGS = {
     "MD_SAVE_LYRICS":           { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--md-save-lyrics'                       ,) },
     "BYPASS_MD_API":            { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--bypass-metadata-api'                  ,) },
     "DOWNLOAD_REAL_TIME":       { DEFAULT: 'False',                   TYPE: bool,   ARG: ('-rt', '--download-real-time'            ,) },
+    "ALBUM_ART_JPG_FILE":       { DEFAULT: 'False',                   TYPE: bool,   ARG: ('--album-art-jpg-file'                      ,) },
 }
 
 
@@ -185,7 +188,7 @@ class Config:
             config_dir_or_file = cls._default_path()
         else:
             config_dir_or_file = Path(config_str).expanduser()
-        config_path = ensure_is_file(config_dir_or_file, 'config.json')
+        config_path = ensure_real_file(config_dir_or_file, CONFIG_FILE)
         
         # Debug Check (guarantee at top of config)
         cmd_args: dict = vars(args)
@@ -195,11 +198,11 @@ class Config:
         for cfg, cfg_setup in CONFIG_VALUES.items():
             cls.Values[cfg] = safe_typecast(cfg_setup, DEFAULT, cfg_setup[TYPE])
         
-        # Load config from config.json
+        # Load config from file
         if not file_has_content(config_path):
             with open(config_path, 'w', encoding='utf-8') as config_file:
                 json.dump(cls._default(), config_file, indent=4)
-            Printer.hashtaged(PrintChannel.MANDATORY, f"config.json saved to {config_path.resolve().parent}")
+            Printer.hashtaged(PrintChannel.MANDATORY, f"{CONFIG_FILE} saved to {Path(config_path).resolve().parent}")
         else:
             with open(config_path, encoding='utf-8') as config_file:
                 jsonvalues: dict[str, dict[str, Any]] = json.load(config_file)
@@ -209,7 +212,7 @@ class Config:
                 elif cfg in CONFIG_VALUES:
                     cls.Values[cfg] = safe_typecast(jsonvalues, cfg, CONFIG_VALUES[cfg][TYPE])
                 elif cfg in DEPRECIATED_CONFIGS: # keep, warn, and place at the bottom (don't delete)
-                    Printer.depreciated_warning(cfg, f'Delete the `"{cfg}": "{jsonvalues[cfg]}"` line from your config.json')
+                    Printer.depreciated_warning(cfg, f'Delete the `"{cfg}": "{jsonvalues[cfg]}"` line from your {CONFIG_FILE}')
                     cls.Values["vvv___DEPRECIATED_BELOW_HERE___vvv"] = "vvv___REMOVE_THESE___vvv"
                     cls.Values[cfg] = safe_typecast(jsonvalues, cfg, DEPRECIATED_CONFIGS[cfg][TYPE])
         
@@ -217,11 +220,10 @@ class Config:
         if cls.debug() or args.update_config:
             if cls.debug() and not config_path.name.endswith("_DEBUG.json"):
                 config_path = config_path.with_stem(config_path.stem + "_DEBUG")
-            config_path.touch()
             with open(config_path, 'w', encoding='utf-8') as debug_file:
                 json.dump({k: str(v) for k, v in cls.Values.items()}, debug_file, indent=4)
             real_debug = cls.Values[DEBUG]; cls.Values[DEBUG] = True
-            Printer.hashtaged(PrintChannel.DEBUG, f"{config_path.name} saved to {config_path.resolve().parent}")
+            Printer.hashtaged(PrintChannel.DEBUG, f"{config_path.name} saved to {Path(config_path).resolve().parent}")
             cls.Values[DEBUG] = real_debug
         
         # Override config from commandline arguments
@@ -232,7 +234,7 @@ class Config:
         if cls.get_regex_enabled():
             for mode in [TRACK, EPISODE, ALBUM]:
                 regex_method: Callable[[None], None | re.Pattern] = getattr(cls, f"get_regex_{mode.lower()}")
-                if regex_method(): 
+                if regex_method():
                     Printer.hashtaged(PrintChannel.DEBUG, f'{mode.capitalize()} Regex Filter:  r"{regex_method().pattern}"')
         
         if cls.debug() or args.update_archive or args.verify_library:
@@ -282,6 +284,7 @@ class Config:
             if root_podcast_path[0] == ".":
                 root_podcast_path = cls.get_root_path() / PurePath(root_podcast_path).relative_to(".")
             root_podcast_path = PurePath(Path(root_podcast_path).expanduser())
+        Path(root_podcast_path).mkdir(parents=True, exist_ok=True)
         return root_podcast_path
     
     @classmethod
@@ -297,8 +300,7 @@ class Config:
             cred_dir_or_file = Path(cls.get_root_path()) / Path(cred_str).expanduser().relative_to(".")
         else:
             cred_dir_or_file = Path(cred_str).expanduser()
-        credentials = ensure_is_file(cred_dir_or_file, 'credentials.json', touch=False)
-        return PurePath(credentials)
+        return ensure_real_file(cred_dir_or_file, CREDS_FILE)
     
     # File Options
     @classmethod
@@ -349,9 +351,9 @@ class Config:
         return cls.get(DOWNLOAD_QUALITY)
     
     @classmethod
-    def get_temp_download_dir(cls) -> str | PurePath:
+    def get_temp_download_dir(cls) -> PurePath | None:
         if cls.get(TEMP_DOWNLOAD_DIR) == '':
-            return ''
+            return
         temp_download_path: str = cls.get(TEMP_DOWNLOAD_DIR)
         if temp_download_path[0] == ".":
             temp_download_path = cls.get_root_path() / PurePath(temp_download_path).relative_to(".")
@@ -426,8 +428,7 @@ class Config:
             archive_dir_or_file = Path(cls.get_root_path()) / Path(archive_str).expanduser().relative_to(".")
         else:
             archive_dir_or_file = Path(archive_str).expanduser()
-        archive_path = ensure_is_file(archive_dir_or_file, '.song_archive')
-        return PurePath(archive_path)
+        return ensure_real_file(archive_dir_or_file, GLOBAL_SONG_ARCHIVE)
     
     @classmethod
     def get_no_song_archive(cls) -> bool:
@@ -549,8 +550,8 @@ class Config:
         return cls.get(STRICT_LIBRARY_VERIFY)
     
     @classmethod
-    def get_album_art_jpg_file(cls) -> bool:
-        return cls.get(ALBUM_ART_JPG_FILE)
+    def get_album_art_to_file(cls) -> bool:
+        return cls.get(ALBUM_ART_TO_FILE)
     
     # ZMD Options
     @classmethod
@@ -598,8 +599,7 @@ class Config:
             cred_dir_or_file = Path(cls.get_root_path()) / Path(cred_str).expanduser().relative_to(".")
         else:
             cred_dir_or_file = Path(cred_str).expanduser()
-        credentials = ensure_is_file(cred_dir_or_file, 'api_credentials.json', touch=False)
-        return PurePath(credentials)
+        return ensure_real_file(cred_dir_or_file, API_CREDS_FILE)
     
     @classmethod
     def permit_client_api(cls) -> bool:
@@ -608,6 +608,11 @@ class Config:
     @classmethod
     def permit_legacy_api(cls) -> bool:
         return bool(cls.permit_client_api() and cls.get(API_CLIENT_LEGACY) and Zotify.LEGACY_API_ENDOINTS)
+    
+    @classmethod
+    def get_fetch_timeout(cls) -> float | None:
+        timeout = max(cls.get(FETCH_TIMEOUT), 0.0)
+        return None if not timeout else timeout
     
     @classmethod
     def get_fetch_delay(cls) -> float:
@@ -929,7 +934,7 @@ class Zotify:
             return
     
     @staticmethod
-    def api_status_str(status_code: int, http: requests.Response = None) -> str:
+    def api_status_str(status_code: int, http: Response = None) -> str:
         if   status_code == 200:        return "OK"
         elif status_code == 201:        return "Request fullfilled internally"
         elif status_code == 202:        return "Awaiting processing"
@@ -945,7 +950,7 @@ class Zotify:
                                                                  http and http.headers.get(RETRY_AFTER) else "")
         elif status_code in {500, 502}: return "Internal/Upstream Server Error"
         elif status_code == 503:        return "Service Unavailable (Possibly a Rate Limit)"
-        else:                           return ""
+        else:                           return "No Status Code, Empty Response"
     
     @classmethod
     def invoke_libre_md(cls, ContClass: type, uri: str) -> dict[str, str | int | dict]:
@@ -1020,6 +1025,14 @@ class Zotify:
         return {}
     
     @classmethod
+    def get_request(cls, url, **kwargs) -> Response:
+        try:
+            return r_get(url, timeout=cls.CONFIG.get_fetch_timeout(), **kwargs)
+        except Timeout:
+            Printer.hashtaged(PrintChannel.WARNING, 'REQUEST TIMEOUT REACHED')
+            return Response()
+    
+    @classmethod
     def invoke_url(cls, url: str, params: dict | None = None, expectFail: bool = False, force_login5: bool = False) -> dict[str, str | int | dict]:
         headers = {
             'Authorization': f'Bearer {LoginHandler.choose_token(force_login5)}',
@@ -1032,13 +1045,14 @@ class Zotify:
         api_retry = 0
         while api_retry <= cls.CONFIG.get_retry_attempts():
             if api_retry and not expectFail:
-                Printer.hashtaged(PrintChannel.WARNING, f'{"REQUEST SUCCESSFUL" if http.ok else "API ERROR"} {retry_text}- RETRYING\n' +
+                Printer.hashtaged(PrintChannel.WARNING, f'{"REQUEST SUCCESSFUL" if http.status_code and http.ok else "API ERROR"} {retry_text}- RETRYING\n' +
                                                         f'Status {http.status_code}:  '+
                                                         f'{resp.get(ERROR, {}).get(MESSAGE, "No message provided")}')
             if api_retry: sleep(retry_delay if not expectFail else 1)
             
             try:
-                http = requests.get(url, headers=headers, params=params)
+                http = cls.get_request(url, headers=headers, params=params)
+                if not http.content: raise HTTPError
                 fallback_message = cls.api_status_str(http.status_code, http)
                 resp: dict[str, str | int | dict] = http.json()
                 http.raise_for_status()
@@ -1046,14 +1060,14 @@ class Zotify:
                 resp = {ERROR: {MESSAGE: fallback_message}}
             except json.decoder.JSONDecodeError:
                 resp = {ERROR: {MESSAGE: "ERROR: MALFORMED JSON"}}
-            except requests.exceptions.HTTPError:
+            except HTTPError:
                 if expectFail:              pass
                 elif http.status_code in {401, 403}:
                     Printer.hashtaged(PrintChannel.API_ERROR, 'API ERROR\n' +
                                                               'ATTEMPTING TO ACCESS FORBIDDEN ENDPOINT')
                     return {} # do not count as fetch, skip FETCH_DELAY
-                elif not resp:              resp = {ERROR: {MESSAGE: "Received an empty response"}}
-                elif not resp.get(ERROR):   resp = {ERROR: {MESSAGE: fallback_message}}
+                elif not http.content or not resp:  resp = {ERROR: {MESSAGE: "Received an empty response"}}
+                elif not resp.get(ERROR):           resp = {ERROR: {MESSAGE: fallback_message}}
             finally: cls.TOTAL_API_CALLS += 1
             retry_text = f"(RETRY {api_retry}) " if api_retry else ""
             retry_delay = max(cls.CONFIG.get_retry_delay(api_retry), float(http.headers.get(RETRY_AFTER, 0.0)))

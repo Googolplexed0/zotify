@@ -9,14 +9,15 @@ from zotify.termoutput import *
 
 
 # Path Utils
-def ensure_is_file(path: Path, def_filename: str, touch: bool = True) -> Path:
-    if path.is_file():  pass
-    elif path.is_dir(): path = path / def_filename
-    elif path.suffix:   pass
-    else:               path = path / def_filename
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if touch: path.touch()
-    return path
+def ensure_real_file(dir_or_file: PurePath, def_filename: str) -> PurePath:
+    dir_or_file = Path(dir_or_file)
+    if   dir_or_file.is_file(): file = dir_or_file
+    elif dir_or_file.is_dir():  file = dir_or_file / def_filename
+    elif dir_or_file.suffix:    file = dir_or_file
+    else:                       file = dir_or_file / def_filename
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.touch()
+    return PurePath(file)
 
 
 def file_has_content(path: str | PurePath) -> None | bool:

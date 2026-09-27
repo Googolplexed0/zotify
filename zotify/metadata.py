@@ -373,7 +373,7 @@ class MetadataIO:
     @classmethod
     def to_zmd(cls, timestamp: str, cont: set[Content]):
         zmd_dir_or_file = Zotify.CONFIG.get_zmd_export_location()
-        zmd_path = ensure_is_file(Path(zmd_dir_or_file), timestamp + ".zmd")
+        zmd_path = ensure_real_file(Path(zmd_dir_or_file), timestamp + ".zmd")
         
         cls.PARSING = cls.LATEST_ZMD
         zmd = {**cls.PARSING}
@@ -431,7 +431,7 @@ class Tagger:
                 ALBUMARTIST:    obj.artist_names(),
                 COMPILATION:    obj.compilation,
                 YEAR:           obj.year,
-                ARTWORK:        requests.get(obj.image_url).content if obj.image_url else None, # expect jpeg
+                ARTWORK:        obj.get_image(),
             }
             optional_tags = {
                 TOTALTRACKS:    obj.total_tracks if Zotify.CONFIG.get_disc_track_totals() else None,
@@ -556,7 +556,7 @@ class SongArchive:
     
     def __init__(self, dir_path: PurePath | None = None):
         self._global = dir_path is None
-        self.path = Zotify.CONFIG.get_song_archive_location() if dir_path is None else dir_path / '.song_ids'
+        self.path = Zotify.CONFIG.get_song_archive_location() if dir_path is None else dir_path / LOCAL_SONG_ARCHIVE
         self.mode = 'a' if file_has_content(self.path) else 'w' # should always exist from Content.create_download_directory()
         self.disabled = Zotify.CONFIG.get_no_song_archive() if self._global else Zotify.CONFIG.get_no_dir_archives()
     
@@ -661,7 +661,7 @@ class M3U8:
         
         dir = Zotify.CONFIG.get_m3u8_location()
         if not dir: dir = self.dynamic_dir(cont_paths)
-        self.path = dir / (self.fill_output_template(parent_cont) + ".m3u8") if dir else None
+        self.path = ensure_real_file(dir, f"{self.fill_output_template(parent_cont)}.m3u8") if dir else None
     
     def fill_output_template(self, parent_cont: Container | Query):
         output_template = Zotify.CONFIG.get_m3u8_filename()
@@ -732,7 +732,6 @@ class M3U8:
         missing_name = f"{self.cont_type.clsn}"
         if isinstance(self.cont_type, Container): missing_name += f" {self.cont_type._contains}"
         
-        Path(self.path.parent).mkdir(parents=True, exist_ok=True)
         with open(self.path, 'w', encoding='utf-8') as file:
             file.write("#EXTM3U\n\n")
             for i, dlc, path in zip(range(len(dlcs)), dlcs, cont_paths):
