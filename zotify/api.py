@@ -4,6 +4,7 @@ import requests
 import subprocess
 from time import time, sleep
 from uuid import uuid4
+from collections.abc import Iterable
 
 from zotify.config import Zotify, Streamer
 from zotify.utils import *
@@ -157,8 +158,9 @@ class Content(HierarchicalNode):
         else:    raise ValueError("No Metadata Fetched")
     
     @staticmethod
-    def fetch_uris_metadata(uris: list[str], ContClass: type[Content],
+    def fetch_uris_metadata(uris: Iterable[str], ContClass: type[Content],
                             loader_text: str = None, hide_loader: bool = False) -> list[dict]:
+        uris = list(uris)
         if not uris: return []
         elif not loader_text: loader_text = ContClass.type_attr
         
