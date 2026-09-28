@@ -885,15 +885,15 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         
         with self.set_dl_status("Converting File"):
             self.create_download_directory(path.parent)
-            staged_path = path.with_name(
+            staged_path = Path(path.with_name(
                 f".{path.stem}.{uuid4()}.zotify-stage{path.suffix}"
-            )
+            ))
             time_elapsed_ffmpeg = self.convert_audio_format(temppath, staged_path) # temppath -> staged
             if time_elapsed_ffmpeg is None:
                 path = path.with_suffix(".ogg")
-                staged_path = path.with_name(
+                staged_path = Path(path.with_name(
                     f".{path.stem}.{uuid4()}.zotify-stage{path.suffix}"
-                )
+                ))
                 pathlike_move_safe(temppath, staged_path)
 
         if not self._validate_audio(staged_path, self.duration_ms):
