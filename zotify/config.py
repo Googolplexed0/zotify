@@ -1169,7 +1169,9 @@ class Zotify:
                 Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +
                                                      f'(ASSUMED HTTP) RUNTIME ERROR - STATUS CODE {error_arg}')
                 Printer.logger("\n".join(str(a) for a in e.args), PrintChannel.ERROR)
-            else: raise
+            else:
+                Printer.hashtaged(PrintChannel.ERROR, f'LIBRESPOT ERROR: {error_arg}')
+                Printer.logger("\n".join(str(a) for a in e.args), PrintChannel.ERROR)
         except ConnectionError as e:
             if "Status code " not in e.args[0]: raise
             status_code = e.args[0].split("Status code ")[1]
