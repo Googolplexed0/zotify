@@ -153,6 +153,8 @@ uv.lock
 .zotify/
 config.json
 credentials.json
+mise.toml
+poetry.lock
 
 # Download Folder
 Zotify\ Music/

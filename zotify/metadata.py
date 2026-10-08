@@ -12,7 +12,7 @@ class MetadataIO:
     PARSE_AS_STR        = {ADDED_AT, ALBUM_TYPE, CONSUMPTION_ORDER, DESCRIPTION, DISPLAY_NAME,
                            EXTERNAL_URL, ID, ITEM_ID, LABEL, NAME, PUBLISHER, RELEASE_DATE, REVISION, SNAPSHOT_ID,}
     PARSE_AS_INT        = {DISC_NUMBER, DURATION_MS, LENGTH, POPULARITY, TIMESTAMP, TOTAL_EPISODES, TOTAL_TRACKS,}
-    PARSE_AS_BOOL       = {COLLABORATIVE, DELETED_BY_OWNER, EXPLICIT, IS_EXTERNALLY_HOSTED, IS_LOCAL, IS_PLAYABLE, PUBLIC,}
+    PARSE_AS_BOOL       = {COLLABORATIVE, DELETED_BY_OWNER, EXPLICIT, IS_EXTERNALLY_HOSTED, IS_LOCAL, PUBLIC,}
     
     def from_resp(self, obj: Content, relative: Content, resp: dict) -> dict[str]:
         for attr in self.PARSE_AS_STR:
@@ -557,8 +557,10 @@ class SongArchive:
     def __init__(self, dir_path: PurePath | None = None):
         self._global = dir_path is None
         self.path = Zotify.CONFIG.get_song_archive_location() if dir_path is None else dir_path / LOCAL_SONG_ARCHIVE
-        self.mode = 'a' if file_has_content(self.path) else 'w' # should always exist from Content.create_download_directory()
         self.disabled = Zotify.CONFIG.get_no_song_archive() if self._global else Zotify.CONFIG.get_no_dir_archives()
+        if not self._global and not Path(self.path.parent).exists():
+            self.disabled = True
+        self.mode = 'a' if file_has_content(self.path) else 'w' # should always exist from Content.create_download_directory()
     
     def _obj_to_entry(self, obj: DLContent, item_path: PurePath, timestamp: str = None) -> dict[str, str | PurePath]:
         entry = self.ARCHIVE_FORMAT.copy()
@@ -575,8 +577,13 @@ class SongArchive:
         return entry
     
     def _add_entries(self, mode: str, entries: list[dict[str, str | PurePath]]) -> None:
-        with open(self.path, mode, encoding='utf-8') as file:
-            file.writelines("\t".join(str(v) for v in entry.values()) + "\n" for entry in entries)
+        if self.disabled: return
+        try:
+            Path(self.path.parent).mkdir(parents=True, exist_ok=True)
+            with open(self.path, mode, encoding='utf-8') as file:
+                file.writelines("\t".join(str(v) for v in entry.values()) + "\n" for entry in entries)
+        except Exception:
+            pass
     
     def add_obj(self, obj: DLContent, item_path: PurePath) -> None:
         if self.disabled: return
@@ -622,8 +629,11 @@ class SongArchive:
         """ Return list of tab-delimted entries in archive file, upgrading legacy archives if necessary """
         if self.disabled or not file_has_content(self.path):
             return []
-        with open(self.path, 'r', encoding='utf-8') as f:
-            entries = f.readlines()
+        try:
+            with open(self.path, 'r', encoding='utf-8') as f:
+                entries = f.readlines()
+        except Exception:
+            return []
         if self._global and SongArchive.UPDATE_GLOBAL:
             SongArchive.UPDATE_GLOBAL = False
             self._upgrade_legacy_archive([self._parse_entry_str(entry_str) for entry_str in entries])
@@ -639,7 +649,17 @@ class SongArchive:
     def paths(self)         -> list[PurePath]:
         path_strs = self._get_all_of_type(self.ITEM_PATH)
         if not self._global:
-            path_strs = [(p if PurePath(p).is_absolute() else str(self.path.parent / p)) if p else None for p in path_strs]
+            resolved_paths = []
+            for p in path_strs:
+                if not p:
+                    resolved_paths.append(None)
+                else:
+                    pp = PurePath(p)
+                    if pp.is_absolute() and Path(pp).exists():
+                        resolved_paths.append(pp)
+                    else:
+                        resolved_paths.append(self.path.parent / pp.name)
+            return resolved_paths
         return [PurePath(p) if p else None for p in path_strs]
     
     def obj_in_archive(self, obj: DLContent) -> PurePath | None:

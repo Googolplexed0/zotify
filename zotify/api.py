@@ -104,10 +104,17 @@ class Content(HierarchicalNode):
     
     @staticmethod
     def fix_filename(filename: str) -> str:
+        # Replace colons with " - "
+        filename = str(filename).replace(':', ' - ')
         # Replace invalid characters on Linux/Windows/MacOS with underscores
         # Trailing spaces & periods are ignored on Windows
         # see https://stackoverflow.com/a/31976060/819417
-        filename = re.sub(r'[/\\:|<>"?*\0-\x1f]|^(AUX|COM[1-9]|CON|LPT[1-9]|NUL|PRN)(?![^.])|^\s|[\s.]$', "_", str(filename), flags=re.IGNORECASE)
+        filename = re.sub(r'[/\\:|<>"?*\0-\x1f]|^(AUX|COM[1-9]|CON|LPT[1-9]|NUL|PRN)(?![^.])|^\s|[\s.]$', "_", filename, flags=re.IGNORECASE)
+        # Clean up multiple underscores caused by sub
+        filename = re.sub(r'_+', '_', filename)
+        # Optional: strip underscores from start/end
+        filename = filename.strip('_')
+        
         maxlen = Zotify.CONFIG.get_max_filename_length()
         if maxlen and len(filename) > maxlen:
             filename = filename[:maxlen]
@@ -272,8 +279,11 @@ class Content(HierarchicalNode):
             from zotify.metadata import SongArchive
             if not SongArchive().obj_in_archive(self):
                 SongArchive().add_obj(self, path)
-            if isinstance(self, Track) and not SongArchive(path.parent).obj_in_archive(self):
-                SongArchive(path.parent).add_obj(self, path)
+            if isinstance(self, Track) and Path(path.parent).exists() and not SongArchive(path.parent).obj_in_archive(self):
+                try:
+                    SongArchive(path.parent).add_obj(self, path)
+                except FileNotFoundError:
+                    pass
 
 
 class DLContent(Content):
@@ -366,19 +376,42 @@ class DLContent(Content):
         elif self.is_local:
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} IS A LOCAL FILE)')
             return True
-        elif not self.is_playable:
+        elif self.is_playable is False:
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} IS UNAVAILABLE)')
             return True
         
         return False
     
-    def fetch_stream(self) -> Streamer | None:
+    def fetch_stream(self, parent_stack: ParentStack = None) -> Streamer | None:
         stream_retry = 0
         while stream_retry <= Zotify.CONFIG.get_retry_attempts():
             if stream_retry: sleep(retry_delay)
             if stream := Zotify.get_content_stream(self): break
             retry_delay = Zotify.CONFIG.get_retry_delay(stream_retry)
             stream_retry += 1
+        
+        if stream is None and isinstance(self, Track) and self.name and self.artists:
+            # Fallback search for re-uploaded tracks
+            clean_name = self.name.replace('"', '')
+            clean_artist = self.artists[0].name.replace('"', '')
+            search_query = f'track:"{clean_name}" artist:"{clean_artist}"'
+            with Loader(f'Attempting to find active version of "{self}"...'):
+                search_url = f"{SEARCH_URL}?{MARKET_APPEND}"
+                params = {TYPE: "track", LIMIT: 5, 'q': search_query}
+                items = Zotify.invoke_url_nextable(search_url, stripper=(TRACKS,), max=5, params=params)
+                
+                playable_track = next((t for t in items.get(TRACKS, []) if t.get(IS_PLAYABLE)), None)
+                if playable_track:
+                    new_id = playable_track[ID]
+                    Printer.hashtaged(PrintChannel.WARNING, f'TRACK "{self}" UNAVAILABLE\n' +
+                                                            f'FOUND RE-UPLOAD: "{playable_track[NAME]}" ({new_id})\n' +
+                                                            'RETRYING DOWNLOAD WITH NEW ID')
+                    
+                    self.id = new_id
+                    self.uri = playable_track[URI]
+                    # Attempt to fetch stream for new ID
+                    return self.fetch_stream(parent_stack)
+
         if stream is None:
             Printer.hashtaged(PrintChannel.ERROR, f'SKIPPING {self.clsn.upper()} - FAILED TO GET CONTENT STREAM\n' +
                                                   f'{self.clsn}_ID: {self.id}')
@@ -744,7 +777,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
             if Zotify.CONFIG.get_temp_download_dir():
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
         
-        if (stream := self.fetch_stream()) is None: return
+        if (stream := self.fetch_stream(parent_stack)) is None: return
         self.set_dl_status("Downloading Stream")
         time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
         
@@ -853,7 +886,7 @@ class Episode(DLContent, HasImage, IsAddable):
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
         
         if not self.fetch_partner_url():
-            if (stream := self.fetch_stream()) is None: return
+            if (stream := self.fetch_stream(parent_stack)) is None: return
             self.set_dl_status("Downloading Stream")
             time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
         else:
