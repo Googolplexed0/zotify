@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timezone
 from fractions import Fraction
-from os.path import commonpath
+from os.path import commonpath, relpath
 from pathlib import Path, PurePath
 from shutil import move, copyfile, copyfileobj
 
@@ -40,7 +40,7 @@ def pathlike_move_safe(src: PurePath | bytes, dst: PurePath, copy: bool = False)
 
 def try_rel_path(path: PurePath | None, start: PurePath) -> PurePath | None:
     if not path: return None
-    try: return path.relative_to(start)
+    try: return PurePath(relpath(path, start))
     except ValueError: return path
 
 

@@ -559,6 +559,7 @@ class SongArchive:
         self.path = Zotify.CONFIG.get_song_archive_location() if dir_path is None else dir_path / LOCAL_SONG_ARCHIVE
         self.mode = 'a' if file_has_content(self.path) else 'w' # should always exist from Content.create_download_directory()
         self.disabled = Zotify.CONFIG.get_no_song_archive() if self._global else Zotify.CONFIG.get_no_dir_archives()
+        if file_has_content(self.path) is None: self.disabled = True
     
     def _obj_to_entry(self, obj: DLContent, item_path: PurePath, timestamp: str = None) -> dict[str, str | PurePath]:
         entry = self.ARCHIVE_FORMAT.copy()
