@@ -644,15 +644,29 @@ class SongArchive:
         return [PurePath(p) if p else None for p in path_strs]
     
     def obj_in_archive(self, obj: DLContent) -> PurePath | None:
-        index = None
-        for i, id in enumerate(self.ids()):
-            if obj.id == id:            index = i;  log_str = f"ID: {obj.id}"; break
-        if not index and Zotify.CONFIG.get_skip_by_isrc() and isinstance(obj, Track) and obj.isrc:
-            for i, isrc in enumerate(self.isrcs()):
-                if obj.isrc == isrc:    index = i;  log_str = f"ISRC: {obj.isrc}"; break
-        if index is None: return None
+        # Keep the archive file as the source of truth, but read it only once
+        # for this lookup instead of separately reading IDs, ISRCs, and paths.
+        match = None
+        isrc_match = None
+        check_isrc = Zotify.CONFIG.get_skip_by_isrc() and isinstance(obj, Track) and obj.isrc
+        for index, entry_str in enumerate(self._read_entry_strs()):
+            entry = self._parse_entry_str(entry_str)
+            if entry[self.ITEM_ID] == obj.id:
+                match = (index, entry, f"ID: {obj.id}")
+                break
+            if check_isrc and isrc_match is None and entry[self.ISRC_CODE] == obj.isrc:
+                isrc_match = (index, entry, f"ISRC: {obj.isrc}")
+        if match is None:
+            match = isrc_match
+        if match is None:
+            return None
+
+        index, entry, log_str = match
         Printer.logger(f'Found {obj.clsn} {log_str} in archive ("{self.path}") at line {index}')
-        return self.paths()[index]
+        path = entry[self.ITEM_PATH]
+        if path and not self._global and not path.is_absolute():
+            path = self.path.parent / path
+        return path or None
 
 
 class M3U8:
