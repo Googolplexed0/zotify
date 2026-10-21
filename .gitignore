@@ -153,6 +153,8 @@ uv.lock
 .zotify/
 config.json
 credentials.json
+.zotify-downloads.sqlite3*
+*.zotify-stage.*
 
 # Download Folder
 Zotify\ Music/
