@@ -85,7 +85,7 @@ CONFIG_VALUES = {
     SKIP_BY_ISRC:               { DEFAULT: 'False',                   TYPE: bool,   ARG: ('-ii', '--skip-by-isrc'                     ,) },
     
     # Playlist File Options
-    EXPORT_M3U8:                { DEFAULT: 'False',                   TYPE: bool,   ARG: ('-e, --export-m3u8'                         ,) },
+    EXPORT_M3U8:                { DEFAULT: 'False',                   TYPE: bool,   ARG: ('-e', '--export-m3u8'                       ,) },
     M3U8_LOCATION:              { DEFAULT: '',                        TYPE: str,    ARG: ('--m3u8-location'                           ,) },
     OUTPUT_M3U8:                { DEFAULT: '{name}',                  TYPE: str,    ARG: ('-om', '--output-m3u8'                      ,) },
     M3U8_REL_PATHS:             { DEFAULT: 'True',                    TYPE: bool,   ARG: ('--m3u8-relative-paths'                     ,) },

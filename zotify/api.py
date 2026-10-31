@@ -1497,11 +1497,7 @@ class UserItem(Query):
         display_list = [[i+1, str(resp.get(self._inner_stripper, resp)[NAME])] for i, resp in enumerate(user_item_resps)]
         Printer.table(self.uppers, ('ID', 'Name'), [[0, f"ALL {self.uppers}"]] + display_list)
         selected_item_resps: list[None | dict] = select([None] + user_item_resps, first_ID=0)
-        
-        if selected_item_resps[0] == None:
-            # option 0 == get all choices
-            selected_item_resps = user_item_resps[1:]
-        return selected_item_resps
+        return user_item_resps if selected_item_resps[0] is None else selected_item_resps
     
     def execute(self):
         user_item_resps = self.fetch_user_items()

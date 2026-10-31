@@ -647,7 +647,7 @@ class SongArchive:
         index = None
         for i, id in enumerate(self.ids()):
             if obj.id == id:            index = i;  log_str = f"ID: {obj.id}"; break
-        if not index and Zotify.CONFIG.get_skip_by_isrc() and isinstance(obj, Track) and obj.isrc:
+        if index is None and Zotify.CONFIG.get_skip_by_isrc() and isinstance(obj, Track) and obj.isrc:
             for i, isrc in enumerate(self.isrcs()):
                 if obj.isrc == isrc:    index = i;  log_str = f"ISRC: {obj.isrc}"; break
         if index is None: return None
