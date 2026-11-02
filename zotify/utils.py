@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 from fractions import Fraction
 from os.path import commonpath, relpath
 from pathlib import Path, PurePath
-from shutil import move, copyfile, copyfileobj
+from shutil import copymode, copyfileobj
+from typing import BinaryIO
 
 from zotify.termoutput import *
 
@@ -28,13 +29,28 @@ def file_has_content(path: str | PurePath) -> None | bool:
     else:                           return True
 
 
-def pathlike_move_safe(src: PurePath | bytes, dst: PurePath, copy: bool = False) -> PurePath:
+def pathlike_move_safe(src: PurePath | str | bytes | BinaryIO, dst: PurePath, copy: bool = False) -> PurePath:
+    """Publish a path, byte string or readable stream without replacing a file."""
+    dst = Path(dst)
     Path(dst.parent).mkdir(parents=True, exist_ok=True)
-    if isinstance(src, bytes):
-        with Path(dst).open("wb") as file:
+    source_path = None if isinstance(src, bytes) or hasattr(src, 'read') else Path(src)
+    # Exclusive creation also closes the race after check_path_dupes().
+    file = dst.open('xb')
+    try:
+        with file:
+            if isinstance(src, bytes):
+                file.write(src)
+            elif source_path is None:
                 copyfileobj(src, file)
-    elif copy:  copyfile(src, dst)
-    else:       move(src, dst)
+            else:
+                with source_path.open('rb') as source:
+                    copyfileobj(source, file)
+                copymode(source_path, dst)
+    except BaseException:
+        dst.unlink(missing_ok=True)
+        raise
+    if source_path is not None and not copy:
+        source_path.unlink()
     return dst
 
 
@@ -45,11 +61,12 @@ def try_rel_path(path: PurePath | None, start: PurePath) -> PurePath | None:
 
 
 def check_path_dupes(path: PurePath) -> PurePath:
-    if not (Path(path).is_file() and Path(path).stat().st_size):
-        return path
-    c = len([file for file in Path(path.parent).iterdir() if file.match(path.stem + "*")])
-    new_path = path.with_stem(f"{path.stem}_{c}") # guaranteed to be unique
-    return new_path
+    candidate = path
+    suffix = 0
+    while Path(candidate).exists() or Path(candidate).is_symlink():
+        suffix += 1
+        candidate = path.with_stem(f'{path.stem}_{suffix}')
+    return candidate
 
 
 def get_common_dir(allpaths: set[PurePath]) -> PurePath:

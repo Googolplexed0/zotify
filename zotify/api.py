@@ -3,6 +3,7 @@ import ffmpy
 import subprocess
 from time import time, sleep
 from uuid import uuid4
+from tempfile import TemporaryDirectory
 
 from zotify.config import Zotify, Streamer, HTTPError
 from zotify.utils import *
@@ -414,12 +415,18 @@ class DLContent(Content):
             "global_options": ['-hide_banner', f'-loglevel {Zotify.CONFIG.get_ffmpeg_log_level()}'],
             "inputs": {in_path: in_cmd}
         }
-        if out_path: 
+        if out_path:
             FFclass = ffmpy.FFmpeg
-            ff_config["global_options"].append('-y')
-            ff_config["outputs"] = {out_path: out_cmd}
-        
-        stdout, stderr = FFclass(**ff_config).run(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            ff_config["global_options"].append('-n')
+            # Convert privately, then publish exclusively. Even a destination
+            # created after path selection must never be overwritten.
+            with TemporaryDirectory(prefix='.zotify-', dir=out_path.parent) as stage:
+                staged_path = Path(stage) / out_path.name
+                ff_config["outputs"] = {staged_path: out_cmd}
+                stdout, stderr = FFclass(**ff_config).run(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                pathlike_move_safe(staged_path, out_path)
+        else:
+            stdout, stderr = FFclass(**ff_config).run(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         loggable_output = ("STDOUT:\n" + (stdout.decode().replace('\r\n', '\n') if stdout else ""),
                             "STDERR:\n" + (stderr.decode().replace('\r\n', '\n') if stderr else ""))
         Printer.logger("\n\n".join(loggable_output), PrintChannel.DEBUG)
@@ -818,16 +825,15 @@ class Episode(DLContent, HasImage, IsAddable):
     def download_directly(self, path: PurePath) -> str:
         time_start = time()
         
-        http = Zotify.get_request(self.partner_url, stream=True, allow_redirects=True)
-        if not http.content:            raise HTTPError("No response received")
-        elif http.status_code != 200:   raise HTTPError(f"{http.status_code} Error: {http.reason} for url: {self.partner_url}")
-        file_size = int(http.headers.get('Content-Length', 0))
-        desc = "" if file_size else "(Unknown total file size)"
-        
-        path = Path(path).expanduser().resolve()
-        with Printer.pbar_stream(http.raw, desc=desc, total=file_size) as f_stream:
-            self.set_dl_status("Downloading Stream")
-            pathlike_move_safe(f_stream, path)
+        with Zotify.get_request(self.partner_url, stream=True, allow_redirects=True) as http:
+            if http.status_code != 200:
+                raise HTTPError(f"{http.status_code} Error: {http.reason} for url: {self.partner_url}")
+            file_size = int(http.headers.get('Content-Length', 0))
+            desc = "" if file_size else "(Unknown total file size)"
+            path = Path(path).expanduser().resolve()
+            with Printer.pbar_stream(http.raw, desc=desc, total=file_size) as f_stream:
+                self.set_dl_status("Downloading Stream")
+                pathlike_move_safe(f_stream, path)
         
         time_dl_end = time()
         return fmt_duration(time_dl_end - time_start)
