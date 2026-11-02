@@ -1,4 +1,5 @@
 from __future__ import annotations
+import difflib
 import ffmpy
 import subprocess
 from time import time, sleep
@@ -101,10 +102,17 @@ class Content(HierarchicalNode):
     
     @staticmethod
     def fix_filename(filename: str) -> str:
+        # Replace colons with " - "
+        filename = str(filename).replace(':', ' - ')
         # Replace invalid characters on Linux/Windows/MacOS with underscores
         # Trailing spaces & periods are ignored on Windows
         # see https://stackoverflow.com/a/31976060/819417
-        filename = re.sub(r'[/\\:|<>"?*\0-\x1f]|^(AUX|COM[1-9]|CON|LPT[1-9]|NUL|PRN)(?![^.])|^\s|[\s.]$', "_", str(filename), flags=re.IGNORECASE)
+        filename = re.sub(r'[/\\:|<>"?*\0-\x1f]|^(AUX|COM[1-9]|CON|LPT[1-9]|NUL|PRN)(?![^.])|^\s|[\s.]$', "_", filename, flags=re.IGNORECASE)
+        # Clean up multiple underscores caused by sub
+        filename = re.sub(r'_+', '_', filename)
+        # Optional: strip underscores from start/end
+        filename = filename.strip('_')
+        
         maxlen = Zotify.CONFIG.get_max_filename_length()
         if maxlen and len(filename) > maxlen:
             filename = filename[:maxlen]
@@ -267,8 +275,11 @@ class Content(HierarchicalNode):
             from zotify.metadata import SongArchive
             if not SongArchive().obj_in_archive(self):
                 SongArchive().add_obj(self, path)
-            if isinstance(self, Track) and not SongArchive(path.parent).obj_in_archive(self):
-                SongArchive(path.parent).add_obj(self, path)
+            if isinstance(self, Track) and Path(path.parent).exists() and not SongArchive(path.parent).obj_in_archive(self):
+                try:
+                    SongArchive(path.parent).add_obj(self, path)
+                except FileNotFoundError:
+                    pass
 
 
 class DLContent(Content):
@@ -361,19 +372,116 @@ class DLContent(Content):
         elif self.is_local:
             Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} IS A LOCAL FILE)')
             return True
-        elif not self.is_playable:
-            Printer.hashtaged(PrintChannel.SKIPPING, f'"{self}" ({self.clsn.upper()} IS UNAVAILABLE)')
-            return True
         
         return False
-    
-    def fetch_stream(self) -> Streamer | None:
+
+    def score_fallback_candidate(self, candidate: dict) -> float:
+        cand_id = candidate.get(ID)
+        if not cand_id or cand_id == self.id:
+            return 0.0
+
+        cand_name = candidate.get(NAME, "")
+        orig_name = getattr(self, "name", "") or ""
+
+        # Filter out variant keywords if original title lacks them
+        variant_keywords = ["live", "remix", "rework", "acoustic", "cover", "karaoke", "instrumental", "tribute"]
+        orig_lower = orig_name.lower()
+        cand_lower = cand_name.lower()
+        for kw in variant_keywords:
+            if kw in cand_lower and kw not in orig_lower:
+                return 0.0
+
+        # Title similarity score
+        def norm_t(s: str) -> str:
+            s = s.lower()
+            s = re.sub(r'\(.*?\)|\[.*?\]', '', s)
+            s = re.sub(r'[^a-z0-9\s]', '', s)
+            return s.strip()
+
+        n_orig = norm_t(orig_name)
+        n_cand = norm_t(cand_name)
+        if not n_orig or not n_cand:
+            title_score = difflib.SequenceMatcher(None, orig_lower, cand_lower).ratio()
+        else:
+            title_score = difflib.SequenceMatcher(None, n_orig, n_cand).ratio()
+
+        if title_score < 0.45:
+            return 0.0
+
+        # Artist match check
+        orig_artists = [a.name.lower().strip() for a in getattr(self, "artists", []) if hasattr(a, "name")]
+        cand_artists_raw = candidate.get(ARTISTS, [])
+        cand_artists = [a.get(NAME, "").lower().strip() for a in cand_artists_raw if isinstance(a, dict) and a.get(NAME)]
+
+        artist_match = False
+        for oa in orig_artists:
+            for ca in cand_artists:
+                if oa in ca or ca in oa or difflib.SequenceMatcher(None, oa, ca).ratio() > 0.6:
+                    artist_match = True
+                    break
+            if artist_match:
+                break
+
+        if not artist_match and orig_artists:
+            return 0.0
+
+        # Track duration check (±25s tolerance)
+        cand_duration = candidate.get(DURATION_MS, 0)
+        orig_duration = getattr(self, "duration_ms", 0) or 0
+        if orig_duration > 0 and cand_duration > 0:
+            if abs(cand_duration - orig_duration) / 1000.0 > 25.0:
+                return 0.0
+
+        return title_score
+
+    def fetch_stream(self, parent_stack: ParentStack = None, allow_fallback: bool = True) -> Streamer | None:
         stream_retry = 0
         while stream_retry <= Zotify.CONFIG.get_retry_attempts():
             if stream_retry: sleep(retry_delay)
             if stream := Zotify.get_content_stream(self): break
             retry_delay = Zotify.CONFIG.get_retry_delay(stream_retry)
             stream_retry += 1
+        
+        if stream is None and allow_fallback and isinstance(self, Track) and self.name and self.artists:
+            # Fallback search for re-uploaded tracks
+            clean_name = re.sub(r'[\(\[\{-].*?(remaster|edition|version|deluxe).*?[\)\]\}]', '', self.name, flags=re.IGNORECASE).replace('"', '').strip()
+            if not clean_name: clean_name = self.name.replace('"', '')
+            clean_artist = self.artists[0].name.replace('"', '')
+
+            queries = [
+                f'track:"{clean_name}" artist:"{clean_artist}"',
+                f"{clean_name} {clean_artist}",
+            ]
+
+            best_candidate: dict | None = None
+            best_score = 0.0
+
+            with Loader(f'Attempting to find active version of "{self}"...'):
+                search_url = f"{SEARCH_URL}?{MARKET_APPEND}"
+                for query in queries:
+                    params = {TYPE: "track", LIMIT: 10, 'q': query, 'market': 'from_token'}
+                    items = Zotify.invoke_url_nextable(search_url, stripper=(TRACKS,), max=10, params=params)
+                    for candidate in items.get(TRACKS, []):
+                        if not candidate.get(IS_PLAYABLE):
+                            continue
+                        score = self.score_fallback_candidate(candidate)
+                        if score > best_score:
+                            best_score = score
+                            best_candidate = candidate
+                    if best_candidate and best_score >= 0.7:
+                        break
+
+                if best_candidate and best_score >= 0.45:
+                    new_id = best_candidate[ID]
+                    Printer.hashtaged(PrintChannel.WARNING, f'TRACK "{self}" UNAVAILABLE\n' +
+                                                            f'FOUND RE-UPLOAD: "{best_candidate[NAME]}" ({new_id})\n' +
+                                                            'RETRYING DOWNLOAD WITH NEW ID')
+                    
+                    self.id = new_id
+                    self.uri = best_candidate[URI]
+                    # Attempt to fetch stream for new ID (disallow further recursive fallback search)
+                    return self.fetch_stream(parent_stack, allow_fallback=False)
+
         if stream is None:
             Printer.hashtaged(PrintChannel.ERROR, f'SKIPPING {self.clsn.upper()} "{self}"\n'
                                                   f'FAILED TO FETCH CONTENT STREAM - {self.clsn}_ID: {self.id}')
@@ -759,7 +867,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
             if Zotify.CONFIG.get_temp_download_dir():
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
         
-        if (stream := self.fetch_stream()) is None: return
+        if (stream := self.fetch_stream(parent_stack)) is None: return
         self.set_dl_status("Downloading Stream")
         if (time_elapsed_dl := self.fetch_stream_content(stream, temppath, parent_stack)) is None: return
         
@@ -867,7 +975,7 @@ class Episode(DLContent, HasImage, IsAddable):
                 temppath = Zotify.CONFIG.get_temp_download_dir() / f'zotify_{str(uuid4())}_{self.id}.tmp'
         
         if not self.fetch_partner_url():
-            if (stream := self.fetch_stream()) is None: return
+            if (stream := self.fetch_stream(parent_stack)) is None: return
             self.set_dl_status("Downloading Stream")
             if (time_elapsed_dl := self.fetch_stream_content(stream, temppath, parent_stack)) is None: return
         else:
