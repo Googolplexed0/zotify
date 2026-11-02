@@ -1,0 +1,7 @@
+*
+!Dockerfile
+!pyproject.toml
+!README.md
+!LICENSE
+!zotify/
+!zotify/*.py

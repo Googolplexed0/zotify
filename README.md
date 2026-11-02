@@ -365,7 +365,12 @@ Increase Volume and Tempo by 50%                      :   `"-af volume=1.5,atemp
 
 ### Create and Run a Container from the Docker Image
 
-`docker run -it --rm -p 4381:4381 -v "$PWD/Zotify Music:/root/Music/Zotify Music" -v "$PWD/Zotify Podcasts:/root/Music/Zotify Podcasts" zotify`
+`docker run --rm zotify --help`
+
+The image installs the project and its package metadata; its entrypoint is
+`zotify`. Pass normal CLI options after the image name. For persistent use, mount
+music, podcast and configuration directories separately and select their paths
+with `--root-path`, `--root-podcast-path` and `--config-location`.
 
 ## Podman Usage
 
