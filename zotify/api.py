@@ -380,20 +380,22 @@ class DLContent(Content):
             retry_delay = Zotify.CONFIG.get_retry_delay(stream_retry)
             stream_retry += 1
         if stream is None:
-            Printer.hashtaged(PrintChannel.ERROR, f'SKIPPING {self.clsn.upper()} - FAILED TO GET CONTENT STREAM\n' +
-                                                  f'{self.clsn}_ID: {self.id}')
+            Printer.hashtaged(PrintChannel.ERROR, f'SKIPPING {self.clsn.upper()} "{self}"\n'
+                                                  f'FAILED TO FETCH CONTENT STREAM - {self.clsn}_ID: {self.id}')
         return stream
     
-    def fetch_stream_content(self, stream: Streamer, temppath: PurePath, parent_stack: ParentStack) -> str:
+    def fetch_stream_content(self, stream: Streamer, temppath: PurePath, parent_stack: ParentStack) -> str | None:
+        t_per_byte = (self.duration_ms / 1000. / stream.size * Zotify.CONFIG.get_dl_rate_limter()) if self.duration_ms else 0
         disable = Zotify.CONFIG.get_standard_interface() or not Zotify.CONFIG.get_show_download_pbar()
         pbar = Printer.pbar(desc=str(self), total=stream.size, unit='B', unit_scale=True,
                             unit_divisor=1024, disable=disable, pbar_stack=parent_stack.PBARS)
         Path(temppath.parent).mkdir(parents=True, exist_ok=True)
-        try:
+        time_elapsed_dl = None
+        
+        def read_stream_to_end() -> str:
             with open(temppath, 'wb') as file:
                 no_responses = 0
                 time_start = time()
-                t_per_byte = (self.duration_ms / 1000. / stream.size * Zotify.CONFIG.get_dl_rate_limter()) if self.duration_ms else 0
                 while no_responses < 5:
                     bytes_r = file.write(stream.stream().read(Zotify.CONFIG.get_chunk_size()))
                     if bytes_r:
@@ -402,10 +404,31 @@ class DLContent(Content):
                     else:
                         no_responses += 1
                         sleep(0.05)
-        finally:
-            pbar.close(); pbar.clear()
+            return fmt_duration(time() - time_start)
         
-        return fmt_duration(time() - time_start)
+        stream_retry = 0
+        while stream_retry <= Zotify.CONFIG.get_retry_attempts():
+            if stream_retry:
+                Printer.hashtaged(PrintChannel.WARNING, f'STREAM READ INTERRUPTED {retry_text}- RETRYING\n' +
+                                                        f'RECONNECTING TO NEW ACCESS POINT\n' +
+                                                        f'RESTARTING DOWNLOAD OF {self.clsn.upper()} "{self}"')
+                Zotify.reconnect()
+                sleep(retry_delay)
+                pbar.reset()
+            try:
+                if time_elapsed_dl := read_stream_to_end(): break
+            except BaseException as e:
+                Path(temppath).unlink(missing_ok=True)
+                if not isinstance(e, Exception): # do not retry on KeyboardInterrupt
+                    pbar.close(); pbar.clear(); raise 
+            retry_text = f"(RETRY {stream_retry}) " if stream_retry else ""
+            retry_delay = Zotify.CONFIG.get_retry_delay(stream_retry)
+            stream_retry += 1
+        if time_elapsed_dl is None:
+            Printer.hashtaged(PrintChannel.ERROR, f'SKIPPING {self.clsn.upper()} "{self}"\n' +
+                                                  f'FAILED TO READ CONTENT STREAM - {self.clsn}_ID: {self.id}')
+        pbar.close(); pbar.clear()
+        return time_elapsed_dl
     
     @staticmethod
     def run_ffm(in_path: PurePath, in_cmd: list[str] | None, out_path: PurePath | None = None, out_cmd: list[str] | None = None) -> str:
@@ -746,7 +769,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
         
         if (stream := self.fetch_stream()) is None: return
         self.set_dl_status("Downloading Stream")
-        time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
+        if (time_elapsed_dl := self.fetch_stream_content(stream, temppath, parent_stack)) is None: return
         
         if not Zotify.CONFIG.get_always_check_lyrics():
             self.fetch_lyrics(parent_stack)
@@ -762,7 +785,7 @@ class Track(DLContent, HasArtists, HasGenres, IsAddable, IsFavoritable):
             self.write_audio_tags(path)
             if self.album: self.album.save_album_art_to_file(path, parent_stack)
         except NotImplementedError as e:
-            if not "Mutagen type" in e.args[0]: raise
+            if not isinstance(e.args[0], str) or "Mutagen type" not in e.args[0]: raise
             err_codec = e.args[0].removeprefix("Mutagen type ").removesuffix(" not implemented")
             Printer.hashtaged(PrintChannel.ERROR,  'FAILED TO WRITE METADATA\n' +
                                                   f'FILE "{self.rel_path(path)}" OF MEDIA TYPE {err_codec}\n' +
@@ -855,7 +878,7 @@ class Episode(DLContent, HasImage, IsAddable):
         if not self.fetch_partner_url():
             if (stream := self.fetch_stream()) is None: return
             self.set_dl_status("Downloading Stream")
-            time_elapsed_dl = self.fetch_stream_content(stream, temppath, parent_stack)
+            if (time_elapsed_dl := self.fetch_stream_content(stream, temppath, parent_stack)) is None: return
         else:
             try:
                 time_elapsed_dl = self.download_directly(temppath)

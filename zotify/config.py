@@ -785,6 +785,15 @@ class LoginHandler:
         cls.SESSION = cls.SESSION_BUILDER.create()
     
     @classmethod
+    def login5_reconnect(cls) -> Session:
+        try: cls.SESSION.reconnect()
+        except:
+            Printer.hashtaged(PrintChannel.MANDATORY, 'RECONNECT FAILED, REBUILDING SESSION FROM SCRATCH AFTER DELAY')
+            sleep(10)
+            cls.SESSION = cls.SESSION_BUILDER.create()
+        return cls.SESSION
+    
+    @classmethod
     def attempt_login(cls, args) -> None:
         if not cls.SESSION:
             try: cls.login5_cred_login(cls.get_creds_from_file(Zotify.CONFIG.get_credentials_location()))
@@ -916,6 +925,10 @@ class Zotify:
                       ('Custom Client API Initialized Successfully\n' if LoginHandler.OAUTH else '') +
                       f'User Subscription Type: {"PREMIUM" if prem else "FREE"}\n' +
                       f'Zotify Version v{cls.VERSION}')
+    
+    @classmethod
+    def reconnect(cls) -> None:
+        cls.SESSION = LoginHandler.login5_reconnect()
     
     @staticmethod
     def id_from_gid(gid: str) -> str:
@@ -1128,17 +1141,14 @@ class Zotify:
         return items
     
     @classmethod
-    def get_content_stream(cls, content, use_qual_pref: bool = True) -> Streamer | None:
+    def get_content_stream(cls, content, use_qual_pref: bool = True, allow_reconn: bool = True) -> Streamer | None:
         content_id = cls.to_libre_content(content.__class__, content.id)
         if not content_id: return
-        qual = cls.DOWNLOAD_QUALITY if use_qual_pref else cls.parse_dl_quality()[1]
-        Printer.logger(f'Fetching stream for {content.type_attr}:{content.id} at quality {qual.preferred.name}')
-        try:
-            if not content.file_ids or cls.FORCE_STREAM_API_CALLS:
-                risky_method = False
-                lds = cls.SESSION.content_feeder().load(content_id, qual, False, None)
-                return lds.input_stream if lds else None
-            risky_method = True
+        
+        def safe(qual: FormatOnlyAudioQuality) -> Streamer | None:
+            lds = cls.SESSION.content_feeder().load(content_id, qual, False, None)
+            return lds.input_stream if lds else None
+        def risky(qual: FormatOnlyAudioQuality) -> Streamer: # saves a few API calls, theoretically
             if getattr(content, EXTERNAL_URL, None):
                 url = cls.SESSION.client().head(content.external_url).url
                 return cls.SESSION.cdn().stream_external_episode(content, url, None)
@@ -1148,41 +1158,69 @@ class Zotify:
             streamer = cls.SESSION.cdn().stream_file(file, key, CdnFeedHelper.get_url(url), None)
             if streamer.stream().skip(0xA7) != 0xA7: raise IOError("Couldn't skip 0xa7 bytes!")
             return streamer
+        
+        def fail_print(e: Exception, pchan: PrintChannel, print_lines: str | None = None) -> None:
+            Printer.hashtaged(pchan, 'FAILED TO FETCH CONTENT STREAM' + (f'\n{print_lines}' if print_lines else ''))
+            Printer.logger("\n".join(str(a) for a in e.args), pchan)
+        def require_reconn(e: Exception) -> bool:
+            from errno import EBADF, ECONNRESET, ENOTCONN, EPIPE, ETIMEDOUT
+            return (isinstance(e, OSError) and e.errno in {EBADF, ECONNRESET, ENOTCONN, EPIPE, ETIMEDOUT}) \
+                or (isinstance(e, RuntimeError) and isinstance(e.args[0], str)
+                    and any(s in e.args[0] for s in {"Session is closed!", "Session isn't authenticated!"}))
+        def retry_reconn(e: Exception) -> Streamer | None:
+            if allow_reconn:
+                fail_print(e, PrintChannel.WARNING, f'SESSION FAILED TO CONNECT - ATTEMPTING RECONNECTION')
+                cls.reconnect()
+                return cls.get_content_stream(content, use_qual_pref=use_qual_pref, allow_reconn=False)
+            else:
+                fail_print(e, PrintChannel.ERROR, f'SESSION FAILED TO CONNECT - NO RECONNECTION ALLOWED')
+                raise ConnectionRefusedError('Session connection refused, aborting Query') from None
+        def retry_qual(e: Exception) -> Streamer | None:
+            if use_qual_pref:
+                preference = cls.DOWNLOAD_QUALITY.preferred.name
+                fail_print(e, PrintChannel.WARNING, f'PREFERED AUDIO QUALITY {preference} NOT AVAILABLE - FALLING BACK TO AUTO')
+                return cls.get_content_stream(content, use_qual_pref=False, allow_reconn=allow_reconn)
+            else:
+                fail_print(e, PrintChannel.ERROR, 'FALLBACK (AUTO) AUDIO QUALITY NOT AVAILABLE')
+        def retry_safe() -> Streamer | None: # disable risky silently
+            cls.FORCE_STREAM_API_CALLS = True
+            return cls.get_content_stream(content, use_qual_pref=use_qual_pref, allow_reconn=allow_reconn)
+        
+        try:
+            qual = cls.DOWNLOAD_QUALITY if use_qual_pref else cls.parse_dl_quality()[1]
+            allow_risky = content.file_ids and not cls.FORCE_STREAM_API_CALLS
+            Printer.logger(f'Fetching stream for {content.type_attr}:{content.id} at quality {qual.preferred.name}')
+            return risky(qual) if allow_risky else safe(qual)
         except FeederException as e:
-            if not use_qual_pref:
-                Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO FILE\n' +
-                                                      'FALLBACK (AUTO) AUDIO QUALITY NOT AVAILABLE')
-                return
-            preference = cls.DOWNLOAD_QUALITY.preferred.name
-            Printer.hashtaged(PrintChannel.WARNING, 'FAILED TO FETCH AUDIO FILE\n' +
-                                                   f'PREFERED AUDIO QUALITY {preference} NOT AVAILABLE - FALLING BACK TO AUTO')
-            return cls.get_content_stream(content, use_qual_pref=False)
+            return retry_qual(e)
         except RuntimeError as e:
-            error_arg = e.args[0]
-            if isinstance(error_arg, str) and 'Failed fetching audio key!' in error_arg:
-                gid, fileid = error_arg.split('! ')[1].split(', ')
-                Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +
-                                                  'MAY BE CAUSED BY RATE LIMITS - CONSIDER INCREASING `BULK_WAIT_TIME`\n' +
+            if require_reconn(e): return retry_reconn(e)
+            elif isinstance(e.args[0], str) and 'Failed fetching audio key!' in e.args[0]:
+                gid, fileid = e.args[0].split('! ')[1].split(', ')
+                fail_print(e, PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY - MAY BE CAUSED BY RATE LIMITS (CONSIDER INCREASING `BULK_WAIT_TIME`)\n' +
                                                  f'GID: {gid[5:]} - File_ID: {fileid[8:]}')
-                Printer.logger("\n".join(str(a) for a in e.args), PrintChannel.ERROR)
-            elif isinstance(error_arg, int):
-                Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO KEY\n' +
-                                                     f'(ASSUMED HTTP) RUNTIME ERROR - STATUS CODE {error_arg}')
-                Printer.logger("\n".join(str(a) for a in e.args), PrintChannel.ERROR)
-            else: raise
+            elif isinstance(e.args[0], int): # assume HTTP error
+                status_str = cls.api_status_str(e.args[0])
+                fail_print(e, PrintChannel.ERROR, f'(ASSUMED HTTP) RUNTIME ERROR - STATUS CODE {e.args[0]}\n' + status_str)
+            else: 
+                fail_print(e, PrintChannel.ERROR, 'AN UNEXPECTED RUNTIME ERROR OCCURED - CHECK LOGS FOR DETAILS')
+                Printer.logger(e, PrintChannel.ERROR)
+                # raise # aborts Query
         except ConnectionError as e:
-            if "Status code " not in e.args[0]: raise
-            status_code = e.args[0].split("Status code ")[1]
-            Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO FILE\n' +
-                                                 f'CONNECTION ERROR WHEN FETCHING CONTENT STREAM - STATUS CODE {status_code}')
-            Printer.logger("\n".join(str(a) for a in e.args), PrintChannel.ERROR)
+            if require_reconn(e): return retry_reconn(e)
+            elif isinstance(e.args[0], str) and "Status code " in e.args[0]:
+                status_code = int(e.args[0].split("Status code ")[1])
+                status_str = cls.api_status_str(status_code)
+                fail_print(e, PrintChannel.ERROR, f'CONNECTION ERROR WHEN FETCHING CONTENT STREAM - STATUS CODE {status_code}\n' + status_str)
+            else:
+                fail_print(e, PrintChannel.ERROR, 'AN UNEXPECTED CONNECTION ERROR OCCURED - CHECK LOGS FOR DETAILS')
+                Printer.logger(e, PrintChannel.ERROR)
+                # raise # aborts Query
         except Exception as e:
-            if risky_method:
-                cls.FORCE_STREAM_API_CALLS = True
-                return cls.get_content_stream(content, use_qual_pref=use_qual_pref)
-            Printer.hashtaged(PrintChannel.ERROR, 'FAILED TO FETCH AUDIO STREAM\n' +
-                                                  'AN UNEXPECTED ERROR OCCURED - CHECK LOGS FOR DETAILS')
-            Printer.traceback(e)
+            if require_reconn(e): return retry_reconn(e)
+            elif allow_risky: return retry_safe()
+            fail_print(e, PrintChannel.ERROR, 'AN UNEXPECTED ERROR OCCURED - CHECK LOGS FOR DETAILS')
+            Printer.logger(e, PrintChannel.ERROR)
         return None
     
     @classmethod

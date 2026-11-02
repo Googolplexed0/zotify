@@ -45,11 +45,10 @@ def try_rel_path(path: PurePath | None, start: PurePath) -> PurePath | None:
 
 
 def check_path_dupes(path: PurePath) -> PurePath:
-    if not (Path(path).is_file() and Path(path).stat().st_size):
-        return path
-    c = len([file for file in Path(path.parent).iterdir() if file.match(path.stem + "*")])
-    new_path = path.with_stem(f"{path.stem}_{c}") # guaranteed to be unique
-    return new_path
+    if not file_has_content(path): return path
+    index = 1
+    while file_has_content(path.with_stem(f"{path.stem}_{index}")): index += 1
+    return path.with_stem(f"{path.stem}_{index}") # guaranteed to be unique
 
 
 def get_common_dir(allpaths: set[PurePath]) -> PurePath:
