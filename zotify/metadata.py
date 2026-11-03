@@ -23,7 +23,9 @@ class MetadataIO:
             setattr(self, attr, safe_typecast(resp, attr, bool))
         self.external_urls          : dict              = resp.get(EXTERNAL_URLS)
         self.gid                    : bytes             = resp.get(GID)
-        self.genres                 : list[str]         = resp.get(GENRES)
+        # librespot's protobuf uses the singular field name, while Spotify's
+        # Web API uses the plural form. Normalize both at the parser boundary.
+        self.genres                 : list[str]         = resp.get(GENRES) if GENRES in resp else resp.get(GENRE)
         # self.lyrics               : list[str]         = resp.get(LYRICS)
         
         def ensure_uri(item: dict | None, type_attr_and_ind: str):
@@ -308,12 +310,15 @@ class MetadataIO:
         
         derefed = {}
         for k, v in obj.items():
-            if k[0] == "_" or k in cls.SKIP_ATTRS or not v:         continue
-            elif k == ID and v == obj.get(URI, "").split(":")[-1]:  continue
-            elif k in cls.SET_ATTRS:                                derefed[k] = [cls._deref(n) for n in v]
-            elif isinstance(v, bytes):                              derefed[k] = cls.BYTES_HEADER + b64encode(v).decode('ascii')
-            elif isinstance(v, (Content, list, dict)):              derefed[k] = cls._deref(v)
-            else:                                                   derefed[k] = v
+            if isinstance(k, str):
+                if k.startswith("_") or k in cls.SKIP_ATTRS: continue
+                if k == ID and v == obj.get(URI, "").split(":")[-1]: continue
+                if not v and not (k == GENRES and v == []): continue
+            key = cls._to_link(k) if isinstance(k, Content) else str(k)
+            if isinstance(k, str) and k in cls.SET_ATTRS:           derefed[key] = [cls._deref(n) for n in v]
+            elif isinstance(v, bytes):                              derefed[key] = cls.BYTES_HEADER + b64encode(v).decode('ascii')
+            elif isinstance(v, (Content, list, dict)):              derefed[key] = cls._deref(v)
+            else:                                                   derefed[key] = v
         return derefed
     
     @classmethod
@@ -326,9 +331,10 @@ class MetadataIO:
         
         rerefed = {}
         for k, v in obj.items():
-            if k in cls.SET_ATTRS:                  rerefed[k] = set(cls._reref(v, dests))
-            if isinstance(v, (str, list, dict)):    rerefed[k] = cls._reref(v, dests)
-            else:                                   rerefed[k] = v
+            key = dests.get(k, k)
+            if k in cls.SET_ATTRS:                  rerefed[key] = set(cls._reref(v, dests))
+            elif isinstance(v, (str, list, dict)):  rerefed[key] = cls._reref(v, dests)
+            else:                                   rerefed[key] = v
         return rerefed
     
     @classmethod
@@ -350,7 +356,12 @@ class MetadataIO:
             obj = dests[obj_link]
             for k, v in cls._reref(md, dests).items():
                 setattr(obj, k, v)
-            obj._hasMetadata = obj.full_metadata()
+            if isinstance(obj, Playlist) and (obj.length is None or len(obj._main_items) < obj.length):
+                # A partial playlist must be fetched again rather than silently omitting tracks.
+                obj._main_items.clear()
+                obj._hasMetadata = False
+            else:
+                obj._hasMetadata = obj.full_metadata()
         cls.PARSING = None
     
     @classmethod
