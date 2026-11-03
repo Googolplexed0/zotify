@@ -20,7 +20,7 @@ from requests.exceptions import HTTPError, Timeout
 from time import sleep
 from typing import Any, Callable
 
-from zotify.utils import ensure_real_file, file_has_content, safe_typecast, now
+from zotify.utils import ensure_real_file, file_has_content, safe_typecast, now, write_private_json
 from zotify.termoutput import *
 
 Streamer = CdnManager.Streamer
@@ -827,8 +827,7 @@ class LoginHandler:
         if not Zotify.CONFIG.get_save_credentials():
             return
         if cls.SESSION:
-            with open(Zotify.CONFIG.get_credentials_location(), "w") as f:
-                json.dump(cls.SESSION.credentials(), f)
+            write_private_json(Zotify.CONFIG.get_credentials_location(), cls.SESSION.credentials())
         if cls.OAUTH:
             cls.OAUTH.save_creds(Zotify.CONFIG.get_api_credentials_location())
     

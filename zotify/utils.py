@@ -1,9 +1,12 @@
 import re
+import json
+import os
 from datetime import datetime, timezone
 from fractions import Fraction
 from os.path import commonpath, relpath
 from pathlib import Path, PurePath
 from shutil import move, copyfile, copyfileobj
+from tempfile import NamedTemporaryFile
 
 from zotify.termoutput import *
 
@@ -180,3 +183,22 @@ def timestamp_utc(timestamp_ms: str | None) -> str | None:
 
 def strptime_utc(dtstr: str) -> datetime:
     return datetime.strptime(dtstr[:-1], r'%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
+
+
+def write_private_json(path: PurePath, data: dict) -> None:
+    """Atomically replace credentials with an owner-only file."""
+    path = Path(path)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temp_path = None
+    try:
+        with NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                prefix=f'.{path.name}-', delete=False) as file:
+            temp_path = Path(file.name)
+            temp_path.chmod(0o600)
+            json.dump(data, file)
+            file.flush()
+            os.fsync(file.fileno())
+        temp_path.replace(path)
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
