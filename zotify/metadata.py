@@ -75,7 +75,7 @@ class MetadataIO:
                 for a in album_entries:                 ensure_uri(a, ALBUM)
                 self.albums         : list[Album]       = obj.parse_relatives(album_entries, Album)
             elif isinstance(obj, Album):
-                self.album_group    : str               = safe_typecast(resp, attr, str)
+                self.album_group    : str               = safe_typecast(resp, ALBUM_GROUP, str)
                 self._needs_expansion = True
         
         appears_on                  : list[dict]        = resp.get(APPEARS_ON_GROUP)
@@ -258,9 +258,9 @@ class MetadataIO:
                 self.tracks: list[Track] = obj.parse_relatives(items, Track)
             self._needs_expansion = not items or tracks.get(NEXT) is not None
             if not self._needs_expansion:
-                # set in Album.grab_more_children() later if album incomplete
-                self.total_discs = safe_typecast(items[-1], DISC_NUMBER, int)
-                self.duration_ms = sum(int(t.duration_ms) if t.duration_ms else 0 for t in self.tracks)
+                self.duration_ms = sum(
+                    int(t.duration_ms or 0) for t in self.tracks if isinstance(t, Track)
+                )
         
         self.year                   : str               = self.release_date.split('-')[0] if self.release_date else None
         
@@ -420,12 +420,20 @@ class Tagger:
                 UPC:            obj.upc,
             }
             rt, ot, ct = cls._content_to_tags(obj.album)
+            custom_tags.update(ct)
             for k, v in rt.items():
                 if k in {ALBUM, ALBUMARTIST, YEAR, ARTWORK}: reliable_tags.update({k: v})
                 elif k == COMPILATION and v: reliable_tags.update({k: v})
             for k, v in ot.items():
                 if k in {TOTALTRACKS, TOTALDISCS}: optional_tags.update({k: v})
+            if obj.album:
+                optional_tags[TOTALTRACKS] = (
+                    obj.album.track_total_for_disc(obj.disc_number)
+                    if Zotify.CONFIG.get_disc_track_totals() else None
+                )
         elif isinstance(obj, Album):
+            # Imported ZMD objects may not have passed through parse_metadata.
+            obj.update_track_totals()
             reliable_tags = {
                 ALBUM:          obj.name,
                 ALBUMARTIST:    obj.artist_names(),

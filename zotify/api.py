@@ -1069,11 +1069,44 @@ class Album(Container, HasArtists, HasImage, IsFavoritable):
     
     def full_metadata(self) -> bool:
         return bool(self.tracks)
+
+    def parse_metadata(self, relative: Content | None, resp: dict):
+        super().parse_metadata(relative, resp)
+        self.update_track_totals()
+
+    def update_track_totals(self) -> dict[int, int]:
+        """Refresh album totals and return validated per-disc track counts."""
+        self.total_discs = None
+        if self._needs_expansion or not self.tracks:
+            return {}
+        if self.total_tracks is not None and self.total_tracks != len(self.tracks):
+            return {}
+        for track in self.tracks:
+            if (not isinstance(track, Track)
+                    or not isinstance(track.disc_number, int)
+                    or track.disc_number < 1):
+                return {}
+        counts: dict[int, int] = {}
+        for track in self.tracks:
+            counts[track.disc_number] = counts.get(track.disc_number, 0) + 1
+        # Gaps indicate missing discs; do not publish a guessed denominator.
+        if len(counts) != max(counts):
+            return {}
+        self.total_discs = max(counts)
+        if self.total_tracks is None:
+            self.total_tracks = len(self.tracks)
+        return counts
+
+    def track_total_for_disc(self, disc_number: int | None) -> int | None:
+        """Return the denominator matching Spotify's per-disc numbering."""
+        return self.update_track_totals().get(disc_number)
     
     def grab_more_children(self, hide_loader: bool = False) -> list[dict]:
         super().grab_more_children(hide_loader=hide_loader)
-        self.total_discs = str(self.tracks[-1].disc_number)
-        self.duration_ms = sum((int(t.duration_ms) for t in self.tracks))
+        self.update_track_totals()
+        self.duration_ms = sum(
+            int(t.duration_ms or 0) for t in self.tracks if isinstance(t, Track)
+        )
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
         discog_artist = next((p for p in parent_stack if isinstance(p, Artist)), None)
