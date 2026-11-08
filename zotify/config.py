@@ -577,12 +577,12 @@ class Config:
     def get_zmd_export_location(cls) -> PurePath:
         if cls.get(EXPORT_ZMD_LOCATION) == '':
             zmd_path = cls.get_root_path() / ".zmd"
-            Path(zmd_path).touch()
         else:
             zmd_path = cls.get(EXPORT_ZMD_LOCATION)
             if zmd_path[0] == ".":
                 zmd_path = cls.get_root_path() / PurePath(zmd_path).relative_to(".")
             zmd_path = PurePath(Path(zmd_path).expanduser())
+        if zmd_path.stem == ".zmd": Path(zmd_path).touch()
         return zmd_path
     
     # API Options
@@ -1032,7 +1032,7 @@ class Zotify:
         
         sleep(cls.CONFIG.get_fetch_delay())
         if api_retry <= cls.CONFIG.get_retry_attempts():
-            return resp
+            return resps
         Printer.hashtaged(PrintChannel.API_ERROR, f'RETRY LIMIT EXCEDED\n' +
                                                     f'FAILED TO FETCH METADATA FOR {ContClass.uppers}')
         return {}

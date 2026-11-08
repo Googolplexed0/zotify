@@ -189,12 +189,12 @@ Set arguments in the commandline like this: `-ie False` or `--codec mp3`. Wrap c
 | `STRICT_LIBRARY_VERIFY`      | `--strict-library-verify`           | Whether unreliable tags should be forced to match when verifying local library           | True          |
 | `ALBUM_ART_TO_FILE`          | `--album-art-to-file`               | Save album art as a separate image file                                                   | False         |
 
-| ZMD Options                  | Command Line Config Flag            | Description                                                                     | Default Value          |
-|------------------------------|-------------------------------------|---------------------------------------------------------------------------------|------------------------|
-| `IMPORT_ZMD`                 | `--zmd-import`                      | Whether to import ZMD files, using previously cached metadata                   | False                  |
-| `IMPORT_ZMD_LOCATION`        | `--zmd-import-location`             | Source for ZMD, either an individual .zmd file (default) or a directory         | `""`                   |
-| `EXPORT_ZMD`                 | `--zmd-export`                      | Whether to export ZMD files, caching metadata                                   | False                  |
-| `EXPORT_ZMD_LOCATION`        | `--zmd-export-location`             | Destination for ZMD, updating an individual .zmd file (default) or a directory  | `""`                   |
+| ZMD Options                  | Command Line Config Flag            | Description                                                                              | Default Value |
+|------------------------------|-------------------------------------|------------------------------------------------------------------------------------------|---------------|
+| `IMPORT_ZMD`                 | `--zmd-import`                      | Whether to import ZMD files, using previously cached metadata                            | False         |
+| `IMPORT_ZMD_LOCATION`        | `--zmd-import-location`             | Source for ZMD, either an individual .zmd file or a directory of .zmd files              | `./.zmd`      |
+| `EXPORT_ZMD`                 | `--zmd-export`                      | Whether to export ZMD files, caching metadata for future use                             | False         |
+| `EXPORT_ZMD_LOCATION`        | `--zmd-export-location`             | Destination for ZMD, updating an individual .zmd file or a directory of .zmd files       |`./.zmd`       |
 
 | API Options                  | Command Line Config Flag            | Description                                                                   | Default Value            |
 |------------------------------|-------------------------------------|-------------------------------------------------------------------------------|--------------------------|
@@ -391,7 +391,7 @@ If you see this, don't worry! Just try logging back in. If you see the incorrect
 
 </summary>
 
-If you see this, don't worry! Recent API changes have introduced rate limits, where requests for track info or audio streams may be rejected if too many requests are sent in a short time period. This can be mitigated by setting `DOWNLOAD_RATE_LIMITER > 0` and/or setting a nonzero `BULK_WAIT_TIME`. A recommended `BULK_WAIT_TIME` of `30` seconds has been shown to significantly minimize, if not completely negate, audio key request denials (see [this analysis by HxDxRx](https://github.com/zotify-dev/zotify/issues/186#issuecomment-2608381052))
+If you see this, don't worry! Recent API changes have introduced rate limits, where requests for metadata or audio streams may be rejected if too many requests are sent in a short time period. This can be mitigated by setting `DOWNLOAD_RATE_LIMITER > 0` and/or setting a nonzero `BULK_WAIT_TIME`. A recommended `BULK_WAIT_TIME` of `30` seconds has been shown to significantly minimize, if not completely negate, audio key request denials (see [this analysis by HxDxRx](https://github.com/zotify-dev/zotify/issues/186#issuecomment-2608381052))
 
 </details>
 

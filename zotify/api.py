@@ -130,15 +130,8 @@ class Content(HierarchicalNode):
             resp = Zotify.invoke_url(f'{cls._url}/{uri.split(":")[-1]}?{MARKET_APPEND}{argstr}')
         else:
             resp = Zotify.invoke_libre_md(cls, uri)
-            if cls is Track and resp.get(DURATION):
-                resp[DURATION_MS] = resp.pop(DURATION)
-                if resp[ALBUM]:
-                    resp[ALBUM][ALBUM_TYPE] = str.lower(resp[ALBUM].pop(TYPE, ALBUM))
-            elif cls is Album and resp.get(TYPE):
-                resp[ALBUM_TYPE] = str.lower(resp.pop(TYPE))
-            elif cls is Playlist and resp.get(ATTRIBUTES):
-                resp.update(resp.pop(ATTRIBUTES))
-            resp.update({URI: ":" + uri, TYPE: cls.type_attr})
+            from zotify.metadata import regularize_libre_md
+            regularize_libre_md(cls, resp, uri)
         if resp: return resp
         else:    raise ValueError("No Metadata Fetched")
     
@@ -162,6 +155,8 @@ class Content(HierarchicalNode):
             Zotify.LEGACY_API_ENDOINTS = False
         elif Zotify.ALLOW_LIBRE_BULK:
             resps = Zotify.invoke_libre_bulk_md(ContClass, uris)
+            from zotify.metadata import regularize_libre_md
+            for resp, uri in zip(resps, uris): regularize_libre_md(ContClass, resp, uri)
         
         suffix = "..." if Zotify.CONFIG.permit_client_api() else " (unsafe)..."
         with Loader(f"Fetching {loader_text} information{suffix}", disabled=hide_loader):
@@ -1513,7 +1508,8 @@ class UserItem(Query):
     
     def fetch_user_items(self) -> list[dict]:
         with Loader(f"Fetching {self.name}...", disabled=self._interactive):
-            user_item_resps = Zotify.invoke_url_nextable(f"{self._url}?{MARKET_APPEND}", stripper=self._outer_stripper)
+            url = f"{self._url}{'&' if '?' in self._url else '?'}{MARKET_APPEND}"
+            user_item_resps = Zotify.invoke_url_nextable(url, stripper=self._outer_stripper)
         return user_item_resps
     
     def display_select_user_items(self, user_item_resps: list[dict]) -> list[dict]:

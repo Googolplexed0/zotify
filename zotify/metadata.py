@@ -8,10 +8,20 @@ from mutagen.id3 import TXXX
 from zotify.api import *
 
 
+def regularize_libre_md(content_type: type[Content], resp: dict, uri: str) -> None:
+    if content_type is Track:
+        if resp.get(ALBUM):         resp[ALBUM][ALBUM_TYPE] = str.lower(resp[ALBUM].pop(TYPE, ALBUM))
+    elif content_type is Album:
+        if resp.get(TYPE):          resp[ALBUM_TYPE]        = str.lower(resp.pop(TYPE))
+    elif content_type is Playlist:
+        if resp.get(ATTRIBUTES):    resp.update(resp.pop(ATTRIBUTES))
+    resp.update({URI: ":" + uri, TYPE: content_type.type_attr})
+
+
 class MetadataIO:
     PARSE_AS_STR        = {ADDED_AT, ALBUM_TYPE, CONSUMPTION_ORDER, DESCRIPTION, DISPLAY_NAME,
                            EXTERNAL_URL, ID, ITEM_ID, LABEL, NAME, PUBLISHER, RELEASE_DATE, REVISION, SNAPSHOT_ID,}
-    PARSE_AS_INT        = {DISC_NUMBER, DURATION_MS, LENGTH, POPULARITY, TIMESTAMP, TOTAL_EPISODES, TOTAL_TRACKS,}
+    PARSE_AS_INT        = {DISC_NUMBER, LENGTH, POPULARITY, TIMESTAMP, TOTAL_EPISODES, TOTAL_TRACKS,}
     PARSE_AS_BOOL       = {COLLABORATIVE, DELETED_BY_OWNER, EXPLICIT, IS_EXTERNALLY_HOSTED, IS_LOCAL, IS_PLAYABLE, PUBLIC,}
     
     def from_resp(self, obj: Content, relative: Content, resp: dict) -> dict[str]:
@@ -23,7 +33,6 @@ class MetadataIO:
             setattr(self, attr, safe_typecast(resp, attr, bool))
         self.external_urls          : dict              = resp.get(EXTERNAL_URLS)
         self.gid                    : bytes             = resp.get(GID)
-        self.genres                 : list[str]         = resp.get(GENRES)
         # self.lyrics               : list[str]         = resp.get(LYRICS)
         
         def ensure_uri(item: dict | None, type_attr_and_ind: str):
@@ -154,6 +163,11 @@ class MetadataIO:
                 track_entries.extend(disc.get(TRACK, []))
             resp.update({TRACKS: {ITEMS: track_entries, NEXT: None}})
         
+        duration                    : int               = resp.get(DURATION)
+        duration_ms                 : int               = resp.get(DURATION_MS)
+        if duration or duration_ms:
+            self.duration_ms        : int               = int(duration if duration else duration_ms)
+        
         episodes                    : dict              = resp.get(EPISODES)
         if episodes:
             items                   : list[dict]        = episodes.get(ITEMS)
@@ -174,6 +188,11 @@ class MetadataIO:
         followers                   : dict              = resp.get(FOLLOWERS)
         if followers:
             self.followers          : int               = safe_typecast(followers, TOTAL, int)
+        
+        genre                       : list[str]         = resp.get(GENRE)
+        genres                      : list[str]         = resp.get(GENRES)
+        if genre or genres:
+            self.genres             : list[str]         = genre if genre else genres
         
         number                      : int               = resp.get(NUMBER)
         track_number                : int               = resp.get(TRACK_NUMBER)
@@ -301,35 +320,27 @@ class MetadataIO:
         return None, None
     
     @classmethod
-    def _deref(cls, obj: Content | list | dict) -> str | list | dict:
-        if isinstance(obj, Content):    return cls._to_link(obj)
-        elif isinstance(obj, list):     return [cls._deref(i) for i in obj]
-        elif not isinstance(obj, dict): return obj
+    def _deref(cls, obj: dict | bytes | list | set | Content | str | bool) -> dict | list | str:
+        def skip_item(k, v) -> bool:
+            return (not v) or (k in cls.SKIP_ATTRS) \
+            or (isinstance(k, str) and k[0] == "_") \
+            or (k == ID and v == obj.get(URI, "").split(":")[-1])
         
-        derefed = {}
-        for k, v in obj.items():
-            if k[0] == "_" or k in cls.SKIP_ATTRS or not v:         continue
-            elif k == ID and v == obj.get(URI, "").split(":")[-1]:  continue
-            elif k in cls.SET_ATTRS:                                derefed[k] = [cls._deref(n) for n in v]
-            elif isinstance(v, bytes):                              derefed[k] = cls.BYTES_HEADER + b64encode(v).decode('ascii')
-            elif isinstance(v, (Content, list, dict)):              derefed[k] = cls._deref(v)
-            else:                                                   derefed[k] = v
-        return derefed
+        if   isinstance(obj, dict):         return {cls._deref(k): cls._deref(v) for k, v in obj.items() if not skip_item(k, v)}
+        elif isinstance(obj, bytes):        return cls.BYTES_HEADER + b64encode(obj).decode('ascii')
+        elif isinstance(obj, (list, set)):  return [cls._deref(i) for i in obj]
+        elif isinstance(obj, Content):      return cls._to_link(obj)
+        else:                               return obj
     
     @classmethod
-    def _reref(cls, obj: str | list | dict, dests: dict[str, Content]) -> Content | list | dict:
-        if isinstance(obj, str) and obj.startswith(cls.BYTES_HEADER):
-            return b64decode(obj.removeprefix(cls.BYTES_HEADER).encode('ascii'))
-        if isinstance(obj, str):        return dests.get(obj, obj)
-        elif isinstance(obj, list):     return [cls._reref(i, dests) for i in obj]
-        elif not isinstance(obj, dict): return obj
-        
-        rerefed = {}
-        for k, v in obj.items():
-            if k in cls.SET_ATTRS:                  rerefed[k] = set(cls._reref(v, dests))
-            if isinstance(v, (str, list, dict)):    rerefed[k] = cls._reref(v, dests)
-            else:                                   rerefed[k] = v
-        return rerefed
+    def _reref(cls, obj: dict | list | str | bool, dests: dict[str, Content]) -> dict | list | bytes | Content | str | bool:
+        if   isinstance(obj, dict):         return {cls._reref(k, dests): set(cls._reref(v, dests)) if k in cls.SET_ATTRS
+                                                                         else cls._reref(v, dests) for k, v in obj.items()}
+        elif isinstance(obj, str) and obj.startswith(cls.BYTES_HEADER):
+                                            return b64decode(obj.removeprefix(cls.BYTES_HEADER).encode('ascii'))
+        elif isinstance(obj, list):         return [cls._reref(i, dests) for i in obj]
+        elif isinstance(obj, str):          return dests.get(obj, obj)
+        else:                               return obj
     
     @classmethod
     def _instantiate_zmd(cls, zmd: dict):
@@ -349,7 +360,10 @@ class MetadataIO:
             if obj_link not in dests: continue
             obj = dests[obj_link]
             for k, v in cls._reref(md, dests).items():
-                setattr(obj, k, v)
+                if isinstance(obj, Container) and getattr(obj, k, None) is obj._main_items:
+                    obj._main_items[:] = v # handle _main_items aliasing
+                else: 
+                    setattr(obj, k, v)
             obj._hasMetadata = obj.full_metadata()
         cls.PARSING = None
     
