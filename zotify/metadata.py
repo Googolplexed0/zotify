@@ -37,11 +37,15 @@ class MetadataIO:
         
         def ensure_uri(item: dict | None, type_attr_and_ind: str):
             if item is None: return
-            gid = item.get(GID);  uri = item.get(URI)
-            name = item.get(NAME); typ = item.get(TYPE)
+            gid: bytes | None = item.get(GID);  uri: str | None = item.get(URI)
+            name:  str | None = item.get(NAME); typ: str | None = item.get(TYPE)
             
             # handle missing TYPE
-            if not typ: item[TYPE] = type_attr_and_ind.lower().strip("0123456789")
+            if not typ: 
+                if uri and (uri_type := set(uri.split(":")) & {cls.type_attr for cls in ITEM_BULK_FETCH}):
+                    item[TYPE] = uri_type.pop()
+                else: 
+                    item[TYPE] = type_attr_and_ind.lower().strip("0123456789")
             
             # handle METADATA_PREFETCH
             if gid and not uri:
@@ -136,7 +140,7 @@ class MetadataIO:
                 if contents.get(TRUNCATED):
                     self._needs_expansion = True
                     Printer.hashtaged(PrintChannel.WARNING, f'PLAYLIST {self.name} MISSING FINAL {self.length - len(items)} ITEMS\n' +
-                                                                'NOT RECOVERABLE WITHOUT A LEGACY DEVELOPER CLIENT')
+                                                             'NOT RECOVERABLE WITHOUT A LEGACY DEVELOPER CLIENT')
         
         cover_group                 : dict              = resp.get(COVER_GROUP)
         images                      : list[dict]        = resp.get(IMAGES)

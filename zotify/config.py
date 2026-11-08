@@ -971,7 +971,7 @@ class Zotify:
         while api_retry <= cls.CONFIG.get_retry_attempts():
             if api_retry:
                 Printer.hashtaged(PrintChannel.WARNING, f'API ERROR {retry_text}- RETRYING\n' +
-                                                        f'FAILED TO FETCH METADATA FOR {uri}'+
+                                                        f'FAILED TO FETCH METADATA FOR {uri}\n'+
                                                         f'{fallback_message}')
                 sleep(retry_delay)
             
@@ -1008,7 +1008,7 @@ class Zotify:
         while api_retry <= cls.CONFIG.get_retry_attempts():
             if api_retry:
                 Printer.hashtaged(PrintChannel.WARNING, f'API ERROR {retry_text}- RETRYING\n' +
-                                                        f'FAILED TO FETCH METADATA FOR {ContClass.uppers}'+
+                                                        f'FAILED TO FETCH METADATA FOR {ContClass.uppers}\n'+
                                                         f'{fallback_message}')
                 sleep(retry_delay)
             
@@ -1034,7 +1034,7 @@ class Zotify:
         if api_retry <= cls.CONFIG.get_retry_attempts():
             return resps
         Printer.hashtaged(PrintChannel.API_ERROR, f'RETRY LIMIT EXCEDED\n' +
-                                                    f'FAILED TO FETCH METADATA FOR {ContClass.uppers}')
+                                                  f'FAILED TO FETCH METADATA FOR {ContClass.uppers}')
         return {}
     
     @classmethod
