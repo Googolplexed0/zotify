@@ -8,14 +8,21 @@ from mutagen.id3 import TXXX
 from zotify.api import *
 
 
-def regularize_libre_md(content_type: type[Content], resp: dict, uri: str) -> None:
+def regularize_libre_md(content_type: type[Content], resp: dict[str, str | list[dict] | dict], uri: str) -> None:
+    resp.update({URI: ":" + uri, TYPE: content_type.type_attr})
     if content_type is Track:
         if resp.get(ALBUM):         resp[ALBUM][ALBUM_TYPE] = str.lower(resp[ALBUM].pop(TYPE, ALBUM))
     elif content_type is Album:
         if resp.get(TYPE):          resp[ALBUM_TYPE]        = str.lower(resp.pop(TYPE))
     elif content_type is Playlist:
         if resp.get(ATTRIBUTES):    resp.update(resp.pop(ATTRIBUTES))
-    resp.update({URI: ":" + uri, TYPE: content_type.type_attr})
+    if resp.get(RESTRICTION) and resp.get(ALTERNATIVE): # handle relinking
+        real_alts: list[dict] = [alt for alt in resp[ALTERNATIVE] if alt.get(GID) and alt.get(FILE)]
+        if not real_alts: return
+        resp.update(max(real_alts, key=lambda a: len(a[FILE])))
+        resp.update({URI: f":{content_type.type_attr}:{Zotify.gid_to_id(resp[GID])}",
+                     GID: Zotify.gid_to_bytes(resp[GID])})
+        del resp[RESTRICTION]; del resp[ALTERNATIVE]
 
 
 class MetadataIO:
@@ -24,7 +31,7 @@ class MetadataIO:
     PARSE_AS_INT        = {DISC_NUMBER, LENGTH, POPULARITY, TIMESTAMP, TOTAL_EPISODES, TOTAL_TRACKS,}
     PARSE_AS_BOOL       = {COLLABORATIVE, DELETED_BY_OWNER, EXPLICIT, IS_EXTERNALLY_HOSTED, IS_LOCAL, IS_PLAYABLE, PUBLIC,}
     
-    def from_resp(self, obj: Content, relative: Content, resp: dict) -> dict[str]:
+    def from_resp(self, obj: Content, relative: Content | None, resp: dict) -> dict[str]:
         for attr in self.PARSE_AS_STR:
             setattr(self, attr, safe_typecast(resp, attr, str))
         for attr in self.PARSE_AS_INT:
@@ -49,8 +56,7 @@ class MetadataIO:
             
             # handle METADATA_PREFETCH
             if gid and not uri:
-                uri = f":{item[TYPE]}:{Zotify.id_from_gid(gid)}"
-                self._needs_recursion = True
+                uri = f":{item[TYPE]}:{Zotify.gid_to_id(gid)}"
             
             # handle local files
             if not name: name = f"noname-{uuid4()}"
@@ -88,8 +94,7 @@ class MetadataIO:
                 for a in album_entries:                 ensure_uri(a, ALBUM)
                 self.albums         : list[Album]       = obj.parse_relatives(album_entries, Album)
             elif isinstance(obj, Album):
-                self.album_group    : str               = safe_typecast(resp, attr, str)
-                self._needs_expansion = True
+                self.album_group    : str               = safe_typecast(resp, ALBUM_GROUP, str)
         
         appears_on                  : list[dict]        = resp.get(APPEARS_ON_GROUP)
         if appears_on:
@@ -107,20 +112,15 @@ class MetadataIO:
         
         audio                       : list[dict]        = resp.get(AUDIO)
         files                       : list[dict]        = resp.get(FILE)
-        alternatives                : list[dict]        = resp.get(ALTERNATIVE)
-        if any((audio, files, alternatives)):
+        if audio or files:
             files = files if files is not None else audio
-            if not files and alternatives:
-                for alt in alternatives:
-                    files = alt.get(FILE)
-                    if files: break
             if files:
                 self.is_playable = True
                 self.file_ids = files
         
         biography                   : list[dict]        = resp.get(BIOGRAPHY)
         if biography:
-            self.biography          : str               = biography[0].get(TEXT)
+            self.biography          : str               = safe_typecast(biography[0], TEXT, str)
         
         self.compilation            : bool              = self.album_type == COMPILATION if self.album_type else None
         
@@ -136,21 +136,19 @@ class MetadataIO:
                     item[ADDED_BY] = ensure_user_resp(attr.get(ADDED_BY))
                     item[ITEM_ID] = attr.get(ITEM_ID)
                 self.tracks_or_eps = obj.parse_relatives(items, (Track, Episode))
-                self._needs_recursion = True
                 if contents.get(TRUNCATED):
-                    self._needs_expansion = True
                     Printer.hashtaged(PrintChannel.WARNING, f'PLAYLIST {self.name} MISSING FINAL {self.length - len(items)} ITEMS\n' +
-                                                             'NOT RECOVERABLE WITHOUT A LEGACY DEVELOPER CLIENT')
+                                                             'NOT RECOVERABLE WITHOUT A OAUTH API DEVELOPER CLIENT')
         
         cover_group                 : dict              = resp.get(COVER_GROUP)
         images                      : list[dict]        = resp.get(IMAGES)
         if cover_group or images:
             covers = images if images else cover_group.get(IMAGE, [])
             largest_cover           : dict              = max(covers, key=lambda img: safe_typecast(img, WIDTH, int),
-                                                            default={URL: None, FILE_ID: None})
+                                                              default={URL: None, FILE_ID: None})
             if largest_cover.get(FILE_ID):
-                largest_cover[URL] = IMAGE_URL_PREFIX + Zotify.hex_id_from_file_id(largest_cover.get(FILE_ID))
-            self.image_url          : str               = largest_cover.get(URL)
+                largest_cover[URL] = IMAGE_URL_PREFIX + Zotify.file_id_to_hex_id(safe_typecast(largest_cover, FILE_ID, str))
+            self.image_url          : str               = safe_typecast(largest_cover, URL, str)
         
         date                        : dict              = resp.get(DATE)
         if date and not self.release_date:
@@ -162,32 +160,33 @@ class MetadataIO:
             for disc in discs:
                 for i, t in enumerate(disc.get(TRACK, [])):
                     ensure_uri(t, TRACK + str(i+1))
-                    t[DISC_NUMBER]  = disc.get(NUMBER)
+                    t[DISC_NUMBER]  = safe_typecast(disc, NUMBER, int)
                     t[TRACK_NUMBER] = i + 1
                 track_entries.extend(disc.get(TRACK, []))
-            resp.update({TRACKS: {ITEMS: track_entries, NEXT: None}})
+            # assume DISC contains all tracks...
+            resp.update({TRACKS: {ITEMS: track_entries, NEXT: None, TOTAL: len(track_entries)}})
+            if not self.total_tracks: self.total_tracks = len(track_entries)
         
         duration                    : int               = resp.get(DURATION)
         duration_ms                 : int               = resp.get(DURATION_MS)
         if duration or duration_ms:
-            self.duration_ms        : int               = int(duration if duration else duration_ms)
+            self.duration_ms        : int               = safe_typecast(resp, DURATION if duration else DURATION_MS, int)
         
         episodes                    : dict              = resp.get(EPISODES)
         if episodes:
             items                   : list[dict]        = episodes.get(ITEMS)
             if items:
-                for i, e in enumerate(items):     ensure_uri(e, EPISODE + str(i+1))
+                for i, e in enumerate(items):           ensure_uri(e, EPISODE + str(i+1))
                 self.episodes       : list[Episode]     = obj.parse_relatives(items, Episode)
-            self._needs_expansion = not items or episodes[NEXT] is not None
         
         external_id                 : list[dict]        = resp.get(EXTERNAL_ID)
         external_ids                : dict              = resp.get(EXTERNAL_IDS)
         if external_id or external_ids:
             if external_id:
                 external_ids = {eid.get(TYPE): eid.get(ID) for eid in external_id}
-            self.ean                : str               = external_ids.get(EAN)
-            self.isrc               : str               = external_ids.get(ISRC)
-            self.upc                : str               = external_ids.get(UPC)
+            self.ean                : str               = safe_typecast(external_ids, EAN, str)
+            self.isrc               : str               = safe_typecast(external_ids, ISRC, str)
+            self.upc                : str               = safe_typecast(external_ids, UPC, str)
         
         followers                   : dict              = resp.get(FOLLOWERS)
         if followers:
@@ -195,13 +194,13 @@ class MetadataIO:
         
         genre                       : list[str]         = resp.get(GENRE)
         genres                      : list[str]         = resp.get(GENRES)
-        if genre or genres:
-            self.genres             : list[str]         = genre if genre else genres
+        if genre is not None or genres is not None:     # accept empty list
+            self.genres             : list[str]         = sorted(genre if genre is not None else genres)
         
         number                      : int               = resp.get(NUMBER)
         track_number                : int               = resp.get(TRACK_NUMBER)
         if number or track_number and isinstance(obj, Track):
-            self.track_number       : int               = number if number else track_number
+            self.track_number       : int               = safe_typecast(resp, NUMBER if number else TRACK_NUMBER, int) 
         
         owner_username              : str               = resp.get(OWNER_USERNAME)
         if owner_username:
@@ -219,7 +218,7 @@ class MetadataIO:
             if items:
                 tracks_eps_empty = obj.unwrap(items)
                 for i, t_or_e in enumerate(tracks_eps_empty):
-                    ensure_uri(t_or_e, TRACK + str(obj.ccount+i+1))
+                    ensure_uri(t_or_e, TRACK + str(obj.ccount()+i+1))
                 self.tracks_or_eps = obj.parse_relatives(tracks_eps_empty, (Track, Episode))
                 if not any(self.tracks_or_eps):
                     Printer.hashtaged(PrintChannel.WARNING,
@@ -231,22 +230,21 @@ class MetadataIO:
                                     f'PLAYLIST "{self.name}" ({obj.uri})\n' +
                                     'HAS [Playlist.Items] BUT NO [Playlist.Items.Items]\n' +
                                     'RECOMMENDED TO SET CONFIG "API_CLIENT_LEGACY = False"')
-            self._needs_expansion = not items or playlist_items.get(NEXT) is not None
         
         publish_time                : dict[str, int]    = resp.get(PUBLISH_TIME)
         if publish_time:
-            dt = datetime(publish_time.get(YEAR),
-                          publish_time.get(MONTH),
-                          publish_time.get(DAY),
-                          publish_time.get(HOUR, 0),
-                          publish_time.get(MINUTE, 0),
-                          publish_time.get(SECOND, 0))
+            dt = datetime(safe_typecast(publish_time, YEAR,     int),
+                          safe_typecast(publish_time, MONTH,    int),
+                          safe_typecast(publish_time, DAY,      int),
+                          safe_typecast(publish_time, HOUR,     int, 0),
+                          safe_typecast(publish_time, MINUTE,   int, 0),
+                          safe_typecast(publish_time, SECOND,   int, 0))
             self.publish_time = dt_to_str(dt)
             self.release_date = dt_to_str(dt.date())
         
         restrictions                : dict[str, str]    = resp.get(RESTRICTIONS)
         if restrictions:
-            self.restricted_reason  : str               = resp.get(REASON)
+            self.restricted_reason  : str               = safe_typecast(restrictions, REASON, str)
         
         show                        : dict              = resp.get(SHOW)
         if isinstance(obj, Episode) and isinstance(relative, Show):
@@ -264,7 +262,7 @@ class MetadataIO:
         
         timestamp                   : str               = resp.get(TIMESTAMP)
         if timestamp:
-            self.timestamp          : str               = timestamp_utc(timestamp)
+            self.timestamp          : str               = timestamp_utc(safe_typecast(resp, TIMESTAMP, str))
         
         top_tracks                  : list[dict]        = resp.get(TOP_TRACK)
         if top_tracks:
@@ -277,13 +275,8 @@ class MetadataIO:
         if tracks and isinstance(obj, Album):
             items                   : list[dict]        = tracks.get(ITEMS)
             if items:
-                for i, t in enumerate(items): ensure_uri(t, TRACK + str(obj.ccount+i+1))
+                for i, t in enumerate(items): ensure_uri(t, TRACK + str(obj.ccount()+i+1))
                 self.tracks: list[Track] = obj.parse_relatives(items, Track)
-            self._needs_expansion = not items or tracks.get(NEXT) is not None
-            if not self._needs_expansion:
-                # set in Album.grab_more_children() later if album incomplete
-                self.total_discs = safe_typecast(items[-1], DISC_NUMBER, int)
-                self.duration_ms = sum(int(t.duration_ms) if t.duration_ms else 0 for t in self.tracks)
         
         self.year                   : str               = self.release_date.split('-')[0] if self.release_date else None
         
@@ -368,7 +361,6 @@ class MetadataIO:
                     obj._main_items[:] = v # handle _main_items aliasing
                 else: 
                     setattr(obj, k, v)
-            obj._hasMetadata = obj.full_metadata()
         cls.PARSING = None
     
     @classmethod
@@ -749,7 +741,7 @@ class M3U8:
             cont_paths = [try_rel_path(p, self.path.parent) for p in cont_paths]
         
         missing_name = f"{self.cont_type.clsn}"
-        if isinstance(self.cont_type, Container): missing_name += f" {self.cont_type._contains}"
+        if isinstance(self.cont_type, Container): missing_name += f" {self.cont_type.anycont}"
         
         with open(self.path, 'w', encoding='utf-8') as file:
             file.write("#EXTM3U\n\n")

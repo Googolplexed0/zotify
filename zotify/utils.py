@@ -66,8 +66,8 @@ def walk_directory_for_tracks(root_path: PurePath):
 
 
 # Input Processing Utils
-def safe_typecast(d: dict, k: str, to_cast: type, except_channel: PrintChannel = PrintChannel.WARNING):
-    raw_val = d.get(k)
+def safe_typecast(d: dict, k: str, to_cast: type, default = None, except_channel: PrintChannel = PrintChannel.WARNING):
+    raw_val = d.get(k, default)
     if raw_val is None:
         return None
     elif isinstance(raw_val, to_cast):

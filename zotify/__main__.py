@@ -8,7 +8,7 @@ It's like youtube-dl, but for that other music platform.
 import argparse
 
 from zotify.config import Zotify, Printer, CONFIG_VALUES, DEPRECIATED_CONFIGS
-from zotify.const import ARG, TYPE, HELP, CONFIG_FILE, LOCAL_SONG_ARCHIVE, GLOBAL_SONG_ARCHIVE
+from zotify.const import ARG, TYPE, HELP, DEBUG, TEST_MODE, CONFIG_LOCATION, CONFIG_FILE, LOCAL_SONG_ARCHIVE, GLOBAL_SONG_ARCHIVE
 
 
 class DepreciatedAction(argparse.Action):
@@ -45,7 +45,7 @@ def main():
                         help='Perform multiple Queries with a single persistent Session')
     parser.add_argument('-T', '--test', '--dry-run',
                         action='store_true',
-                        dest='test',
+                        dest=TEST_MODE.lower(),
                         help='Run a Query as a test, making no downloads')
     parser.add_argument('--update-config',
                         action='store_true',
@@ -57,13 +57,13 @@ def main():
                         help=f'Updates the global `{GLOBAL_SONG_ARCHIVE}` file with full filepaths, keeping non-findable entries unchanged')
     parser.add_argument('--debug',
                         action='store_true',
-                        dest='debug',
+                        dest=DEBUG.lower(),
                         help=f'Enables debugging, printing extra information and creating a `{CONFIG_FILE.replace(".json", "_DEBUG.json")}` file')
     
     # with args
     parser.add_argument('-c', '--config', '--config-location',
                         type=str,
-                        dest='config_location',
+                        dest=CONFIG_LOCATION.lower(),
                         help=f'Specify a directory containing a Zotify `{CONFIG_FILE}` file to load settings')
     parser.add_argument('-u', '--username',
                         type=str,

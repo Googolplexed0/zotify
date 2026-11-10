@@ -183,16 +183,15 @@ class Config:
     
     @classmethod
     def load(cls, args) -> None:
-        config_str = args.config_location
-        if not config_str:
-            config_dir_or_file = cls._default_path()
-        else:
-            config_dir_or_file = Path(config_str).expanduser()
+        cmd_args: dict = vars(args)
+        config_str = safe_typecast(cmd_args, CONFIG_LOCATION.lower(), str)
+        if not config_str:  config_dir_or_file = cls._default_path()
+        else:               config_dir_or_file = Path(config_str).expanduser()
         config_path = ensure_real_file(config_dir_or_file, CONFIG_FILE)
         
-        # Debug Check (guarantee at top of config)
-        cmd_args: dict = vars(args)
-        cls.Values[DEBUG] = safe_typecast(cmd_args, DEBUG.lower(), bool)
+        # Debug Checks (guarantee at top of config)
+        cls.Values[DEBUG]     = safe_typecast(cmd_args, DEBUG.lower(),     bool)
+        cls.Values[TEST_MODE] = safe_typecast(cmd_args, TEST_MODE.lower(), bool)
         
         # Load default values
         for cfg, cfg_setup in CONFIG_VALUES.items():
@@ -207,8 +206,8 @@ class Config:
             with open(config_path, encoding='utf-8') as config_file:
                 jsonvalues: dict[str, dict[str, Any]] = json.load(config_file)
             for cfg in jsonvalues:
-                if cfg == DEBUG and not cls.Values[DEBUG]:
-                    cls.Values[DEBUG] = safe_typecast(jsonvalues, cfg, bool)
+                if cfg in {DEBUG, TEST_MODE} and not cls.Values[cfg]: # latch ON cfg
+                    cls.Values[cfg] = safe_typecast(jsonvalues, cfg, bool)
                 elif cfg in CONFIG_VALUES:
                     cls.Values[cfg] = safe_typecast(jsonvalues, cfg, CONFIG_VALUES[cfg][TYPE])
                 elif cfg in DEPRECIATED_CONFIGS: # keep, warn, and place at the bottom (don't delete)
@@ -222,9 +221,8 @@ class Config:
                 config_path = config_path.with_stem(config_path.stem + "_DEBUG")
             with open(config_path, 'w', encoding='utf-8') as debug_file:
                 json.dump({k: str(v) for k, v in cls.Values.items()}, debug_file, indent=4)
-            real_debug = cls.Values[DEBUG]; cls.Values[DEBUG] = True
-            Printer.hashtaged(PrintChannel.DEBUG, f"{config_path.name} saved to {Path(config_path).resolve().parent}")
-            cls.Values[DEBUG] = real_debug
+            with cls.temporary_config(DEBUG, True, bool):
+                Printer.hashtaged(PrintChannel.DEBUG, f"{config_path.name} saved to {Path(config_path).resolve().parent}")
         
         # Override config from commandline arguments
         for cfg in CONFIG_VALUES:
@@ -239,9 +237,6 @@ class Config:
         
         if cls.debug() or args.update_archive or args.verify_library:
             cls.Values[UPDATE_ARCHIVE] = True
-        
-        if args.test:
-            cls.Values[TEST_MODE] = True
     
     @classmethod
     def get(cls, key: str) -> Any:
@@ -249,9 +244,10 @@ class Config:
     
     @classmethod
     @contextmanager
-    def temporary_config(cls, cfg: str, temp_value):
+    def temporary_config(cls, cfg: str, temp_value, cfg_type: type | None = None):
         original_val = cls.get(cfg)
-        cls.Values[cfg] = safe_typecast({cfg: temp_value}, cfg, CONFIG_VALUES[cfg][TYPE])
+        cfg_type = CONFIG_VALUES[cfg][TYPE] if cfg_type in CONFIG_VALUES else cfg_type
+        cls.Values[cfg] = safe_typecast({cfg: temp_value}, cfg, cfg_type)
         try:
             yield
         finally:
@@ -857,7 +853,7 @@ class Zotify:
     # STATIC
     VERSION                                             = version("zotify")
     LEGACY_API_ENDOINTS     : bool                      = True
-    FORCE_LIBRE_METADATA    : bool                      = False
+    FORCE_LIBRE_METADATA    : bool                      = True
     ALLOW_LIBRE_BULK        : bool                      = True
     
     # STATIC AFTER BOOT
@@ -931,20 +927,18 @@ class Zotify:
         cls.SESSION = LoginHandler.login5_reconnect()
     
     @staticmethod
-    def id_from_gid(gid: str) -> str:
-        return metadata.Id.b62.encode(b64decode(gid)).decode()
-    
+    def gid_to_bytes(gid: str) -> bytes:        return b64decode(gid)
     @staticmethod
-    def hex_id_from_file_id(file_id: str) -> str:
-        return hexlify(b64decode(file_id)).decode()
+    def gid_to_id(gid: str) -> str:             return metadata.Id.b62.encode(b64decode(gid)).decode()
+    @staticmethod
+    def file_id_to_hex_id(file_id: str) -> str: return hexlify(b64decode(file_id)).decode()
     
     @staticmethod
     def to_libre_content(ContClass: type, id: str) -> metadata.Id | None:
         try:
             libre_content_type: metadata.Id = getattr(metadata, ContClass.clsn + "Id")
             return libre_content_type.from_base62(id)
-        except:
-            return
+        except: return
     
     @staticmethod
     def api_status_str(status_code: int, http: Response = None) -> str:
