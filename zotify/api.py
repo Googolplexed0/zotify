@@ -1067,11 +1067,9 @@ class Album(Container, HasArtists, HasImage, IsFavoritable):
     
     # TODO expand duration_ms to all Content?
     def _update_child_based_metadata(self) -> None:
-        self.total_discs = max(t.disc_number or 0 for t in self.tracks)
-        self.duration_ms = sum(t.duration_ms or 0 for t in self.tracks)
-        if not self.duration_ms or len(t for t in self.tracks if t.duration_ms) < self.ccount()//2:
-            approx_dur = (self.total_tracks or 0) * 3 * 60 * 1000 # ~3 minute/track heuristic
-            self.duration_ms = approx_dur if approx_dur else None
+        self.total_discs = max(t.disc_number for t in self.tracks if t and t.disc_number)
+        real_durs =           [t.duration_ms for t in self.tracks if t and t.duration_ms]
+        self.duration_ms = sum(real_durs) + (self.ccount() - len(real_durs)) * 3 * 60 * 1000
     
     def check_skippable(self, parent_stack: ParentStack) -> bool:
         discog_artist = next((p for p in parent_stack if isinstance(p, Artist)), None)
