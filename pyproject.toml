@@ -28,7 +28,7 @@ dependencies = [
   "music_tag",
   "Pillow",
   "pkce",
-  "protobuf==3.20.1",
+  "protobuf>=7.36.2,<8",
   "pwinput",
   "tabulate[widechars]",
   "tqdm"
