@@ -853,7 +853,7 @@ class Zotify:
     # STATIC
     VERSION                                             = version("zotify")
     LEGACY_API_ENDOINTS     : bool                      = True
-    FORCE_LIBRE_METADATA    : bool                      = True
+    FORCE_LIBRE_METADATA    : bool                      = False
     ALLOW_LIBRE_BULK        : bool                      = True
     
     # STATIC AFTER BOOT
